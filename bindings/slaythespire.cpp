@@ -9,17 +9,694 @@
 
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 
 #include "sim/ConsoleSimulator.h"
 #include "sim/search/ScumSearchAgent2.h"
 #include "sim/SimHelpers.h"
 #include "sim/PrintHelpers.h"
+#include "combat/BattleContext.h"
+#include "combat/InputState.h"
+#include "sim/search/Action.h"
+#include "sim/search/GameAction.h"
+#include "game/GameContext.h"
 #include "game/Game.h"
 
 #include "slaythespire.h"
 
 
 using namespace sts;
+
+
+
+namespace {
+
+struct LightSpeedAction {
+    std::string scope;
+    std::uint32_t bits = 0;
+    std::string kind;
+    int idx1 = 0;
+    int idx2 = 0;
+    int idx3 = 0;
+    std::string label;
+};
+
+std::string gameOutcomeLabel(const GameOutcome outcome) {
+    switch (outcome) {
+        case GameOutcome::PLAYER_LOSS:
+            return "PLAYER_LOSS";
+        case GameOutcome::UNDECIDED:
+            return "UNDECIDED";
+        case GameOutcome::PLAYER_VICTORY:
+            return "PLAYER_VICTORY";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+std::string battleOutcomeLabel(const Outcome outcome) {
+    switch (outcome) {
+        case Outcome::UNDECIDED:
+            return "UNDECIDED";
+        case Outcome::PLAYER_VICTORY:
+            return "PLAYER_VICTORY";
+        case Outcome::PLAYER_LOSS:
+            return "PLAYER_LOSS";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+std::string screenStateLabel(const ScreenState screenState) {
+    switch (screenState) {
+        case ScreenState::INVALID:
+            return "INVALID";
+        case ScreenState::EVENT_SCREEN:
+            return "EVENT_SCREEN";
+        case ScreenState::REWARDS:
+            return "REWARDS";
+        case ScreenState::BOSS_RELIC_REWARDS:
+            return "BOSS_RELIC_REWARDS";
+        case ScreenState::CARD_SELECT:
+            return "CARD_SELECT";
+        case ScreenState::MAP_SCREEN:
+            return "MAP_SCREEN";
+        case ScreenState::TREASURE_ROOM:
+            return "TREASURE_ROOM";
+        case ScreenState::REST_ROOM:
+            return "REST_ROOM";
+        case ScreenState::SHOP_ROOM:
+            return "SHOP_ROOM";
+        case ScreenState::BATTLE:
+            return "BATTLE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+std::string inputStateLabel(const InputState inputState) {
+    switch (inputState) {
+        case InputState::EXECUTING_ACTIONS:
+            return "EXECUTING_ACTIONS";
+        case InputState::PLAYER_NORMAL:
+            return "PLAYER_NORMAL";
+        case InputState::CARD_SELECT:
+            return "CARD_SELECT";
+        default:
+            return "OTHER";
+    }
+}
+
+std::string rewardActionLabel(search::GameAction::RewardsActionType type) {
+    switch (type) {
+        case search::GameAction::RewardsActionType::CARD:
+            return "reward_card";
+        case search::GameAction::RewardsActionType::GOLD:
+            return "reward_gold";
+        case search::GameAction::RewardsActionType::KEY:
+            return "reward_key";
+        case search::GameAction::RewardsActionType::POTION:
+            return "reward_potion";
+        case search::GameAction::RewardsActionType::RELIC:
+            return "reward_relic";
+        case search::GameAction::RewardsActionType::CARD_REMOVE:
+            return "card_remove";
+        case search::GameAction::RewardsActionType::SKIP:
+            return "skip";
+        default:
+            return "reward_unknown";
+    }
+}
+
+std::string gameActionKind(const GameContext &gc, const search::GameAction &action) {
+    if (action.isPotionAction()) {
+        return action.isPotionDiscard() ? "game_potion_discard" : "game_potion_use";
+    }
+
+    switch (gc.screenState) {
+        case ScreenState::EVENT_SCREEN:
+            return "event";
+        case ScreenState::REWARDS:
+            return rewardActionLabel(action.getRewardsActionType());
+        case ScreenState::BOSS_RELIC_REWARDS:
+            return "boss_relic";
+        case ScreenState::CARD_SELECT:
+            return "card_select";
+        case ScreenState::MAP_SCREEN:
+            return "map";
+        case ScreenState::TREASURE_ROOM:
+            return action.getIdx1() == 0 ? "treasure_open" : "treasure_leave";
+        case ScreenState::REST_ROOM:
+            return "rest";
+        case ScreenState::SHOP_ROOM:
+            return "shop_" + rewardActionLabel(action.getRewardsActionType());
+        default:
+            return "game_unknown";
+    }
+}
+
+LightSpeedAction makeGameAction(const GameContext &gc, const search::GameAction &action) {
+    auto kind = gameActionKind(gc, action);
+    std::ostringstream label;
+    label
+        << "game." << kind
+        << " bits=" << action.bits
+        << " idx1=" << action.getIdx1()
+        << " idx2=" << action.getIdx2()
+        << " idx3=" << action.getIdx3();
+
+    return {
+        "game",
+        action.bits,
+        kind,
+        action.getIdx1(),
+        action.getIdx2(),
+        action.getIdx3(),
+        label.str(),
+    };
+}
+
+std::string battleActionKind(const search::Action &action) {
+    switch (action.getActionType()) {
+        case search::ActionType::CARD:
+            return "card";
+        case search::ActionType::POTION:
+            return action.getTargetIdx() > 5 ? "potion_discard" : "potion";
+        case search::ActionType::SINGLE_CARD_SELECT:
+            return "single_card_select";
+        case search::ActionType::MULTI_CARD_SELECT:
+            return "multi_card_select";
+        case search::ActionType::END_TURN:
+            return "end_turn";
+        default:
+            return "battle_unknown";
+    }
+}
+
+LightSpeedAction makeBattleAction(const BattleContext &bc, const search::Action &action) {
+    std::ostringstream label;
+    action.printDesc(label, bc);
+    if (label.tellp() <= 0) {
+        label
+            << "battle." << battleActionKind(action)
+            << " bits=" << action.bits
+            << " source=" << action.getSourceIdx()
+            << " target=" << action.getTargetIdx();
+    }
+
+    return {
+        "battle",
+        action.bits,
+        battleActionKind(action),
+        action.getSourceIdx(),
+        action.getTargetIdx(),
+        action.getSelectIdx(),
+        label.str(),
+    };
+}
+
+std::vector<search::Action> enumerateBattleActions(const BattleContext &bc) {
+    std::vector<search::Action> actions;
+    if (bc.outcome != Outcome::UNDECIDED) {
+        return actions;
+    }
+
+    if (bc.inputState == InputState::CARD_SELECT) {
+        return search::Action::enumerateCardSelectActions(bc);
+    }
+
+    if (bc.inputState != InputState::PLAYER_NORMAL) {
+        return actions;
+    }
+
+    search::Action endTurn(search::ActionType::END_TURN);
+    if (endTurn.isValidAction(bc)) {
+        actions.push_back(endTurn);
+    }
+
+    for (int source = 0; source < bc.cards.cardsInHand; ++source) {
+        const auto &card = bc.cards.hand[source];
+        if (card.requiresTarget()) {
+            for (int target = 0; target < 5; ++target) {
+                search::Action action(search::ActionType::CARD, source, target);
+                if (action.isValidAction(bc)) {
+                    actions.push_back(action);
+                }
+            }
+        } else {
+            search::Action action(search::ActionType::CARD, source, 0);
+            if (action.isValidAction(bc)) {
+                actions.push_back(action);
+            }
+        }
+    }
+
+    for (int source = 0; source < bc.potionCapacity; ++source) {
+        for (int target = 0; target < 5; ++target) {
+            search::Action action(search::ActionType::POTION, source, target);
+            if (action.isValidAction(bc)) {
+                actions.push_back(action);
+            }
+        }
+
+        search::Action discard(search::ActionType::POTION, source, 6);
+        if (discard.isValidAction(bc)) {
+            actions.push_back(discard);
+        }
+    }
+
+    return actions;
+}
+
+
+std::string cardTypeLabel(CardType type) {
+    const auto idx = static_cast<int>(type);
+    if (idx >= 0 && idx <= static_cast<int>(CardType::INVALID)) {
+        return cardTypeStrings[idx];
+    }
+    return "UNKNOWN";
+}
+
+std::string potionLabel(Potion potion) {
+    const auto idx = static_cast<int>(potion);
+    if (idx >= 0 && idx <= static_cast<int>(Potion::WEAK_POTION)) {
+        return potionNames[idx];
+    }
+    return "UNKNOWN";
+}
+
+std::string monsterIdLabel(MonsterId id) {
+    const auto idx = static_cast<int>(id);
+    if (idx >= 0 && idx <= static_cast<int>(MonsterId::WRITHING_MASS)) {
+        return monsterIdStrings[idx];
+    }
+    return "UNKNOWN";
+}
+
+pybind11::dict playerSnapshot(const Player &player) {
+    pybind11::dict ret;
+    ret["current_hp"] = player.curHp;
+    ret["max_hp"] = player.maxHp;
+    ret["energy"] = player.energy;
+    ret["energy_per_turn"] = player.energyPerTurn;
+    ret["block"] = player.block;
+    ret["strength"] = player.strength;
+    ret["dexterity"] = player.dexterity;
+    ret["artifact"] = player.artifact;
+    ret["focus"] = player.focus;
+    ret["vulnerable"] = player.getStatusRuntime(PS::VULNERABLE);
+    ret["weak"] = player.getStatusRuntime(PS::WEAK);
+    ret["frail"] = player.getStatusRuntime(PS::FRAIL);
+    ret["cards_played_this_turn"] = player.cardsPlayedThisTurn;
+    ret["attacks_played_this_turn"] = player.attacksPlayedThisTurn;
+    ret["skills_played_this_turn"] = player.skillsPlayedThisTurn;
+    ret["cards_discarded_this_turn"] = player.cardsDiscardedThisTurn;
+    ret["times_damaged_this_combat"] = player.timesDamagedThisCombat;
+    return ret;
+}
+
+pybind11::dict cardSnapshot(
+        const BattleContext &bc,
+        const CardInstance &card,
+        int pileIdx,
+        bool cardIsPlayable) {
+    pybind11::dict ret;
+    ret["pile_index"] = pileIdx;
+    ret["id"] = static_cast<int>(card.getId());
+    ret["name"] = std::string(card.getName());
+    ret["type"] = cardTypeLabel(card.getType());
+    ret["cost"] = card.cost;
+    ret["cost_for_turn"] = card.costForTurn;
+    ret["upgraded"] = card.isUpgraded();
+    ret["upgrade_count"] = card.getUpgradeCount();
+    ret["requires_target"] = card.requiresTarget();
+    ret["playable"] = cardIsPlayable && card.canUseOnAnyTarget(bc);
+    ret["free_to_play_once"] = card.freeToPlayOnce;
+    ret["retain"] = card.retain;
+    ret["ethereal"] = card.isEthereal();
+    ret["exhausts"] = card.doesExhaust();
+    return ret;
+}
+
+pybind11::dict monsterSnapshot(const BattleContext &bc, int monsterIdx) {
+    const auto &monster = bc.monsters.arr[monsterIdx];
+    const auto damage = monster.getMoveBaseDamage(bc);
+
+    pybind11::dict ret;
+    ret["monster_index"] = monsterIdx;
+    ret["id"] = static_cast<int>(monster.id);
+    ret["id_label"] = monsterIdLabel(monster.id);
+    ret["name"] = std::string(monster.getName());
+    ret["current_hp"] = monster.curHp;
+    ret["max_hp"] = monster.maxHp;
+    ret["block"] = monster.block;
+    ret["alive"] = monster.isAlive();
+    ret["targetable"] = monster.isTargetable();
+    ret["attacking"] = monster.isAttacking();
+    ret["intent_category"] = monster.isAttacking() ? "ATTACK" : "NON_ATTACK";
+    ret["current_move"] = std::string(monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
+    ret["move_id"] = static_cast<int>(monster.moveHistory[0]);
+    ret["last_move_id"] = static_cast<int>(monster.moveHistory[1]);
+    ret["move_base_damage"] = damage.damage;
+    ret["move_hits"] = damage.attackCount;
+    ret["strength"] = monster.strength;
+    ret["vulnerable"] = monster.vulnerable;
+    ret["weak"] = monster.weak;
+    ret["artifact"] = monster.artifact;
+    ret["poison"] = monster.poison;
+    ret["metallicize"] = monster.metallicize;
+    ret["plated_armor"] = monster.platedArmor;
+    ret["regen"] = monster.regen;
+    ret["half_dead"] = monster.halfDead;
+    ret["misc_info"] = monster.miscInfo;
+    ret["unique_power_0"] = monster.uniquePower0;
+    ret["unique_power_1"] = monster.uniquePower1;
+    return ret;
+}
+
+pybind11::dict potionSnapshot(const BattleContext &bc, int potionIdx) {
+    const auto potion = bc.potions[potionIdx];
+    pybind11::dict ret;
+    ret["potion_index"] = potionIdx;
+    ret["id"] = static_cast<int>(potion);
+    ret["name"] = potionLabel(potion);
+    return ret;
+}
+
+pybind11::list handSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < bc.cards.cardsInHand; ++idx) {
+        ret.append(cardSnapshot(bc, bc.cards.hand[idx], idx, true));
+    }
+    return ret;
+}
+
+template <typename Pile>
+pybind11::list pileSnapshot(const BattleContext &bc, const Pile &pile) {
+    pybind11::list ret;
+    for (int idx = 0; idx < static_cast<int>(pile.size()); ++idx) {
+        ret.append(cardSnapshot(bc, pile[idx], idx, false));
+    }
+    return ret;
+}
+
+pybind11::list monsterGroupSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
+        ret.append(monsterSnapshot(bc, idx));
+    }
+    return ret;
+}
+
+pybind11::list potionListSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < bc.potionCapacity; ++idx) {
+        ret.append(potionSnapshot(bc, idx));
+    }
+    return ret;
+}
+
+pybind11::dict relicSnapshot(const RelicInstance &relic, int relicIdx) {
+    pybind11::dict ret;
+    ret["relic_index"] = relicIdx;
+    ret["id"] = static_cast<int>(relic.id);
+    ret["name"] = std::string(getRelicName(relic.id));
+    ret["counter"] = relic.data;
+    return ret;
+}
+
+pybind11::list relicListSnapshot(const GameContext &gc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < gc.relics.size(); ++idx) {
+        ret.append(relicSnapshot(gc.relics.relics[idx], idx));
+    }
+    return ret;
+}
+
+struct StepSimulatorCheckpoint {
+    GameContext gc;
+    BattleContext bc;
+    bool battleActive = false;
+};
+pybind11::dict publicProjectionAvailable(
+        const pybind11::object &value,
+        const char *source) {
+    pybind11::dict ret;
+    ret["availability"] = "available";
+    ret["source"] = source;
+    ret["value"] = value;
+    return ret;
+}
+
+pybind11::dict publicProjectionUnavailable(
+        const char *availability,
+        const char *reason) {
+    pybind11::dict ret;
+    ret["availability"] = availability;
+    ret["reason"] = reason;
+    return ret;
+}
+
+pybind11::dict publicProjectionActionSnapshot(const LightSpeedAction &action) {
+    pybind11::dict ret;
+    ret["scope"] = action.scope;
+    ret["bits"] = action.bits;
+    ret["kind"] = action.kind;
+    ret["idx1"] = action.idx1;
+    ret["idx2"] = action.idx2;
+    ret["idx3"] = action.idx3;
+    ret["label"] = action.label;
+    return ret;
+}
+
+struct StepSimulator {
+    GameContext gc;
+    BattleContext bc;
+    bool battleActive = false;
+
+    StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {}
+
+    void reset(CharacterClass cc, std::uint64_t seed, int ascension) {
+        gc = GameContext(cc, seed, ascension);
+        bc = BattleContext();
+        battleActive = false;
+    }
+
+    void ensureBattleContext() {
+        if (gc.outcome != GameOutcome::UNDECIDED) {
+            battleActive = false;
+            return;
+        }
+        if (gc.screenState == ScreenState::BATTLE && !battleActive) {
+            bc = BattleContext();
+            bc.init(gc);
+            battleActive = true;
+        }
+        if (gc.screenState != ScreenState::BATTLE) {
+            battleActive = false;
+        }
+    }
+
+    pybind11::dict snapshot() {
+        ensureBattleContext();
+        pybind11::dict ret;
+        ret["screen_state"] = screenStateLabel(gc.screenState);
+        ret["outcome"] = gameOutcomeLabel(gc.outcome);
+        ret["act"] = gc.act;
+        ret["floor_num"] = gc.floorNum;
+        ret["cur_hp"] = gc.curHp;
+        ret["max_hp"] = gc.maxHp;
+        ret["gold"] = gc.gold;
+        ret["ascension"] = gc.ascension;
+        ret["room_type"] = roomStrings[static_cast<int>(gc.curRoom)];
+        ret["potion_count"] = gc.potionCount;
+        ret["potion_capacity"] = gc.potionCapacity;
+        ret["battle_active"] = battleActive;
+        if (battleActive) {
+            ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
+            ret["battle_outcome"] = battleOutcomeLabel(bc.outcome);
+            ret["battle_input_state"] = inputStateLabel(bc.inputState);
+            ret["battle_turn"] = bc.turn;
+            ret["battle_player_hp"] = bc.player.curHp;
+            ret["battle_player_energy"] = bc.player.energy;
+            ret["battle_player_block"] = bc.player.block;
+            ret["battle_player"] = playerSnapshot(bc.player);
+            ret["battle_hand_size"] = bc.cards.cardsInHand;
+            ret["battle_hand"] = handSnapshot(bc);
+            ret["battle_draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
+            ret["battle_discard_pile_size"] = static_cast<int>(bc.cards.discardPile.size());
+            ret["battle_exhaust_pile_size"] = static_cast<int>(bc.cards.exhaustPile.size());
+            ret["battle_discard_pile"] = pileSnapshot(bc, bc.cards.discardPile);
+            ret["battle_exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);
+            ret["battle_monster_count"] = bc.monsters.monsterCount;
+            ret["battle_monsters_alive"] = bc.monsters.monstersAlive;
+            ret["battle_monsters"] = monsterGroupSnapshot(bc);
+            ret["battle_potion_count"] = bc.potionCount;
+            ret["battle_potion_capacity"] = bc.potionCapacity;
+            ret["battle_potions"] = potionListSnapshot(bc);
+            ret["battle_relics"] = relicListSnapshot(gc);
+        }
+        return ret;
+    }
+
+    std::vector<int> observation() const {
+        const auto obs = NNInterface::getInstance()->getObservation(gc);
+        return {obs.begin(), obs.end()};
+    }
+
+    std::vector<LightSpeedAction> legalActions() {
+        ensureBattleContext();
+        std::vector<LightSpeedAction> result;
+        if (gc.outcome != GameOutcome::UNDECIDED) {
+            return result;
+        }
+
+        if (gc.screenState == ScreenState::BATTLE) {
+            for (const auto &action : enumerateBattleActions(bc)) {
+                result.push_back(makeBattleAction(bc, action));
+            }
+            return result;
+        }
+
+        for (const auto &action : search::GameAction::getAllActionsInState(gc)) {
+            result.push_back(makeGameAction(gc, action));
+        }
+
+        for (int idx = 0; idx < gc.potionCapacity; ++idx) {
+            const auto potionIdx = static_cast<std::uint32_t>(idx);
+            const search::GameAction useAction(0x80000000U | potionIdx);
+            if (useAction.isValidAction(gc)) {
+                result.push_back(makeGameAction(gc, useAction));
+            }
+
+            const search::GameAction discardAction(0xC0000000U | potionIdx);
+            if (discardAction.isValidAction(gc)) {
+                result.push_back(makeGameAction(gc, discardAction));
+            }
+        }
+
+        return result;
+    }
+
+    pybind11::dict publicProjection() {
+        ensureBattleContext();
+        pybind11::dict ret;
+        ret["schema_id"] = "native-public-projection-v1";
+        ret["external_base_commit"] = "7476a81";
+        ret["patch_identity"] = "sts_lightspeed_public_projection.patch";
+        ret["screen_identity"] = publicProjectionAvailable(
+                pybind11::str(screenStateLabel(gc.screenState)),
+                "GameContext::screenState");
+        ret["visible_act_boss"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+        ret["visible_map_graph"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+        ret["current_map_node"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+        ret["immediately_legal_routes"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+
+        pybind11::dict resourceFields;
+        if (battleActive) {
+            resourceFields["current_hp"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.curHp), "BattleContext::player.curHp");
+            resourceFields["max_hp"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.maxHp), "BattleContext::player.maxHp");
+            resourceFields["gold"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.gold), "BattleContext::player.gold");
+            resourceFields["potion_count"] = publicProjectionAvailable(
+                    pybind11::int_(bc.potionCount), "BattleContext::potionCount");
+            resourceFields["potion_capacity"] = publicProjectionAvailable(
+                    pybind11::int_(bc.potionCapacity), "BattleContext::potionCapacity");
+        } else {
+            resourceFields["current_hp"] = publicProjectionAvailable(
+                    pybind11::int_(gc.curHp), "GameContext::curHp");
+            resourceFields["max_hp"] = publicProjectionAvailable(
+                    pybind11::int_(gc.maxHp), "GameContext::maxHp");
+            resourceFields["gold"] = publicProjectionAvailable(
+                    pybind11::int_(gc.gold), "GameContext::gold");
+            resourceFields["potion_count"] = publicProjectionAvailable(
+                    pybind11::int_(gc.potionCount), "GameContext::potionCount");
+            resourceFields["potion_capacity"] = publicProjectionAvailable(
+                    pybind11::int_(gc.potionCapacity), "GameContext::potionCapacity");
+        }
+        resourceFields["deck"] = publicProjectionUnavailable(
+                "unavailable", "not yet audited for raw projection");
+        resourceFields["relics"] = publicProjectionUnavailable(
+                "unavailable", "not yet audited for raw projection");
+        resourceFields["potion_identities"] = publicProjectionUnavailable(
+                "unavailable", "not yet audited for raw projection");
+        resourceFields["keys"] = publicProjectionUnavailable(
+                "unavailable", "not yet audited for raw projection");
+        ret["persistent_resources"] = publicProjectionAvailable(
+                resourceFields, "StepSimulator::publicProjection");
+        ret["screen_payload"] = publicProjectionUnavailable(
+                "unsupported", "screen-specific payloads are not exposed by this patch");
+
+        pybind11::list candidates;
+        for (const auto &action : legalActions()) {
+            candidates.append(publicProjectionActionSnapshot(action));
+        }
+        ret["candidate_actions"] = publicProjectionAvailable(
+                candidates, "StepSimulator::legalActions");
+        return ret;
+    }
+
+    pybind11::dict step(const LightSpeedAction &action) {
+        ensureBattleContext();
+        if (action.scope == "battle") {
+            if (!battleActive) {
+                throw std::runtime_error("battle action requested outside battle");
+            }
+            search::Action battleAction(action.bits);
+            if (!battleAction.isValidAction(bc)) {
+                throw std::invalid_argument("invalid battle action");
+            }
+            battleAction.execute(bc);
+            if (bc.outcome != Outcome::UNDECIDED) {
+                const auto completedBattleOutcome = battleOutcomeLabel(bc.outcome);
+                bc.exitBattle(gc);
+                battleActive = false;
+                auto result = snapshot();
+                result["completed_battle_outcome"] = completedBattleOutcome;
+                return result;
+            }
+            return snapshot();
+        }
+
+        if (action.scope == "game") {
+            if (gc.screenState == ScreenState::BATTLE) {
+                throw std::runtime_error("game action requested during battle");
+            }
+            search::GameAction gameAction(action.bits);
+            if (!gameAction.isValidAction(gc)) {
+                throw std::invalid_argument("invalid game action");
+            }
+            gameAction.execute(gc);
+            return snapshot();
+        }
+
+        throw std::invalid_argument("unknown action scope");
+    }
+
+    StepSimulatorCheckpoint captureCheckpoint() const {
+        return StepSimulatorCheckpoint{gc, bc, battleActive};
+    }
+
+    pybind11::dict restoreCheckpoint(const StepSimulatorCheckpoint &checkpoint) {
+        gc = checkpoint.gc;
+        bc = checkpoint.bc;
+        battleActive = checkpoint.battleActive;
+        return snapshot();
+    }
+};
+
+}
+
 
 PYBIND11_MODULE(slaythespire, m) {
     m.doc() = "pybind11 example plugin"; // optional module docstring
@@ -40,6 +717,32 @@ PYBIND11_MODULE(slaythespire, m) {
         .def_readwrite("pause_on_card_reward", &search::ScumSearchAgent2::pauseOnCardReward, "causes the agent to pause so as to cede control to the user when it encounters a card reward choice")
         .def_readwrite("print_logs", &search::ScumSearchAgent2::printLogs, "when set to true, the agent prints state information as it makes actions")
         .def("playout", &search::ScumSearchAgent2::playout);
+
+
+    pybind11::class_<LightSpeedAction>(m, "LightSpeedAction")
+        .def_readonly("scope", &LightSpeedAction::scope)
+        .def_readonly("bits", &LightSpeedAction::bits)
+        .def_readonly("kind", &LightSpeedAction::kind)
+        .def_readonly("idx1", &LightSpeedAction::idx1)
+        .def_readonly("idx2", &LightSpeedAction::idx2)
+        .def_readonly("idx3", &LightSpeedAction::idx3)
+        .def_readonly("label", &LightSpeedAction::label)
+        .def("__repr__", [](const LightSpeedAction &action) {
+            return "<LightSpeedAction " + action.label + ">";
+        });
+
+    pybind11::class_<StepSimulatorCheckpoint>(m, "StepSimulatorCheckpoint");
+
+    pybind11::class_<StepSimulator>(m, "StepSimulator")
+        .def(pybind11::init<CharacterClass, std::uint64_t, int>())
+        .def("reset", &StepSimulator::reset)
+        .def("snapshot", &StepSimulator::snapshot)
+        .def("observation", &StepSimulator::observation)
+        .def("legal_actions", &StepSimulator::legalActions)
+        .def("public_projection", &StepSimulator::publicProjection)
+        .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
+        .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
+        .def("step", &StepSimulator::step);
 
     pybind11::class_<GameContext> gameContext(m, "GameContext");
     gameContext.def(pybind11::init<CharacterClass, std::uint64_t, int>())
