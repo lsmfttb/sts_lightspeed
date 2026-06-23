@@ -428,6 +428,7 @@ void search::GameAction::execute(GameContext &gc) const {
         } else {
             gc.drinkPotionAtIdx(getIdx1());
         }
+        return;
     }
 
     switch (gc.screenState) {
