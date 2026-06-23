@@ -18,6 +18,7 @@
 #include "combat/BattleContext.h"
 #include "combat/InputState.h"
 #include "sim/search/Action.h"
+#include "sim/search/BattleScumSearcher2.h"
 #include "sim/search/GameAction.h"
 #include "game/GameContext.h"
 #include "game/Game.h"
@@ -646,6 +647,87 @@ struct StepSimulator {
         return ret;
     }
 
+    pybind11::dict battleSearch(std::int64_t simulations, bool includePotions) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle search requested outside battle");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("battle search simulations must be positive");
+        }
+
+        search::BattleScumSearcher2 searcher(bc);
+        searcher.includePotions = includePotions;
+        searcher.search(simulations);
+
+        const auto legalActions = enumerateBattleActions(bc);
+        std::vector<bool> matchedEdges(searcher.root.edges.size(), false);
+        pybind11::list rootRows;
+        int unsearchedLegalActionCount = 0;
+        for (const auto &legalAction : legalActions) {
+            const search::BattleScumSearcher2::Edge *matchedEdge = nullptr;
+            int matchedEdgeIndex = -1;
+            for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size()); ++edgeIdx) {
+                if (searcher.root.edges[edgeIdx].action.bits == legalAction.bits) {
+                    matchedEdge = &searcher.root.edges[edgeIdx];
+                    matchedEdgeIndex = edgeIdx;
+                    matchedEdges[edgeIdx] = true;
+                    break;
+                }
+            }
+
+            pybind11::dict row = publicProjectionActionSnapshot(
+                    makeBattleAction(bc, legalAction));
+            row["search_tree_present"] = matchedEdge != nullptr;
+            row["search_edge_index"] = matchedEdgeIndex >= 0
+                    ? pybind11::object(pybind11::int_(matchedEdgeIndex))
+                    : pybind11::object(pybind11::none());
+            if (matchedEdge == nullptr) {
+                ++unsearchedLegalActionCount;
+                row["visits"] = 0;
+                row["evaluation_sum"] = pybind11::none();
+                row["mean_value"] = pybind11::none();
+            } else {
+                const auto visits = matchedEdge->node.simulationCount;
+                row["visits"] = visits;
+                row["evaluation_sum"] = matchedEdge->node.evaluationSum;
+                if (visits > 0) {
+                    row["mean_value"] = matchedEdge->node.evaluationSum / visits;
+                } else {
+                    row["mean_value"] = pybind11::none();
+                }
+            }
+            rootRows.append(row);
+        }
+
+        int unmappedSearchEdgeCount = 0;
+        for (const bool matched : matchedEdges) {
+            if (!matched) {
+                ++unmappedSearchEdgeCount;
+            }
+        }
+
+        pybind11::dict ret;
+        ret["schema_id"] = "native-battle-search-root-v1";
+        ret["native_api"] = "StepSimulator.battle_search.v1";
+        ret["patch_identity"] = "sts_lightspeed_battle_search_root_v1";
+        ret["information_regime"] = "full_simulator_state_oracle_like";
+        ret["simulations_requested"] = simulations;
+        ret["root_visits"] = searcher.root.simulationCount;
+        ret["include_potions"] = includePotions;
+        ret["native_simulator_steps"] = searcher.actionExecutionCount;
+        ret["model_calls"] = pybind11::none();
+        ret["best_action_value"] = searcher.bestActionValue;
+        ret["min_action_value"] = searcher.minActionValue;
+        ret["outcome_player_hp"] = searcher.outcomePlayerHp;
+        ret["root_row_count"] = static_cast<int>(rootRows.size());
+        ret["search_edge_count"] = static_cast<int>(searcher.root.edges.size());
+        ret["unsearched_legal_action_count"] = unsearchedLegalActionCount;
+        ret["unmapped_search_edge_count"] = unmappedSearchEdgeCount;
+        ret["root_rows"] = rootRows;
+        return ret;
+    }
+
     pybind11::dict step(const LightSpeedAction &action) {
         ensureBattleContext();
         if (action.scope == "battle") {
@@ -740,6 +822,11 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("observation", &StepSimulator::observation)
         .def("legal_actions", &StepSimulator::legalActions)
         .def("public_projection", &StepSimulator::publicProjection)
+        .def(
+            "battle_search",
+            &StepSimulator::battleSearch,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false)
         .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
         .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
         .def("step", &StepSimulator::step);
@@ -1539,5 +1626,3 @@ PYBIND11_MODULE(slaythespire, m) {
 }
 
 // os.add_dll_directory("C:\\Program Files\\mingw-w64\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\mingw64\\bin")
-
-

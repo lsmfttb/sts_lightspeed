@@ -40,6 +40,8 @@ namespace sts::search {
         double bestActionValue = std::numeric_limits<double>::min();
         double minActionValue = std::numeric_limits<double>::max();
         int outcomePlayerHp = 0;
+        bool includePotions = true;
+        std::int64_t actionExecutionCount = 0;
 
         std::vector<Action> bestActionSequence;
         std::default_random_engine randGen;
