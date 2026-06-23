@@ -838,6 +838,121 @@ struct StepSimulator {
         throw std::invalid_argument("unknown action scope");
     }
 
+    std::vector<MonsterEncounter> legalBattleStartEncounterValues() {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle-start encounter enumeration requested outside battle");
+        }
+
+        std::vector<MonsterEncounter> result;
+        const auto append = [&result](const MonsterEncounter *values, int count) {
+            result.insert(result.end(), values, values + count);
+        };
+        const auto contains = [](const MonsterEncounter *values, int count, MonsterEncounter value) {
+            return std::find(values, values + count, value) != values + count;
+        };
+        if (gc.act < 1 || gc.act > 3) {
+            result.push_back(bc.encounter);
+            return result;
+        }
+
+        const int actIdx = gc.act - 1;
+        switch (gc.curRoom) {
+            case Room::MONSTER: {
+                const bool weak = contains(
+                        MonsterEncounterPool::weakEnemies[actIdx],
+                        MonsterEncounterPool::weakCount[actIdx],
+                        bc.encounter);
+                const bool strong = contains(
+                        MonsterEncounterPool::strongEnemies[actIdx],
+                        MonsterEncounterPool::strongCount[actIdx],
+                        bc.encounter);
+                if (weak != strong) {
+                    if (weak) {
+                        append(
+                                MonsterEncounterPool::weakEnemies[actIdx],
+                                MonsterEncounterPool::weakCount[actIdx]);
+                    } else {
+                        append(
+                                MonsterEncounterPool::strongEnemies[actIdx],
+                                MonsterEncounterPool::strongCount[actIdx]);
+                    }
+                }
+                break;
+            }
+            case Room::ELITE:
+                append(MonsterEncounterPool::elites[actIdx], 3);
+                break;
+            default:
+                break;
+        }
+        if (result.empty()) {
+            result.push_back(bc.encounter);
+        }
+        return result;
+    }
+
+    pybind11::list legalBattleStartEncounters() {
+        pybind11::list rows;
+        for (const auto encounter : legalBattleStartEncounterValues()) {
+            pybind11::dict row;
+            row["id"] = static_cast<int>(encounter);
+            row["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(encounter)];
+            rows.append(row);
+        }
+        return rows;
+    }
+
+    pybind11::dict rebuildBattleStart(
+            int hpBonus,
+            bool addRandomPotion,
+            int targetEncounterId) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle-start transform requested outside battle");
+        }
+        if (hpBonus < 0) {
+            throw std::invalid_argument("battle-start HP bonus cannot be negative");
+        }
+
+        auto targetEncounter = bc.encounter;
+        if (targetEncounterId >= 0) {
+            targetEncounter = static_cast<MonsterEncounter>(targetEncounterId);
+            const auto legal = legalBattleStartEncounterValues();
+            if (std::find(legal.begin(), legal.end(), targetEncounter) == legal.end()) {
+                throw std::invalid_argument("target encounter is not a legal same-structure replacement");
+            }
+        }
+
+        bool changed = false;
+        const int transformedHp = std::min(gc.maxHp, gc.curHp + hpBonus);
+        if (transformedHp != gc.curHp) {
+            gc.curHp = transformedHp;
+            changed = true;
+        }
+        if (addRandomPotion
+                && gc.potionCount < gc.potionCapacity
+                && !gc.relics.has(RelicId::SOZU)) {
+            gc.obtainPotion(returnRandomPotion(gc.potionRng, gc.cc));
+            changed = true;
+        }
+        if (targetEncounter != bc.encounter) {
+            if (gc.curRoom == Room::BOSS) {
+                throw std::invalid_argument("Boss encounter replacement is not supported for training supplements");
+            }
+            gc.info.encounter = targetEncounter;
+            changed = true;
+        }
+        if (!changed) {
+            return snapshot();
+        }
+
+        bc = BattleContext();
+        bc.init(gc, targetEncounter);
+        battleActive = true;
+        return snapshot();
+    }
+
     StepSimulatorCheckpoint captureCheckpoint() const {
         return StepSimulatorCheckpoint{gc, bc, battleActive};
     }
@@ -900,6 +1015,8 @@ PYBIND11_MODULE(slaythespire, m) {
             &StepSimulator::battleSearch,
             pybind11::arg("simulations"),
             pybind11::arg("include_potions") = false)
+        .def("legal_battle_start_encounters", &StepSimulator::legalBattleStartEncounters)
+        .def("rebuild_battle_start", &StepSimulator::rebuildBattleStart)
         .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
         .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
         .def("step", &StepSimulator::step);
