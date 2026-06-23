@@ -278,10 +278,26 @@ std::string cardTypeLabel(CardType type) {
     return "UNKNOWN";
 }
 
+std::string cardRarityLabel(CardRarity rarity) {
+    const auto idx = static_cast<int>(rarity);
+    if (idx >= 0 && idx <= static_cast<int>(CardRarity::INVALID)) {
+        return cardRarityStrings[idx];
+    }
+    return "UNKNOWN";
+}
+
 std::string potionLabel(Potion potion) {
     const auto idx = static_cast<int>(potion);
     if (idx >= 0 && idx <= static_cast<int>(Potion::WEAK_POTION)) {
         return potionNames[idx];
+    }
+    return "UNKNOWN";
+}
+
+std::string potionIdLabel(Potion potion) {
+    const auto idx = static_cast<int>(potion);
+    if (idx >= 0 && idx <= static_cast<int>(Potion::WEAK_POTION)) {
+        return potionIds[idx];
     }
     return "UNKNOWN";
 }
@@ -380,7 +396,32 @@ pybind11::dict potionSnapshot(const BattleContext &bc, int potionIdx) {
     pybind11::dict ret;
     ret["potion_index"] = potionIdx;
     ret["id"] = static_cast<int>(potion);
+    ret["id_label"] = potionIdLabel(potion);
     ret["name"] = potionLabel(potion);
+    return ret;
+}
+
+pybind11::dict gamePotionSnapshot(const GameContext &gc, int potionIdx) {
+    const auto potion = gc.potions[potionIdx];
+    pybind11::dict ret;
+    ret["potion_index"] = potionIdx;
+    ret["id"] = static_cast<int>(potion);
+    ret["id_label"] = potionIdLabel(potion);
+    ret["name"] = potionLabel(potion);
+    return ret;
+}
+
+pybind11::dict cardIdentitySnapshot(const Card &card, int deckIdx) {
+    pybind11::dict ret;
+    ret["deck_index"] = deckIdx;
+    ret["id"] = static_cast<int>(card.getId());
+    ret["id_label"] = std::string(getCardEnumName(card.getId()));
+    ret["name"] = std::string(card.getName());
+    ret["type"] = cardTypeLabel(card.getType());
+    ret["rarity"] = cardRarityLabel(card.getRarity());
+    ret["upgraded"] = card.isUpgraded();
+    ret["upgrade_count"] = card.getUpgraded();
+    ret["misc"] = card.misc;
     return ret;
 }
 
@@ -417,10 +458,19 @@ pybind11::list potionListSnapshot(const BattleContext &bc) {
     return ret;
 }
 
+pybind11::list gamePotionListSnapshot(const GameContext &gc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < gc.potionCapacity; ++idx) {
+        ret.append(gamePotionSnapshot(gc, idx));
+    }
+    return ret;
+}
+
 pybind11::dict relicSnapshot(const RelicInstance &relic, int relicIdx) {
     pybind11::dict ret;
     ret["relic_index"] = relicIdx;
     ret["id"] = static_cast<int>(relic.id);
+    ret["id_label"] = std::string(relicIds[static_cast<int>(relic.id)]);
     ret["name"] = std::string(getRelicName(relic.id));
     ret["counter"] = relic.data;
     return ret;
@@ -431,6 +481,22 @@ pybind11::list relicListSnapshot(const GameContext &gc) {
     for (int idx = 0; idx < gc.relics.size(); ++idx) {
         ret.append(relicSnapshot(gc.relics.relics[idx], idx));
     }
+    return ret;
+}
+
+pybind11::list deckSnapshot(const GameContext &gc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < gc.deck.size(); ++idx) {
+        ret.append(cardIdentitySnapshot(gc.deck.cards[idx], idx));
+    }
+    return ret;
+}
+
+pybind11::dict keyFlagsSnapshot(const GameContext &gc) {
+    pybind11::dict ret;
+    ret["blue_key"] = gc.blueKey;
+    ret["green_key"] = gc.greenKey;
+    ret["red_key"] = gc.redKey;
     return ret;
 }
 
@@ -512,6 +578,12 @@ struct StepSimulator {
         ret["room_type"] = roomStrings[static_cast<int>(gc.curRoom)];
         ret["potion_count"] = gc.potionCount;
         ret["potion_capacity"] = gc.potionCapacity;
+        ret["potions"] = gamePotionListSnapshot(gc);
+        ret["deck"] = deckSnapshot(gc);
+        ret["relics"] = relicListSnapshot(gc);
+        ret["blue_key"] = gc.blueKey;
+        ret["green_key"] = gc.greenKey;
+        ret["red_key"] = gc.redKey;
         ret["battle_active"] = battleActive;
         if (battleActive) {
             ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
@@ -625,14 +697,15 @@ struct StepSimulator {
             resourceFields["potion_capacity"] = publicProjectionAvailable(
                     pybind11::int_(gc.potionCapacity), "GameContext::potionCapacity");
         }
-        resourceFields["deck"] = publicProjectionUnavailable(
-                "unavailable", "not yet audited for raw projection");
-        resourceFields["relics"] = publicProjectionUnavailable(
-                "unavailable", "not yet audited for raw projection");
-        resourceFields["potion_identities"] = publicProjectionUnavailable(
-                "unavailable", "not yet audited for raw projection");
-        resourceFields["keys"] = publicProjectionUnavailable(
-                "unavailable", "not yet audited for raw projection");
+        resourceFields["deck"] = publicProjectionAvailable(
+                deckSnapshot(gc), "GameContext::deck");
+        resourceFields["relics"] = publicProjectionAvailable(
+                relicListSnapshot(gc), "GameContext::relics");
+        resourceFields["potion_identities"] = publicProjectionAvailable(
+                battleActive ? potionListSnapshot(bc) : gamePotionListSnapshot(gc),
+                battleActive ? "BattleContext::potions" : "GameContext::potions");
+        resourceFields["keys"] = publicProjectionAvailable(
+                keyFlagsSnapshot(gc), "GameContext::keyFlags");
         ret["persistent_resources"] = publicProjectionAvailable(
                 resourceFields, "StepSimulator::publicProjection");
         ret["screen_payload"] = publicProjectionUnavailable(
