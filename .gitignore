@@ -1,3 +1,6 @@
 /cmake-build-*/
+/build-py/
+/__pycache__/
+__pycache__/
 /files/
 /.idea/
