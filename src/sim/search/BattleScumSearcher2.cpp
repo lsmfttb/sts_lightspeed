@@ -8,6 +8,7 @@
 #include <utility>
 #include <string>
 #include <memory>
+#include <stdexcept>
 
 using namespace sts;
 
@@ -79,6 +80,68 @@ void search::BattleScumSearcher2::step() {
             auto &edgeTaken = curNode.edges[selectIdx];
 
 //            edgeTaken.action.printDesc(std::cout, curState) << std::endl;
+            ++actionExecutionCount;
+            edgeTaken.action.execute(curState);
+
+            actionStack.push_back(edgeTaken.action);
+            searchStack.push_back(&edgeTaken.node);
+        }
+    }
+}
+
+void search::BattleScumSearcher2::stepFromRootEdge(int rootEdgeIdx) {
+    g_debug_scum_search = this;
+    searchStack = {&root};
+    actionStack.clear();
+    BattleContext curState;
+    curState = *rootState;
+
+    if (isTerminalState(curState)) {
+        updateFromPlayout(searchStack, actionStack, curState);
+        return;
+    }
+
+    if (root.edges.empty()) {
+        enumerateActionsForNode(root, curState);
+    }
+    if (rootEdgeIdx < 0 || rootEdgeIdx >= static_cast<int>(root.edges.size())) {
+        throw std::out_of_range("root edge index is outside the current root");
+    }
+
+    auto &rootEdgeTaken = root.edges[rootEdgeIdx];
+    ++actionExecutionCount;
+    rootEdgeTaken.action.execute(curState);
+    actionStack.push_back(rootEdgeTaken.action);
+    searchStack.push_back(&rootEdgeTaken.node);
+
+    while (true) {
+        auto &curNode = *searchStack.back();
+
+        if (isTerminalState(curState)) {
+            updateFromPlayout(searchStack, actionStack, curState);
+            return;
+        }
+
+        const bool isLeaf = curNode.edges.empty();
+        if (isLeaf) {
+            ++simulationIdx;
+            enumerateActionsForNode(curNode, curState);
+            const auto selectIdx = selectFirstActionForLeafNode(curNode);
+            auto &edgeTaken = curNode.edges[selectIdx];
+
+            ++actionExecutionCount;
+            edgeTaken.action.execute(curState);
+
+            actionStack.push_back(edgeTaken.action);
+            searchStack.push_back(&edgeTaken.node);
+
+            playoutRandom(curState, actionStack);
+            updateFromPlayout(searchStack, actionStack, curState);
+            return;
+        } else {
+            const auto selectIdx = selectBestEdgeToSearch(curNode);
+            auto &edgeTaken = curNode.edges[selectIdx];
+
             ++actionExecutionCount;
             edgeTaken.action.execute(curState);
 

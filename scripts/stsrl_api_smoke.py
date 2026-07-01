@@ -23,6 +23,7 @@ REQUIRED_STEP_SIMULATOR_METHODS = (
     "restore_checkpoint",
     "public_projection",
     "battle_search",
+    "battle_search_with_root_priors",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 )

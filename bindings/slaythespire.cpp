@@ -9,6 +9,7 @@
 
 #include <sstream>
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 #include "sim/ConsoleSimulator.h"
@@ -720,24 +721,21 @@ struct StepSimulator {
         return ret;
     }
 
-    pybind11::dict battleSearch(std::int64_t simulations, bool includePotions) {
-        ensureBattleContext();
-        if (!battleActive) {
-            throw std::runtime_error("battle search requested outside battle");
-        }
-        if (simulations <= 0) {
-            throw std::invalid_argument("battle search simulations must be positive");
-        }
-
-        search::BattleScumSearcher2 searcher(bc);
-        searcher.includePotions = includePotions;
-        searcher.search(simulations);
-
+    pybind11::dict buildBattleSearchReport(
+            const search::BattleScumSearcher2 &searcher,
+            std::int64_t simulations,
+            bool includePotions,
+            const std::string &nativeApi,
+            const std::string &patchIdentity,
+            const std::vector<double> *legalActionPriors,
+            const std::vector<int> *edgeAllocations,
+            const pybind11::object &allocationMetadata) {
         const auto legalActions = enumerateBattleActions(bc);
         std::vector<bool> matchedEdges(searcher.root.edges.size(), false);
         pybind11::list rootRows;
         int unsearchedLegalActionCount = 0;
-        for (const auto &legalAction : legalActions) {
+        for (int legalIdx = 0; legalIdx < static_cast<int>(legalActions.size()); ++legalIdx) {
+            const auto &legalAction = legalActions[legalIdx];
             const search::BattleScumSearcher2::Edge *matchedEdge = nullptr;
             int matchedEdgeIndex = -1;
             for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size()); ++edgeIdx) {
@@ -755,6 +753,14 @@ struct StepSimulator {
             row["search_edge_index"] = matchedEdgeIndex >= 0
                     ? pybind11::object(pybind11::int_(matchedEdgeIndex))
                     : pybind11::object(pybind11::none());
+            if (legalActionPriors != nullptr) {
+                row["root_prior"] = (*legalActionPriors)[legalIdx];
+            }
+            if (edgeAllocations != nullptr) {
+                row["allocated_root_visits"] = matchedEdgeIndex >= 0
+                        ? (*edgeAllocations)[matchedEdgeIndex]
+                        : 0;
+            }
             if (matchedEdge == nullptr) {
                 ++unsearchedLegalActionCount;
                 row["visits"] = 0;
@@ -782,8 +788,8 @@ struct StepSimulator {
 
         pybind11::dict ret;
         ret["schema_id"] = "native-battle-search-root-v1";
-        ret["native_api"] = "StepSimulator.battle_search.v1";
-        ret["patch_identity"] = "sts_lightspeed_battle_search_root_v1";
+        ret["native_api"] = nativeApi;
+        ret["patch_identity"] = patchIdentity;
         ret["information_regime"] = "full_simulator_state_oracle_like";
         ret["simulations_requested"] = simulations;
         ret["root_visits"] = searcher.root.simulationCount;
@@ -798,7 +804,221 @@ struct StepSimulator {
         ret["unsearched_legal_action_count"] = unsearchedLegalActionCount;
         ret["unmapped_search_edge_count"] = unmappedSearchEdgeCount;
         ret["root_rows"] = rootRows;
+        if (!allocationMetadata.is_none()) {
+            ret["allocation_metadata"] = allocationMetadata;
+        }
         return ret;
+    }
+
+    pybind11::dict battleSearch(std::int64_t simulations, bool includePotions) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle search requested outside battle");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("battle search simulations must be positive");
+        }
+
+        search::BattleScumSearcher2 searcher(bc);
+        searcher.includePotions = includePotions;
+        searcher.search(simulations);
+        return buildBattleSearchReport(
+                searcher,
+                simulations,
+                includePotions,
+                "StepSimulator.battle_search.v1",
+                "sts_lightspeed_battle_search_root_v1",
+                nullptr,
+                nullptr,
+                pybind11::none());
+    }
+
+    std::vector<int> buildRootPriorAllocationPlan(
+            int simulations,
+            int rootEdgeCount,
+            const std::vector<double> &edgePriors,
+            double priorTemperature,
+            int minVisitsPerLegalAction,
+            double priorAllocationWeight) {
+        if (rootEdgeCount <= 0) {
+            throw std::runtime_error("root-prior search has no eligible root edges");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("root-prior search simulations must be positive");
+        }
+        if (minVisitsPerLegalAction < 0) {
+            throw std::invalid_argument("min visits per legal action cannot be negative");
+        }
+        if (!std::isfinite(priorTemperature) || priorTemperature <= 0.0) {
+            throw std::invalid_argument("prior temperature must be finite and positive");
+        }
+        if (!std::isfinite(priorAllocationWeight)
+                || priorAllocationWeight < 0.0
+                || priorAllocationWeight > 1.0) {
+            throw std::invalid_argument("prior allocation weight must be finite and between zero and one");
+        }
+
+        std::vector<int> allocations(rootEdgeCount, 0);
+        int remaining = simulations;
+        for (int visit = 0; visit < minVisitsPerLegalAction && remaining > 0; ++visit) {
+            for (int edgeIdx = 0; edgeIdx < rootEdgeCount && remaining > 0; ++edgeIdx) {
+                ++allocations[edgeIdx];
+                --remaining;
+            }
+        }
+        if (remaining <= 0) {
+            return allocations;
+        }
+
+        std::vector<double> transformed(rootEdgeCount, 0.0);
+        double transformedSum = 0.0;
+        for (int edgeIdx = 0; edgeIdx < rootEdgeCount; ++edgeIdx) {
+            const double prior = edgePriors[edgeIdx];
+            const double value = prior > 0.0
+                    ? std::pow(prior, 1.0 / priorTemperature)
+                    : 0.0;
+            transformed[edgeIdx] = value;
+            transformedSum += value;
+        }
+
+        const double uniformWeight = 1.0 / static_cast<double>(rootEdgeCount);
+        std::vector<double> weights(rootEdgeCount, 0.0);
+        double weightSum = 0.0;
+        for (int edgeIdx = 0; edgeIdx < rootEdgeCount; ++edgeIdx) {
+            const double priorWeight = transformedSum > 0.0
+                    ? transformed[edgeIdx] / transformedSum
+                    : uniformWeight;
+            const double mixedWeight =
+                    ((1.0 - priorAllocationWeight) * uniformWeight)
+                    + (priorAllocationWeight * priorWeight);
+            weights[edgeIdx] = mixedWeight;
+            weightSum += mixedWeight;
+        }
+
+        std::vector<double> remainders(rootEdgeCount, 0.0);
+        int assigned = 0;
+        for (int edgeIdx = 0; edgeIdx < rootEdgeCount; ++edgeIdx) {
+            const double quota = (weights[edgeIdx] / weightSum) * remaining;
+            const int whole = static_cast<int>(std::floor(quota));
+            allocations[edgeIdx] += whole;
+            assigned += whole;
+            remainders[edgeIdx] = quota - whole;
+        }
+
+        while (assigned < remaining) {
+            int bestEdge = 0;
+            double bestRemainder = remainders[0];
+            for (int edgeIdx = 1; edgeIdx < rootEdgeCount; ++edgeIdx) {
+                if (remainders[edgeIdx] > bestRemainder) {
+                    bestEdge = edgeIdx;
+                    bestRemainder = remainders[edgeIdx];
+                }
+            }
+            ++allocations[bestEdge];
+            remainders[bestEdge] = 0.0;
+            ++assigned;
+        }
+
+        return allocations;
+    }
+
+    pybind11::dict battleSearchWithRootPriors(
+            std::int64_t simulations,
+            bool includePotions,
+            const std::vector<double> &rootActionPriors,
+            double priorTemperature,
+            int minVisitsPerLegalAction,
+            double priorAllocationWeight) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("root-prior battle search requested outside battle");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("root-prior battle search simulations must be positive");
+        }
+
+        const auto legalActions = enumerateBattleActions(bc);
+        if (rootActionPriors.size() != legalActions.size()) {
+            throw std::invalid_argument("root action prior count must match current legal action count");
+        }
+        for (int priorIdx = 0; priorIdx < static_cast<int>(rootActionPriors.size()); ++priorIdx) {
+            const double prior = rootActionPriors[priorIdx];
+            if (!std::isfinite(prior) || prior < 0.0) {
+                throw std::invalid_argument("root action priors must be finite and non-negative");
+            }
+        }
+
+        search::BattleScumSearcher2 searcher(bc);
+        searcher.includePotions = includePotions;
+        searcher.actionExecutionCount = 0;
+        searcher.enumerateActionsForNode(searcher.root, *searcher.rootState);
+        if (searcher.root.edges.empty()) {
+            throw std::runtime_error("root-prior battle search found no eligible root actions");
+        }
+
+        std::vector<double> edgePriors(searcher.root.edges.size(), 0.0);
+        std::vector<bool> matchedLegalActions(legalActions.size(), false);
+        double matchedPriorMass = 0.0;
+        for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size()); ++edgeIdx) {
+            for (int legalIdx = 0; legalIdx < static_cast<int>(legalActions.size()); ++legalIdx) {
+                if (matchedLegalActions[legalIdx]) {
+                    continue;
+                }
+                if (searcher.root.edges[edgeIdx].action.bits == legalActions[legalIdx].bits) {
+                    edgePriors[edgeIdx] = rootActionPriors[legalIdx];
+                    matchedLegalActions[legalIdx] = true;
+                    matchedPriorMass += rootActionPriors[legalIdx];
+                    break;
+                }
+            }
+        }
+
+        const auto allocations = buildRootPriorAllocationPlan(
+                static_cast<int>(simulations),
+                static_cast<int>(searcher.root.edges.size()),
+                edgePriors,
+                priorTemperature,
+                minVisitsPerLegalAction,
+                priorAllocationWeight);
+        int allocatedRootVisits = 0;
+        for (int edgeIdx = 0; edgeIdx < static_cast<int>(allocations.size()); ++edgeIdx) {
+            allocatedRootVisits += allocations[edgeIdx];
+            for (int visitIdx = 0; visitIdx < allocations[edgeIdx]; ++visitIdx) {
+                searcher.stepFromRootEdge(edgeIdx);
+            }
+        }
+
+        pybind11::list allocationPlan;
+        for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size()); ++edgeIdx) {
+            pybind11::dict row = publicProjectionActionSnapshot(
+                    makeBattleAction(bc, searcher.root.edges[edgeIdx].action));
+            row["search_edge_index"] = edgeIdx;
+            row["root_prior"] = edgePriors[edgeIdx];
+            row["allocated_root_visits"] = allocations[edgeIdx];
+            allocationPlan.append(row);
+        }
+
+        pybind11::dict allocationMetadata;
+        allocationMetadata["schema_id"] = "native-root-prior-allocation-metadata-v1";
+        allocationMetadata["allocation_strategy"] = "root_prior_mixture_v1";
+        allocationMetadata["prior_temperature"] = priorTemperature;
+        allocationMetadata["min_visits_per_legal_action"] = minVisitsPerLegalAction;
+        allocationMetadata["prior_allocation_weight"] = priorAllocationWeight;
+        allocationMetadata["legal_action_prior_count"] = static_cast<int>(rootActionPriors.size());
+        allocationMetadata["eligible_root_action_count"] = static_cast<int>(searcher.root.edges.size());
+        allocationMetadata["matched_prior_mass"] = matchedPriorMass;
+        allocationMetadata["allocated_root_visits"] = allocatedRootVisits;
+        allocationMetadata["allocation_plan"] = allocationPlan;
+
+        return buildBattleSearchReport(
+                searcher,
+                simulations,
+                includePotions,
+                "StepSimulator.battle_search_with_root_priors.v1",
+                "sts_lightspeed_root_prior_allocation_v1",
+                &rootActionPriors,
+                &allocations,
+                allocationMetadata);
     }
 
     pybind11::dict step(const LightSpeedAction &action) {
@@ -1015,6 +1235,15 @@ PYBIND11_MODULE(slaythespire, m) {
             &StepSimulator::battleSearch,
             pybind11::arg("simulations"),
             pybind11::arg("include_potions") = false)
+        .def(
+            "battle_search_with_root_priors",
+            &StepSimulator::battleSearchWithRootPriors,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions"),
+            pybind11::arg("root_action_priors"),
+            pybind11::arg("prior_temperature") = 1.0,
+            pybind11::arg("min_visits_per_legal_action") = 1,
+            pybind11::arg("prior_allocation_weight") = 1.0)
         .def("legal_battle_start_encounters", &StepSimulator::legalBattleStartEncounters)
         .def("rebuild_battle_start", &StepSimulator::rebuildBattleStart)
         .def("capture_checkpoint", &StepSimulator::captureCheckpoint)

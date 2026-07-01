@@ -54,6 +54,7 @@ namespace sts::search {
         // public methods
         void search(int64_t simulations);
         void step();
+        void stepFromRootEdge(int rootEdgeIdx);
 
         // private helpers
         void updateFromPlayout(const std::vector<Node*> &stack, const std::vector<Action> &actionStack, const BattleContext &endState);
