@@ -613,6 +613,61 @@ struct StepSimulator {
         return ret;
     }
 
+    pybind11::dict battleSearchNodeSnapshot(const BattleContext &state) const {
+        pybind11::dict ret;
+        ret["screen_state"] = "BATTLE";
+        ret["outcome"] = gameOutcomeLabel(gc.outcome);
+        ret["act"] = gc.act;
+        ret["floor_num"] = gc.floorNum;
+        ret["cur_hp"] = state.player.curHp;
+        ret["max_hp"] = state.player.maxHp;
+        ret["gold"] = state.player.gold;
+        ret["ascension"] = gc.ascension;
+        ret["room_type"] = roomStrings[static_cast<int>(gc.curRoom)];
+        ret["potion_count"] = state.potionCount;
+        ret["potion_capacity"] = state.potionCapacity;
+        ret["potions"] = potionListSnapshot(state);
+        ret["deck"] = deckSnapshot(gc);
+        ret["relics"] = relicListSnapshot(gc);
+        ret["blue_key"] = gc.blueKey;
+        ret["green_key"] = gc.greenKey;
+        ret["red_key"] = gc.redKey;
+        ret["battle_active"] = true;
+        ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(state.encounter)];
+        ret["battle_outcome"] = battleOutcomeLabel(state.outcome);
+        ret["battle_input_state"] = inputStateLabel(state.inputState);
+        ret["battle_turn"] = state.turn;
+        ret["battle_player_hp"] = state.player.curHp;
+        ret["battle_player_energy"] = state.player.energy;
+        ret["battle_player_block"] = state.player.block;
+        ret["battle_player"] = playerSnapshot(state.player);
+        ret["battle_hand_size"] = state.cards.cardsInHand;
+        ret["battle_hand"] = handSnapshot(state);
+        ret["battle_draw_pile_size"] = static_cast<int>(state.cards.drawPile.size());
+        ret["battle_discard_pile_size"] = static_cast<int>(state.cards.discardPile.size());
+        ret["battle_exhaust_pile_size"] = static_cast<int>(state.cards.exhaustPile.size());
+        ret["battle_discard_pile"] = pileSnapshot(state, state.cards.discardPile);
+        ret["battle_exhaust_pile"] = pileSnapshot(state, state.cards.exhaustPile);
+        ret["battle_monster_count"] = state.monsters.monsterCount;
+        ret["battle_monsters_alive"] = state.monsters.monstersAlive;
+        ret["battle_monsters"] = monsterGroupSnapshot(state);
+        ret["battle_potion_count"] = state.potionCount;
+        ret["battle_potion_capacity"] = state.potionCapacity;
+        ret["battle_potions"] = potionListSnapshot(state);
+        ret["battle_relics"] = relicListSnapshot(gc);
+        return ret;
+    }
+
+    pybind11::list battleSearchNodeActions(
+            const BattleContext &state,
+            const std::vector<search::Action> &actions) const {
+        pybind11::list result;
+        for (const auto &action : actions) {
+            result.append(publicProjectionActionSnapshot(makeBattleAction(state, action)));
+        }
+        return result;
+    }
+
     std::vector<int> observation() const {
         const auto obs = NNInterface::getInstance()->getObservation(gc);
         return {obs.begin(), obs.end()};
@@ -831,6 +886,83 @@ struct StepSimulator {
                 nullptr,
                 nullptr,
                 pybind11::none());
+    }
+
+    pybind11::dict battleSearchV2(
+            std::int64_t simulations,
+            bool includePotions,
+            const pybind11::object &policyPriorCallback,
+            const pybind11::object &leafValueCallback) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle search v2 requested outside battle");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("battle search v2 simulations must be positive");
+        }
+        const bool usePolicyPriors = !policyPriorCallback.is_none();
+        const bool useLeafValue = !leafValueCallback.is_none();
+        if (usePolicyPriors && !pybind11::isinstance<pybind11::function>(policyPriorCallback)) {
+            throw std::invalid_argument("battle search v2 policy prior callback must be callable");
+        }
+        if (useLeafValue && !pybind11::isinstance<pybind11::function>(leafValueCallback)) {
+            throw std::invalid_argument("battle search v2 leaf value callback must be callable");
+        }
+
+        search::BattleScumSearcher2 searcher(bc);
+        searcher.includePotions = includePotions;
+        if (usePolicyPriors) {
+            const pybind11::function callback = policyPriorCallback.cast<pybind11::function>();
+            searcher.policyPriorFnc = [this, callback](
+                    const BattleContext &state,
+                    const std::vector<search::Action> &actions) {
+                pybind11::gil_scoped_acquire acquire;
+                pybind11::object raw = callback(
+                        battleSearchNodeSnapshot(state),
+                        battleSearchNodeActions(state, actions));
+                const auto priors = raw.cast<std::vector<double>>();
+                return priors;
+            };
+        }
+        if (useLeafValue) {
+            const pybind11::function callback = leafValueCallback.cast<pybind11::function>();
+            searcher.useLearnedLeafValue = true;
+            searcher.learnedLeafValueFnc = [this, callback](
+                    const BattleContext &state,
+                    const std::vector<search::Action> &actions) {
+                pybind11::gil_scoped_acquire acquire;
+                const double value = callback(
+                        battleSearchNodeSnapshot(state),
+                        battleSearchNodeActions(state, actions)).cast<double>();
+                if (!std::isfinite(value)) {
+                    throw std::runtime_error("battle search v2 leaf callback returned non-finite value");
+                }
+                return value;
+            };
+        }
+        searcher.search(simulations);
+        auto report = buildBattleSearchReport(
+                searcher,
+                simulations,
+                includePotions,
+                "StepSimulator.battle_search_v2.v1",
+                "sts_lightspeed_battle_search_v2_tree_internal_v1",
+                nullptr,
+                nullptr,
+                pybind11::none());
+        report["model_calls"] = searcher.policyPriorCallCount + searcher.leafValueCallCount;
+        pybind11::dict telemetry;
+        telemetry["expanded_nodes"] = searcher.expandedNodeCount;
+        telemetry["policy_prior_calls"] = searcher.policyPriorCallCount;
+        telemetry["leaf_value_calls"] = searcher.leafValueCallCount;
+        telemetry["policy_prior_scope"] = usePolicyPriors
+                ? "every_expanded_player_decision_node"
+                : "disabled";
+        telemetry["leaf_value_boundary"] = useLeafValue
+                ? "after_first_action_from_newly_expanded_node"
+                : "disabled";
+        report["tree_internal_telemetry"] = telemetry;
+        return report;
     }
 
     std::vector<int> buildRootPriorAllocationPlan(
@@ -1235,6 +1367,13 @@ PYBIND11_MODULE(slaythespire, m) {
             &StepSimulator::battleSearch,
             pybind11::arg("simulations"),
             pybind11::arg("include_potions") = false)
+        .def(
+            "battle_search_v2",
+            &StepSimulator::battleSearchV2,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false,
+            pybind11::arg("policy_prior_callback") = pybind11::none(),
+            pybind11::arg("leaf_value_callback") = pybind11::none())
         .def(
             "battle_search_with_root_priors",
             &StepSimulator::battleSearchWithRootPriors,

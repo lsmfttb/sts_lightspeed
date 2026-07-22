@@ -9,6 +9,7 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
+#include <cmath>
 
 using namespace sts;
 
@@ -71,6 +72,29 @@ void search::BattleScumSearcher2::step() {
             actionStack.push_back(edgeTaken.action);
             searchStack.push_back(&edgeTaken.node);
 
+            if (isTerminalState(curState)) {
+                updateFromPlayout(searchStack, actionStack, curState);
+                return;
+            }
+            if (useLearnedLeafValue) {
+                Node leafActions;
+                enumerateActionsForNode(leafActions, curState, false);
+                std::vector<Action> legalActions;
+                legalActions.reserve(leafActions.edges.size());
+                for (const auto &candidate : leafActions.edges) {
+                    legalActions.push_back(candidate.action);
+                }
+                if (legalActions.empty()) {
+                    throw std::runtime_error("learned leaf value has no legal actions");
+                }
+                ++leafValueCallCount;
+                const double evaluation = learnedLeafValueFnc(curState, legalActions);
+                if (!std::isfinite(evaluation)) {
+                    throw std::runtime_error("learned leaf value must be finite");
+                }
+                updateFromEvaluation(searchStack, actionStack, evaluation);
+                return;
+            }
             playoutRandom(curState, actionStack);
             updateFromPlayout(searchStack, actionStack, curState);
             return;
@@ -151,16 +175,17 @@ void search::BattleScumSearcher2::stepFromRootEdge(int rootEdgeIdx) {
     }
 }
 
-void search::BattleScumSearcher2::updateFromPlayout(const std::vector<Node *> &stack, const std::vector<Action> &actionStack, const BattleContext &endState) {
-    const auto evaluation = evaluateEndState(endState);
-
-    if (evaluation > bestActionValue) {
-        bestActionSequence = actionStack;
-        bestActionValue = evaluation;
-        outcomePlayerHp = endState.player.curHp;
+void search::BattleScumSearcher2::updateFromEvaluation(const std::vector<Node *> &stack, const std::vector<Action> &actionStack, double evaluation, const BattleContext *terminalState) {
+    if (terminalState != nullptr) {
+        outcomePlayerHp = terminalState->player.curHp;
     }
 
-    if (evaluation < minActionValue) {
+    if (terminalState != nullptr && evaluation > bestActionValue) {
+        bestActionSequence = actionStack;
+        bestActionValue = evaluation;
+    }
+
+    if (terminalState != nullptr && evaluation < minActionValue) {
         minActionValue = evaluation;
     }
 
@@ -169,6 +194,11 @@ void search::BattleScumSearcher2::updateFromPlayout(const std::vector<Node *> &s
         ++node.simulationCount;
         node.evaluationSum += evaluation;
     }
+}
+
+void search::BattleScumSearcher2::updateFromPlayout(const std::vector<Node *> &stack, const std::vector<Action> &actionStack, const BattleContext &endState) {
+    const auto evaluation = evaluateEndState(endState);
+    updateFromEvaluation(stack, actionStack, evaluation, &endState);
 }
 
 bool search::BattleScumSearcher2::isTerminalState(const BattleContext &bc) const { // maybe can optimize by making this evaluate directly if score cannot possibly be higher than best
@@ -189,7 +219,14 @@ double search::BattleScumSearcher2::evaluateEdge(const search::BattleScumSearche
     double explorationValue = explorationParameter *
             std::sqrt(std::log(parent.simulationCount+1) / (edge.node.simulationCount+1));
 
-    return qualityValue + explorationValue;
+    double policyValue = 0.0;
+    if (!parent.policyPriors.empty()) {
+        const double prior = parent.policyPriors.at(edgeIdx);
+        policyValue = policyExplorationParameter * prior
+                * std::sqrt(static_cast<double>(parent.simulationCount + 1))
+                / static_cast<double>(edge.node.simulationCount + 1);
+    }
+    return qualityValue + explorationValue + policyValue;
 }
 
 int search::BattleScumSearcher2::selectBestEdgeToSearch(const search::BattleScumSearcher2::Node &cur) {
@@ -211,6 +248,11 @@ int search::BattleScumSearcher2::selectBestEdgeToSearch(const search::BattleScum
 }
 
 int search::BattleScumSearcher2::selectFirstActionForLeafNode(const search::BattleScumSearcher2::Node &leafNode) {
+    if (!leafNode.policyPriors.empty()) {
+        std::discrete_distribution<int> dist(
+                leafNode.policyPriors.begin(), leafNode.policyPriors.end());
+        return dist(randGen);
+    }
     auto dist = std::uniform_int_distribution<int>(0, static_cast<int>(leafNode.edges.size())-1);
     return dist(randGen);
 }
@@ -240,7 +282,8 @@ void search::BattleScumSearcher2::playoutRandom(BattleContext &state, std::vecto
 }
 
 void search::BattleScumSearcher2::enumerateActionsForNode(search::BattleScumSearcher2::Node &node,
-                                                               const BattleContext &bc) {
+                                                               const BattleContext &bc,
+                                                               bool applyPriors) {
     switch (bc.inputState) {
         case InputState::PLAYER_NORMAL:
             enumerateCardActions(node, bc);
@@ -262,6 +305,11 @@ void search::BattleScumSearcher2::enumerateActionsForNode(search::BattleScumSear
             break;
     }
 
+    if (applyPriors) {
+        ++expandedNodeCount;
+        applyPolicyPriors(node, bc);
+    }
+
 #ifdef sts_print_debug
     std::cout << "{ (" << node.edges.size() << ") ";
     for (int i = 0; i < node.edges.size(); ++i) {
@@ -269,6 +317,37 @@ void search::BattleScumSearcher2::enumerateActionsForNode(search::BattleScumSear
     }
     std::cout << " }" << std::endl;
 #endif
+}
+
+void search::BattleScumSearcher2::applyPolicyPriors(
+        search::BattleScumSearcher2::Node &node, const BattleContext &bc) {
+    if (!policyPriorFnc || node.edges.empty()) {
+        return;
+    }
+    std::vector<Action> actions;
+    actions.reserve(node.edges.size());
+    for (const auto &edge : node.edges) {
+        actions.push_back(edge.action);
+    }
+    auto priors = policyPriorFnc(bc, actions);
+    ++policyPriorCallCount;
+    if (priors.size() != actions.size()) {
+        throw std::runtime_error("policy prior count must match expanded node action count");
+    }
+    double mass = 0.0;
+    for (const double prior : priors) {
+        if (!std::isfinite(prior) || prior < 0.0) {
+            throw std::runtime_error("policy priors must be finite and non-negative");
+        }
+        mass += prior;
+    }
+    if (!std::isfinite(mass) || mass <= 0.0) {
+        throw std::runtime_error("policy priors must have positive finite mass");
+    }
+    for (auto &prior : priors) {
+        prior /= mass;
+    }
+    node.policyPriors = std::move(priors);
 }
 
 void search::BattleScumSearcher2::enumerateCardActions(search::BattleScumSearcher2::Node &node,
