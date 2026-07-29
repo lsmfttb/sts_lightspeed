@@ -888,11 +888,54 @@ struct StepSimulator {
                 pybind11::none());
     }
 
-    pybind11::dict battleSearchV2(
+    void appendTreeGeometryTelemetry(
+            pybind11::dict &report,
+            const search::BattleScumSearcher2 &searcher) const {
+        const auto geometry = searcher.buildTreeGeometryTelemetry();
+        if (geometry.totalExpandedNodeCount != searcher.expandedNodeCount) {
+            throw std::logic_error("tree geometry expanded-node count disagrees with search telemetry");
+        }
+
+        pybind11::dict geometryDict;
+        geometryDict["schema_id"] = "native-battle-search-v2-tree-geometry-v1";
+        geometryDict["schema_version"] = 1;
+        geometryDict["root_depth"] = 0;
+        geometryDict["total_expanded_node_count"] = geometry.totalExpandedNodeCount;
+        geometryDict["total_discovered_child_edge_count"] = geometry.totalDiscoveredChildEdgeCount;
+        geometryDict["total_visited_child_edge_count"] = geometry.totalVisitedChildEdgeCount;
+        geometryDict["max_expanded_depth"] = geometry.maxExpandedDepth;
+
+        pybind11::list depthRows;
+        for (const auto &sourceRow : geometry.depthRows) {
+            pybind11::dict row;
+            row["depth"] = sourceRow.depth;
+            row["expanded_node_count"] = sourceRow.expandedNodeCount;
+            row["discovered_child_edge_count"] = sourceRow.discoveredChildEdgeCount;
+            row["visited_child_edge_count"] = sourceRow.visitedChildEdgeCount;
+
+            pybind11::list branchingHistogram;
+            for (const auto &[childCount, nodeCount] : sourceRow.branchingHistogram) {
+                pybind11::dict bucket;
+                bucket["child_count"] = childCount;
+                bucket["node_count"] = nodeCount;
+                branchingHistogram.append(bucket);
+            }
+            row["branching_histogram"] = branchingHistogram;
+            depthRows.append(row);
+        }
+        geometryDict["depth_rows"] = depthRows;
+
+        auto telemetry = report["tree_internal_telemetry"].cast<pybind11::dict>();
+        telemetry["tree_geometry"] = geometryDict;
+        report["tree_internal_telemetry"] = telemetry;
+    }
+
+    pybind11::dict battleSearchV2Impl(
             std::int64_t simulations,
             bool includePotions,
             const pybind11::object &policyPriorCallback,
-            const pybind11::object &leafValueCallback) {
+            const pybind11::object &leafValueCallback,
+            bool includeTreeGeometry) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error("battle search v2 requested outside battle");
@@ -962,7 +1005,36 @@ struct StepSimulator {
                 ? "after_first_action_from_newly_expanded_node"
                 : "disabled";
         report["tree_internal_telemetry"] = telemetry;
+        if (includeTreeGeometry) {
+            appendTreeGeometryTelemetry(report, searcher);
+        }
         return report;
+    }
+
+    pybind11::dict battleSearchV2(
+            std::int64_t simulations,
+            bool includePotions,
+            const pybind11::object &policyPriorCallback,
+            const pybind11::object &leafValueCallback) {
+        return battleSearchV2Impl(
+                simulations,
+                includePotions,
+                policyPriorCallback,
+                leafValueCallback,
+                false);
+    }
+
+    pybind11::dict battleSearchV2WithTreeGeometry(
+            std::int64_t simulations,
+            bool includePotions,
+            const pybind11::object &policyPriorCallback,
+            const pybind11::object &leafValueCallback) {
+        return battleSearchV2Impl(
+                simulations,
+                includePotions,
+                policyPriorCallback,
+                leafValueCallback,
+                true);
     }
 
     std::vector<int> buildRootPriorAllocationPlan(
@@ -1370,6 +1442,13 @@ PYBIND11_MODULE(slaythespire, m) {
         .def(
             "battle_search_v2",
             &StepSimulator::battleSearchV2,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false,
+            pybind11::arg("policy_prior_callback") = pybind11::none(),
+            pybind11::arg("leaf_value_callback") = pybind11::none())
+        .def(
+            "battle_search_v2_with_tree_geometry",
+            &StepSimulator::battleSearchV2WithTreeGeometry,
             pybind11::arg("simulations"),
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),

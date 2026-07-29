@@ -8,10 +8,13 @@
 #include "sim/search/Action.h"
 
 #include <functional>
+#include <cstdint>
+#include <map>
 #include <memory>
 #include <random>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 namespace sts::search {
 
@@ -20,6 +23,22 @@ namespace sts::search {
             const BattleContext&, const std::vector<Action>&)> PolicyPriorFnc;
     typedef std::function<double (
             const BattleContext&, const std::vector<Action>&)> LeafValueFnc;
+
+    struct TreeGeometryDepthRow {
+        std::int64_t depth = 0;
+        std::int64_t expandedNodeCount = 0;
+        std::int64_t discoveredChildEdgeCount = 0;
+        std::int64_t visitedChildEdgeCount = 0;
+        std::map<std::int64_t, std::int64_t> branchingHistogram;
+    };
+
+    struct TreeGeometryTelemetry {
+        std::int64_t totalExpandedNodeCount = 0;
+        std::int64_t totalDiscoveredChildEdgeCount = 0;
+        std::int64_t totalVisitedChildEdgeCount = 0;
+        std::int64_t maxExpandedDepth = -1;
+        std::vector<TreeGeometryDepthRow> depthRows;
+    };
 
     // to find a solution to a battle with tree pruning
     struct BattleScumSearcher2 {
@@ -67,6 +86,7 @@ namespace sts::search {
         void search(int64_t simulations);
         void step();
         void stepFromRootEdge(int rootEdgeIdx);
+        [[nodiscard]] TreeGeometryTelemetry buildTreeGeometryTelemetry() const;
 
         // private helpers
         void updateFromEvaluation(const std::vector<Node*> &stack, const std::vector<Action> &actionStack, double evaluation, const BattleContext *terminalState=nullptr);

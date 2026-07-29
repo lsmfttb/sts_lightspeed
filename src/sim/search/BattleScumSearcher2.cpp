@@ -175,6 +175,44 @@ void search::BattleScumSearcher2::stepFromRootEdge(int rootEdgeIdx) {
     }
 }
 
+search::TreeGeometryTelemetry search::BattleScumSearcher2::buildTreeGeometryTelemetry() const {
+    TreeGeometryTelemetry telemetry;
+    std::vector<std::pair<const Node *, std::int64_t>> pending{{&root, 0}};
+
+    while (!pending.empty()) {
+        const auto [node, depth] = pending.back();
+        pending.pop_back();
+
+        if (!node->edges.empty()) {
+            if (static_cast<std::size_t>(depth) >= telemetry.depthRows.size()) {
+                telemetry.depthRows.resize(static_cast<std::size_t>(depth) + 1);
+                for (std::size_t rowIdx = 0; rowIdx < telemetry.depthRows.size(); ++rowIdx) {
+                    telemetry.depthRows[rowIdx].depth = static_cast<std::int64_t>(rowIdx);
+                }
+            }
+
+            auto &row = telemetry.depthRows[static_cast<std::size_t>(depth)];
+            const auto childCount = static_cast<std::int64_t>(node->edges.size());
+            ++row.expandedNodeCount;
+            row.discoveredChildEdgeCount += childCount;
+            ++row.branchingHistogram[childCount];
+            ++telemetry.totalExpandedNodeCount;
+            telemetry.totalDiscoveredChildEdgeCount += childCount;
+            telemetry.maxExpandedDepth = std::max(telemetry.maxExpandedDepth, depth);
+
+            for (const auto &edge : node->edges) {
+                if (edge.node.simulationCount > 0) {
+                    ++row.visitedChildEdgeCount;
+                    ++telemetry.totalVisitedChildEdgeCount;
+                }
+                pending.emplace_back(&edge.node, depth + 1);
+            }
+        }
+    }
+
+    return telemetry;
+}
+
 void search::BattleScumSearcher2::updateFromEvaluation(const std::vector<Node *> &stack, const std::vector<Action> &actionStack, double evaluation, const BattleContext *terminalState) {
     if (terminalState != nullptr) {
         outcomePlayerHp = terminalState->player.curHp;
