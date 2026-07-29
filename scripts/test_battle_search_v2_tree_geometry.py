@@ -135,6 +135,44 @@ def main() -> int:
     assert leaf_report["tree_internal_telemetry"]["leaf_value_calls"] == 1
     check_geometry(leaf_report)
 
+    def make_combined_callbacks() -> tuple[Any, Any, dict[str, int]]:
+        counts = {"policy": 0, "leaf": 0}
+
+        def combined_policy(
+                snapshot: Mapping[str, Any],
+                actions: Sequence[Mapping[str, Any]]) -> list[float]:
+            counts["policy"] += 1
+            assert snapshot["screen_state"] == "BATTLE"
+            return [1.0] * len(actions)
+
+        def combined_leaf(
+                snapshot: Mapping[str, Any],
+                actions: Sequence[Mapping[str, Any]]) -> float:
+            counts["leaf"] += 1
+            assert snapshot["screen_state"] == "BATTLE"
+            assert actions
+            return 1.0
+
+        return combined_policy, combined_leaf, counts
+
+    baseline_policy, baseline_leaf, baseline_counts = make_combined_callbacks()
+    sim.restore_checkpoint(checkpoint)
+    combined_baseline = sim.battle_search_v2(
+        16, False, baseline_policy, baseline_leaf)
+    geometry_policy, geometry_leaf, geometry_counts = make_combined_callbacks()
+    sim.restore_checkpoint(checkpoint)
+    combined_geometry = sim.battle_search_v2_with_tree_geometry(
+        16, False, geometry_policy, geometry_leaf)
+    assert without_geometry(combined_baseline) == without_geometry(combined_geometry)
+    assert baseline_counts == geometry_counts
+    assert combined_baseline["tree_internal_telemetry"]["policy_prior_calls"] == (
+        combined_geometry["tree_internal_telemetry"]["policy_prior_calls"])
+    assert combined_baseline["tree_internal_telemetry"]["leaf_value_calls"] == (
+        combined_geometry["tree_internal_telemetry"]["leaf_value_calls"])
+    assert combined_baseline["native_simulator_steps"] == combined_geometry["native_simulator_steps"]
+    assert combined_baseline["root_rows"] == combined_geometry["root_rows"]
+    check_geometry(combined_geometry)
+
     sim.restore_checkpoint(checkpoint)
     multi_a = sim.battle_search_v2_with_tree_geometry(16)
     sim.restore_checkpoint(checkpoint)
