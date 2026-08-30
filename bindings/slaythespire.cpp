@@ -1378,11 +1378,18 @@ struct StepSimulator {
     }
 
     StepSimulatorCheckpoint captureCheckpoint() const {
-        return StepSimulatorCheckpoint{gc, bc, battleActive};
+        auto checkpoint = StepSimulatorCheckpoint{gc, bc, battleActive};
+        if (checkpoint.gc.map != nullptr) {
+            checkpoint.gc.map = std::make_shared<Map>(*checkpoint.gc.map);
+        }
+        return checkpoint;
     }
 
     pybind11::dict restoreCheckpoint(const StepSimulatorCheckpoint &checkpoint) {
         gc = checkpoint.gc;
+        if (gc.map != nullptr) {
+            gc.map = std::make_shared<Map>(*gc.map);
+        }
         bc = checkpoint.bc;
         battleActive = checkpoint.battleActive;
         return snapshot();
