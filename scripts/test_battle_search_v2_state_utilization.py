@@ -42,6 +42,9 @@ def main() -> int:
     telemetry = result["tree_internal_telemetry"]
     state = telemetry["state_utilization"]
     assert state["identity_complete"] is True
+    assert state["identity_semantics"].startswith("all future-dynamics BattleContext values")
+    assert "BattleContext.curCardQueueItem.all_fields" in state["identity_components"]
+    assert "ActionQueue.indices_size_and_clear_bits" in state["identity_components"]
     assert state["digest_collision_count"] == 0
     assert state["collision_check"] == (
         "canonical_payload_equality_within_digest_bucket"

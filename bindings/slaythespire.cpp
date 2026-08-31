@@ -939,7 +939,22 @@ struct StepSimulator {
         telemetry["schema_version"] = 1;
         telemetry["identity_schema_id"] = "native-battle-search-v2-exact-state-v1";
         telemetry["identity_semantics"] =
-                "full BattleContext values, ordered card/pile state, all combat RNG state, and collision-checked canonical equality";
+                "all future-dynamics BattleContext values including curCardQueueItem, ordered card/pile state, all combat RNG state, and collision-checked canonical equality";
+        pybind11::list identityComponents;
+        for (const auto *component : {
+                     "BattleContext.scalar_control_flags",
+                     "BattleContext.all_six_rng_states",
+                     "BattleContext.potions_and_card_select",
+                     "Player.all_fields_and_status_map",
+                     "MonsterGroup.all_fields_and_monster_state",
+                     "CardManager.all_counters_and_ordered_piles",
+                     "CardQueue.all_slots_and_indices",
+                     "BattleContext.curCardQueueItem.all_fields",
+                     "ActionQueue.indices_size_and_clear_bits",
+                 }) {
+            identityComponents.append(component);
+        }
+        telemetry["identity_components"] = identityComponents;
         telemetry["identity_complete"] = source.identityComplete;
         telemetry["identity_unavailable_reason"] = source.identityUnavailableReason.empty()
                 ? pybind11::object(pybind11::none())

@@ -51,6 +51,14 @@ void appendCards(std::ostream &out, const Container &cards) {
     out << ']';
 }
 
+void appendCardQueueItem(std::ostream &out, const sts::CardQueueItem &item) {
+    appendCard(out, item.card);
+    out << item.target << ',' << item.isEndTurn << ',' << item.triggerOnUse << ','
+        << item.ignoreEnergyTotal << ',' << item.energyOnUse << ',' << item.freeToPlay
+        << ',' << item.randomTarget << ',' << item.autoplay << ',' << item.regretCardCount
+        << ',' << item.purgeOnUse << ',' << item.exhaustOnUse << ';';
+}
+
 void appendPlayer(std::ostream &out, const sts::Player &player) {
     out << static_cast<int>(player.cc) << ',' << player.gold << ',' << player.curHp
         << ',' << player.maxHp << ',' << player.energy << ','
@@ -103,8 +111,20 @@ void appendMonster(std::ostream &out, const sts::Monster &monster) {
 std::string canonicalBattleState(const sts::BattleContext &state, bool &complete,
                                  std::string &reason) {
     std::ostringstream out;
-    // The stream representation is retained as an auditable compatibility
-    // prefix; the tagged fields below cover values omitted by the debug print.
+    // Every non-static BattleContext, Player, MonsterGroup, CardManager,
+    // CardQueue, CardSelectInfo, CardInstance, and Random value used by the
+    // battle transition code is represented below.  In particular,
+    // curCardQueueItem is serialized separately: Actions.cpp reads it while
+    // executing the current card, even when cardQueue is empty.  The stream
+    // representation is retained as an auditable compatibility prefix; the
+    // tagged fields below cover values omitted by the debug print.
+    //
+    // The only intentionally omitted values are BattleContext::sum and the
+    // debug pointer (static/process-local diagnostics), container capacity or
+    // allocator identity (not transition state), and inactive ActionQueue
+    // function objects.  An ActionQueue with size > 0 is opaque std::function
+    // state and therefore marks this identity incomplete below; when size == 0
+    // those inactive functions are unreachable by future transitions.
     out << "battle-context-v1|" << state;
     out << "flags|" << state.haveUsedDiscoveryAction << ',' << state.undefinedBehaviorEvoked
         << ',' << state.seed << ',' << state.floorNum << ',' << static_cast<int>(state.encounter)
@@ -158,13 +178,11 @@ std::string canonicalBattleState(const sts::BattleContext &state, bool &complete
     out << "|cardqueue|" << state.cardQueue.size << ',' << state.cardQueue.frontIdx << ','
         << state.cardQueue.backIdx << '[';
     for (const auto &item : state.cardQueue.arr) {
-        appendCard(out, item.card);
-        out << item.target << ',' << item.isEndTurn << ',' << item.triggerOnUse << ','
-            << item.ignoreEnergyTotal << ',' << item.energyOnUse << ',' << item.freeToPlay
-            << ',' << item.randomTarget << ',' << item.autoplay << ',' << item.regretCardCount
-            << ',' << item.purgeOnUse << ',' << item.exhaustOnUse << ';';
+        appendCardQueueItem(out, item);
     }
-    out << "]actionqueue|" << state.actionQueue.size << ',' << state.actionQueue.front << ','
+    out << "]cur-card-queue-item|";
+    appendCardQueueItem(out, state.curCardQueueItem);
+    out << "actionqueue|" << state.actionQueue.size << ',' << state.actionQueue.front << ','
         << state.actionQueue.back << ',' << state.actionQueue.bits;
     if (state.actionQueue.size != 0) {
         complete = false;
