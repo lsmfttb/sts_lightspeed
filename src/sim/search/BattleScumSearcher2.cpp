@@ -115,9 +115,11 @@ std::string canonicalBattleState(const sts::BattleContext &state, bool &complete
     // CardQueue, CardSelectInfo, CardInstance, and Random value used by the
     // battle transition code is represented below.  In particular,
     // curCardQueueItem is serialized separately: Actions.cpp reads it while
-    // executing the current card, even when cardQueue is empty.  The stream
-    // representation is retained as an auditable compatibility prefix; the
-    // tagged fields below cover values omitted by the debug print.
+    // executing the current card, even when cardQueue is empty.  Do not include
+    // BattleContext::operator<< here: that debug formatter includes the mutable
+    // process-global BattleContext::sum counter, which is not future dynamics
+    // and would make identical states reached by different paths compare
+    // unequal.  The tagged fields below are the complete explicit payload.
     //
     // The only intentionally omitted values are BattleContext::sum and the
     // debug pointer (static/process-local diagnostics), container capacity or
@@ -125,7 +127,7 @@ std::string canonicalBattleState(const sts::BattleContext &state, bool &complete
     // function objects.  An ActionQueue with size > 0 is opaque std::function
     // state and therefore marks this identity incomplete below; when size == 0
     // those inactive functions are unreachable by future transitions.
-    out << "battle-context-v1|" << state;
+    out << "battle-context-v1|";
     out << "flags|" << state.haveUsedDiscoveryAction << ',' << state.undefinedBehaviorEvoked
         << ',' << state.seed << ',' << state.floorNum << ',' << static_cast<int>(state.encounter)
         << ',' << state.loopCount << ',' << state.energyWasted << ',' << state.cardsDrawn
