@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
 
 
@@ -11,6 +12,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-dir", required=True)
     args = parser.parse_args()
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/sim/search/BattleScumSearcher2.cpp"
+    )
+    source_text = source.read_text(encoding="utf-8")
+    if 'out << "battle-context-v1|" << state' in source_text:
+        raise RuntimeError(
+            "canonicalBattleState must not include BattleContext::operator<<"
+        )
     sys.path.insert(0, args.build_dir)
     import slaythespire
 
