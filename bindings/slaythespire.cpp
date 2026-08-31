@@ -930,6 +930,43 @@ struct StepSimulator {
         report["tree_internal_telemetry"] = telemetry;
     }
 
+    void appendStateUtilizationTelemetry(
+            pybind11::dict &report,
+            const search::BattleScumSearcher2 &searcher) const {
+        const auto &source = searcher.stateUtilizationTelemetry;
+        pybind11::dict telemetry;
+        telemetry["schema_id"] = search::BattleScumSearcher2::StateUtilizationTelemetry::schemaId;
+        telemetry["schema_version"] = 1;
+        telemetry["identity_schema_id"] = "native-battle-search-v2-exact-state-v1";
+        telemetry["identity_semantics"] =
+                "full BattleContext values, ordered card/pile state, all combat RNG state, and collision-checked canonical equality";
+        telemetry["identity_complete"] = source.identityComplete;
+        telemetry["identity_unavailable_reason"] = source.identityUnavailableReason.empty()
+                ? pybind11::object(pybind11::none())
+                : pybind11::object(pybind11::str(source.identityUnavailableReason));
+        telemetry["digest_algorithm"] = source.digestAlgorithm;
+        telemetry["digest_collision_count"] = source.collisionCount;
+        telemetry["collision_check"] = "canonical_payload_equality_within_digest_bucket";
+        telemetry["expanded_path_node_count"] = static_cast<std::int64_t>(source.records.size());
+
+        pybind11::list rows;
+        for (const auto &record : source.records) {
+            pybind11::dict row;
+            row["expansion_ordinal"] = record.expansionOrdinal;
+            row["depth"] = record.depth;
+            row["exact_state_digest"] = record.exactStateDigest;
+            row["first_seen"] = record.firstSeen;
+            row["first_seen_expansion_ordinal"] = record.firstSeenExpansionOrdinal;
+            row["first_seen_depth"] = record.firstSeenDepth;
+            row["path_fingerprint"] = record.pathFingerprint;
+            rows.append(row);
+        }
+        telemetry["expanded_states"] = rows;
+        auto treeTelemetry = report["tree_internal_telemetry"].cast<pybind11::dict>();
+        treeTelemetry["state_utilization"] = telemetry;
+        report["tree_internal_telemetry"] = treeTelemetry;
+    }
+
     pybind11::dict battleSearchV2Impl(
             std::int64_t simulations,
             bool includePotions,
@@ -1035,6 +1072,82 @@ struct StepSimulator {
                 policyPriorCallback,
                 leafValueCallback,
                 true);
+    }
+
+    pybind11::dict battleSearchV2WithStateUtilization(
+            std::int64_t simulations,
+            bool includePotions,
+            const pybind11::object &policyPriorCallback,
+            const pybind11::object &leafValueCallback) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle search requested outside battle");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("battle search simulations must be positive");
+        }
+        const bool usePolicyPriors = !policyPriorCallback.is_none();
+        const bool useLeafValue = !leafValueCallback.is_none();
+        if (usePolicyPriors && !pybind11::isinstance<pybind11::function>(policyPriorCallback)) {
+            throw std::invalid_argument("battle search state-utilization policy callback must be callable");
+        }
+        if (useLeafValue && !pybind11::isinstance<pybind11::function>(leafValueCallback)) {
+            throw std::invalid_argument("battle search state-utilization value callback must be callable");
+        }
+
+        search::BattleScumSearcher2 searcher(bc);
+        searcher.includePotions = includePotions;
+        if (usePolicyPriors) {
+            const pybind11::function callback = policyPriorCallback.cast<pybind11::function>();
+            searcher.policyPriorFnc = [this, callback](
+                    const BattleContext &state,
+                    const std::vector<search::Action> &actions) {
+                pybind11::gil_scoped_acquire acquire;
+                return callback(
+                        battleSearchNodeSnapshot(state),
+                        battleSearchNodeActions(state, actions)).cast<std::vector<double>>();
+            };
+        }
+        if (useLeafValue) {
+            const pybind11::function callback = leafValueCallback.cast<pybind11::function>();
+            searcher.useLearnedLeafValue = true;
+            searcher.learnedLeafValueFnc = [this, callback](
+                    const BattleContext &state,
+                    const std::vector<search::Action> &actions) {
+                pybind11::gil_scoped_acquire acquire;
+                const auto value = callback(
+                        battleSearchNodeSnapshot(state),
+                        battleSearchNodeActions(state, actions)).cast<double>();
+                if (!std::isfinite(value)) {
+                    throw std::runtime_error("battle search state-utilization value callback returned non-finite value");
+                }
+                return value;
+            };
+        }
+        searcher.enableStateUtilizationTelemetry();
+        searcher.search(simulations);
+        auto report = buildBattleSearchReport(
+                searcher,
+                simulations,
+                includePotions,
+                "StepSimulator.battle_search_v2_with_state_utilization.v1",
+                "sts_lightspeed_battle_search_v2_state_utilization_v1",
+                nullptr,
+                nullptr,
+                pybind11::none());
+        report["model_calls"] = searcher.policyPriorCallCount + searcher.leafValueCallCount;
+        pybind11::dict mechanismTelemetry;
+        mechanismTelemetry["expanded_nodes"] = searcher.expandedNodeCount;
+        mechanismTelemetry["policy_prior_calls"] = searcher.policyPriorCallCount;
+        mechanismTelemetry["leaf_value_calls"] = searcher.leafValueCallCount;
+        mechanismTelemetry["policy_prior_scope"] = usePolicyPriors
+                ? "every_expanded_player_decision_node" : "disabled";
+        mechanismTelemetry["leaf_value_boundary"] = useLeafValue
+                ? "after_first_action_from_newly_expanded_node" : "disabled";
+        report["tree_internal_telemetry"] = mechanismTelemetry;
+        appendStateUtilizationTelemetry(report, searcher);
+        appendTreeGeometryTelemetry(report, searcher);
+        return report;
     }
 
     std::vector<int> buildRootPriorAllocationPlan(
@@ -1449,6 +1562,13 @@ PYBIND11_MODULE(slaythespire, m) {
         .def(
             "battle_search_v2_with_tree_geometry",
             &StepSimulator::battleSearchV2WithTreeGeometry,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false,
+            pybind11::arg("policy_prior_callback") = pybind11::none(),
+            pybind11::arg("leaf_value_callback") = pybind11::none())
+        .def(
+            "battle_search_v2_with_state_utilization",
+            &StepSimulator::battleSearchV2WithStateUtilization,
             pybind11::arg("simulations"),
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),
