@@ -8,6 +8,9 @@
 #include <utility>
 #include <string>
 #include <memory>
+#include <iomanip>
+#include <sstream>
+#include <unordered_map>
 #include <stdexcept>
 #include <cmath>
 
@@ -19,10 +22,241 @@ namespace sts::search {
     thread_local search::BattleScumSearcher2 *g_debug_scum_search;
 }
 
+namespace {
+
+struct StateIdentityValue {
+    std::string payload;
+    std::string digest;
+    bool complete = true;
+    std::string reason;
+};
+
+void appendRandom(std::ostream &out, const sts::Random &rng) {
+    out << rng.counter << ':' << rng.seed0 << ':' << rng.seed1 << ';';
+}
+
+void appendCard(std::ostream &out, const sts::CardInstance &card) {
+    out << static_cast<int>(card.id) << ',' << card.uniqueId << ','
+        << card.specialData << ',' << static_cast<int>(card.cost) << ','
+        << static_cast<int>(card.costForTurn) << ',' << card.upgraded << ','
+        << card.freeToPlayOnce << ',' << card.retain << ';';
+}
+
+template <typename Container>
+void appendCards(std::ostream &out, const Container &cards) {
+    out << cards.size() << '[';
+    for (const auto &card : cards) {
+        appendCard(out, card);
+    }
+    out << ']';
+}
+
+void appendPlayer(std::ostream &out, const sts::Player &player) {
+    out << static_cast<int>(player.cc) << ',' << player.gold << ',' << player.curHp
+        << ',' << player.maxHp << ',' << player.energy << ','
+        << static_cast<int>(player.energyPerTurn) << ','
+        << static_cast<int>(player.cardDrawPerTurn) << ','
+        << static_cast<int>(player.stance) << ',' << static_cast<int>(player.orbSlots)
+        << ',' << static_cast<int>(player.lastTargetedMonster) << ',' << player.block
+        << ',' << player.artifact << ',' << player.dexterity << ',' << player.focus
+        << ',' << player.strength << ',' << player.justAppliedBits << ','
+        << player.statusBits0 << ',' << player.statusBits1 << ',' << player.relicBits0
+        << ',' << player.relicBits1 << ',' << static_cast<int>(player.happyFlowerCounter)
+        << ',' << static_cast<int>(player.incenseBurnerCounter) << ','
+        << static_cast<int>(player.inkBottleCounter) << ','
+        << static_cast<int>(player.inserterCounter) << ','
+        << static_cast<int>(player.nunchakuCounter) << ','
+        << static_cast<int>(player.penNibCounter) << ','
+        << static_cast<int>(player.sundialCounter) << ','
+        << player.haveUsedNecronomiconThisTurn << ','
+        << static_cast<int>(player.combustHpLoss) << ',' << player.devaFormEnergyPerTurn
+        << ',' << static_cast<int>(player.echoFormCardsDoubled) << ','
+        << static_cast<int>(player.panacheCounter) << ',' << player.cardsPlayedThisTurn
+        << ',' << player.attacksPlayedThisTurn << ',' << player.skillsPlayedThisTurn
+        << ',' << player.orangePelletsCardTypesPlayed << ',' << player.cardsDiscardedThisTurn
+        << ',' << player.lastAttackUnblockedDamage << ',' << player.timesDamagedThisCombat
+        << ',' << static_cast<int>(player.bomb1) << ',' << static_cast<int>(player.bomb2)
+        << ',' << static_cast<int>(player.bomb3) << "{";
+    for (const auto &[status, value] : player.statusMap) {
+        out << static_cast<int>(status) << '=' << value << ';';
+    }
+    out << '}';
+}
+
+void appendMonster(std::ostream &out, const sts::Monster &monster) {
+    out << monster.idx << ',' << static_cast<int>(monster.id) << ',' << monster.curHp
+        << ',' << monster.maxHp << ',' << monster.block << ',' << monster.isEscapingB
+        << ',' << monster.halfDead << ',' << monster.escapeNext << ','
+        << static_cast<int>(monster.moveHistory[0]) << ','
+        << static_cast<int>(monster.moveHistory[1]) << ',' << monster.statusBits << ','
+        << static_cast<int>(monster.artifact) << ',' << static_cast<int>(monster.blockReturn)
+        << ',' << static_cast<int>(monster.choked) << ','
+        << static_cast<int>(monster.corpseExplosion) << ','
+        << static_cast<int>(monster.lockOn) << ',' << monster.mark << ','
+        << static_cast<int>(monster.metallicize) << ',' << static_cast<int>(monster.platedArmor)
+        << ',' << static_cast<int>(monster.poison) << ',' << static_cast<int>(monster.regen)
+        << ',' << static_cast<int>(monster.shackled) << ',' << monster.strength << ','
+        << monster.vulnerable << ',' << monster.weak << ',' << monster.uniquePower0 << ','
+        << monster.uniquePower1 << ',' << monster.miscInfo << ';';
+}
+
+std::string canonicalBattleState(const sts::BattleContext &state, bool &complete,
+                                 std::string &reason) {
+    std::ostringstream out;
+    // The stream representation is retained as an auditable compatibility
+    // prefix; the tagged fields below cover values omitted by the debug print.
+    out << "battle-context-v1|" << state;
+    out << "flags|" << state.haveUsedDiscoveryAction << ',' << state.undefinedBehaviorEvoked
+        << ',' << state.seed << ',' << state.floorNum << ',' << static_cast<int>(state.encounter)
+        << ',' << state.loopCount << ',' << state.energyWasted << ',' << state.cardsDrawn
+        << ',' << state.ascension << ',' << static_cast<int>(state.outcome) << ','
+        << static_cast<int>(state.inputState) << ',' << state.monsterTurnIdx << ','
+        << state.isBattleOver << ',' << state.endTurnQueued << ',' << state.turnHasEnded
+        << ',' << state.skipMonsterTurn << ',' << state.potionCount << ',' << state.potionCapacity
+        << ',' << state.turn << ',' << state.miscBits << '|';
+    out << "rng|";
+    appendRandom(out, state.aiRng);
+    appendRandom(out, state.cardRandomRng);
+    appendRandom(out, state.miscRng);
+    appendRandom(out, state.monsterHpRng);
+    appendRandom(out, state.potionRng);
+    appendRandom(out, state.shuffleRng);
+    out << "potions|";
+    for (int i = 0; i < state.potionCapacity; ++i) {
+        out << static_cast<int>(state.potions[i]) << ',';
+    }
+    out << "select|" << state.cardSelectInfo.canPickZero << ','
+        << state.cardSelectInfo.canPickAnyNumber << ',' << state.cardSelectInfo.pickCount
+        << ',' << state.cardSelectInfo.data0 << ','
+        << static_cast<int>(state.cardSelectInfo.cardSelectTask) << ',';
+    for (const auto card : state.cardSelectInfo.cards) {
+        out << static_cast<int>(card) << ',';
+    }
+    out << "player|";
+    appendPlayer(out, state.player);
+    out << "monsters|" << state.monsters.monstersAlive << ',' << state.monsters.monsterCount
+        << ',' << state.monsters.extraRollMoveOnTurn << ',' << state.monsters.skipTurn << '[';
+    for (const auto &monster : state.monsters.arr) {
+        appendMonster(out, monster);
+    }
+    out << "]cards|" << state.cards.nextUniqueCardId << ',' << state.cards.cardsInHand
+        << ',' << state.cards.handNormalityCount << ',' << state.cards.handPainCount << ','
+        << state.cards.strikeCount << ',' << state.cards.handBloodCardCount << ','
+        << state.cards.drawPileBloodCardCount << ',' << state.cards.discardPileBloodCardCount
+        << "|hand|";
+    appendCards(out, state.cards.hand);
+    out << "|limbo|";
+    appendCards(out, state.cards.limbo);
+    out << "|stasis|";
+    appendCards(out, state.cards.stasisCards);
+    out << "|draw|";
+    appendCards(out, state.cards.drawPile);
+    out << "|discard|";
+    appendCards(out, state.cards.discardPile);
+    out << "|exhaust|";
+    appendCards(out, state.cards.exhaustPile);
+    out << "|cardqueue|" << state.cardQueue.size << ',' << state.cardQueue.frontIdx << ','
+        << state.cardQueue.backIdx << '[';
+    for (const auto &item : state.cardQueue.arr) {
+        appendCard(out, item.card);
+        out << item.target << ',' << item.isEndTurn << ',' << item.triggerOnUse << ','
+            << item.ignoreEnergyTotal << ',' << item.energyOnUse << ',' << item.freeToPlay
+            << ',' << item.randomTarget << ',' << item.autoplay << ',' << item.regretCardCount
+            << ',' << item.purgeOnUse << ',' << item.exhaustOnUse << ';';
+    }
+    out << "]actionqueue|" << state.actionQueue.size << ',' << state.actionQueue.front << ','
+        << state.actionQueue.back << ',' << state.actionQueue.bits;
+    if (state.actionQueue.size != 0) {
+        complete = false;
+        reason = "native ActionQueue contains opaque std::function entries";
+    }
+    return out.str();
+}
+
+std::string fnvDigest(const std::string &payload) {
+    std::uint64_t first = 1469598103934665603ULL;
+    std::uint64_t second = 1099511628211ULL;
+    for (const unsigned char byte : payload) {
+        first ^= byte;
+        first *= 1099511628211ULL;
+        second ^= static_cast<std::uint64_t>(byte) + 0x9d;
+        second *= 14029467366897019727ULL;
+        second ^= second >> 29;
+    }
+    std::ostringstream out;
+    out << std::hex << std::setfill('0') << std::setw(16) << first << std::setw(16) << second;
+    return out.str();
+}
+
+std::string pathFingerprint(const std::vector<sts::search::Action> &path) {
+    std::ostringstream out;
+    out << "p" << path.size() << ':';
+    for (const auto &action : path) {
+        out << action.bits << '/';
+    }
+    return out.str();
+}
+
+StateIdentityValue stateIdentity(const sts::BattleContext &state) {
+    StateIdentityValue value;
+    value.payload = canonicalBattleState(state, value.complete, value.reason);
+    value.digest = fnvDigest(value.payload);
+    return value;
+}
+
+}
+
 
 
 search::BattleScumSearcher2::BattleScumSearcher2(const BattleContext &bc, search::EvalFnc _evalFnc)
     : rootState(new BattleContext(bc)), evalFnc(std::move(_evalFnc)), randGen(bc.seed+bc.floorNum) {
+}
+
+void search::BattleScumSearcher2::enableStateUtilizationTelemetry() {
+    stateUtilizationEnabled = true;
+    stateUtilizationTelemetry = {};
+    stateUtilizationPayloads.clear();
+}
+
+void search::BattleScumSearcher2::recordExpandedState(
+        const BattleContext &state, int depth, const std::vector<Action> &path) {
+    if (!stateUtilizationEnabled) {
+        return;
+    }
+    const auto identity = stateIdentity(state);
+    if (!identity.complete) {
+        stateUtilizationTelemetry.identityComplete = false;
+        if (stateUtilizationTelemetry.identityUnavailableReason.empty()) {
+            stateUtilizationTelemetry.identityUnavailableReason = identity.reason;
+        }
+    }
+    const auto ordinal = static_cast<std::int64_t>(stateUtilizationTelemetry.records.size()) + 1;
+    auto &records = stateUtilizationTelemetry.records;
+    auto first = records.end();
+    for (auto it = records.begin(); it != records.end(); ++it) {
+        if (it->exactStateDigest == identity.digest) {
+            const auto previousIndex = static_cast<std::size_t>(it - records.begin());
+            if (stateUtilizationPayloads[previousIndex] != identity.payload) {
+                ++stateUtilizationTelemetry.collisionCount;
+                stateUtilizationTelemetry.identityComplete = false;
+                stateUtilizationTelemetry.identityUnavailableReason =
+                        "digest collision rejected by canonical payload equality";
+                continue;
+            }
+            first = it;
+            break;
+        }
+    }
+    StateUtilizationRecord record;
+    record.expansionOrdinal = ordinal;
+    record.depth = depth;
+    record.exactStateDigest = identity.digest;
+    record.firstSeen = first == records.end();
+    record.firstSeenExpansionOrdinal = record.firstSeen ? ordinal : first->firstSeenExpansionOrdinal;
+    record.firstSeenDepth = record.firstSeen ? depth : first->firstSeenDepth;
+    record.pathFingerprint = pathFingerprint(path);
+    records.push_back(std::move(record));
+    stateUtilizationPayloads.push_back(identity.payload);
 }
 
 void search::BattleScumSearcher2::search(int64_t simulations) {
@@ -57,10 +291,11 @@ void search::BattleScumSearcher2::step() {
             return;
         }
 
-        const bool isLeaf = curNode.edges.empty();
+            const bool isLeaf = curNode.edges.empty();
         if (isLeaf) {
 
             ++simulationIdx;
+            recordExpandedState(curState, static_cast<int>(searchStack.size()) - 1, actionStack);
             enumerateActionsForNode(curNode, curState);
             const auto selectIdx = selectFirstActionForLeafNode(curNode);
             auto &edgeTaken = curNode.edges[selectIdx];

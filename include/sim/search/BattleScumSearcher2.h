@@ -13,6 +13,8 @@
 #include <memory>
 #include <random>
 #include <iostream>
+#include <string>
+#include <vector>
 #include <limits>
 #include <vector>
 
@@ -42,6 +44,25 @@ namespace sts::search {
 
     // to find a solution to a battle with tree pruning
     struct BattleScumSearcher2 {
+        struct StateUtilizationRecord {
+            std::int64_t expansionOrdinal = 0;
+            int depth = 0;
+            std::string exactStateDigest;
+            bool firstSeen = false;
+            std::int64_t firstSeenExpansionOrdinal = 0;
+            int firstSeenDepth = 0;
+            std::string pathFingerprint;
+        };
+
+        struct StateUtilizationTelemetry {
+            static constexpr const char *schemaId = "native-battle-search-v2-state-utilization-v1";
+            bool identityComplete = true;
+            std::string identityUnavailableReason;
+            std::string digestAlgorithm = "fnv1a128-v1";
+            int collisionCount = 0;
+            std::vector<StateUtilizationRecord> records;
+        };
+
         class Edge;
         struct Node {
             std::int64_t simulationCount = 0;
@@ -80,6 +101,10 @@ namespace sts::search {
         std::vector<Node*> searchStack;
         std::vector<Action> actionStack;
 
+        bool stateUtilizationEnabled = false;
+        StateUtilizationTelemetry stateUtilizationTelemetry;
+        std::vector<std::string> stateUtilizationPayloads;
+
         explicit BattleScumSearcher2(const BattleContext &bc, EvalFnc evalFnc=&evaluateEndState);
 
         // public methods
@@ -109,6 +134,10 @@ namespace sts::search {
 
         void printSearchTree(std::ostream &os, int levels);
         void printSearchStack(std::ostream &os, bool skipLast=false);
+
+        void enableStateUtilizationTelemetry();
+        void recordExpandedState(const BattleContext &state, int depth,
+                                 const std::vector<Action> &path);
     };
 
     extern thread_local BattleScumSearcher2 *g_debug_scum_search;
