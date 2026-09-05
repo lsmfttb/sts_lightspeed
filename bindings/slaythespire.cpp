@@ -777,7 +777,8 @@ struct StepSimulator {
     }
 
     pybind11::dict completeBattleTransitionIfTerminal() {
-        if (bc.outcome == Outcome::UNDECIDED) {
+        ensureBattleContext();
+        if (!battleActive || bc.outcome == Outcome::UNDECIDED) {
             return snapshot();
         }
 
@@ -1392,7 +1393,7 @@ struct StepSimulator {
                 throw std::invalid_argument("invalid game action");
             }
             gameAction.execute(gc);
-            return snapshot();
+            return completeBattleTransitionIfTerminal();
         }
 
         throw std::invalid_argument("unknown action scope");
@@ -1504,7 +1505,7 @@ struct StepSimulator {
             changed = true;
         }
         if (!changed) {
-            return snapshot();
+            return completeBattleTransitionIfTerminal();
         }
 
         bc = BattleContext();
