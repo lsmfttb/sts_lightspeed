@@ -776,6 +776,20 @@ struct StepSimulator {
         return ret;
     }
 
+    pybind11::dict completeBattleTransitionIfTerminal() {
+        ensureBattleContext();
+        if (!battleActive || bc.outcome == Outcome::UNDECIDED) {
+            return snapshot();
+        }
+
+        const auto completedBattleOutcome = battleOutcomeLabel(bc.outcome);
+        bc.exitBattle(gc);
+        battleActive = false;
+        auto result = snapshot();
+        result["completed_battle_outcome"] = completedBattleOutcome;
+        return result;
+    }
+
     pybind11::dict buildBattleSearchReport(
             const search::BattleScumSearcher2 &searcher,
             std::int64_t simulations,
@@ -1365,12 +1379,7 @@ struct StepSimulator {
             }
             battleAction.execute(bc);
             if (bc.outcome != Outcome::UNDECIDED) {
-                const auto completedBattleOutcome = battleOutcomeLabel(bc.outcome);
-                bc.exitBattle(gc);
-                battleActive = false;
-                auto result = snapshot();
-                result["completed_battle_outcome"] = completedBattleOutcome;
-                return result;
+                return completeBattleTransitionIfTerminal();
             }
             return snapshot();
         }
@@ -1384,7 +1393,7 @@ struct StepSimulator {
                 throw std::invalid_argument("invalid game action");
             }
             gameAction.execute(gc);
-            return snapshot();
+            return completeBattleTransitionIfTerminal();
         }
 
         throw std::invalid_argument("unknown action scope");
@@ -1496,13 +1505,13 @@ struct StepSimulator {
             changed = true;
         }
         if (!changed) {
-            return snapshot();
+            return completeBattleTransitionIfTerminal();
         }
 
         bc = BattleContext();
         bc.init(gc, targetEncounter);
         battleActive = true;
-        return snapshot();
+        return completeBattleTransitionIfTerminal();
     }
 
     StepSimulatorCheckpoint captureCheckpoint() const {
