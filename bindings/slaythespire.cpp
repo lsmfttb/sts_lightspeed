@@ -783,10 +783,16 @@ struct StepSimulator {
         }
 
         const auto completedBattleOutcome = battleOutcomeLabel(bc.outcome);
+        const auto completedBattleMonsterCount = bc.monsters.monsterCount;
+        const auto completedBattleMonstersAlive = bc.monsters.monstersAlive;
+        const auto completedBattleMonsters = monsterGroupSnapshot(bc);
         bc.exitBattle(gc);
         battleActive = false;
         auto result = snapshot();
         result["completed_battle_outcome"] = completedBattleOutcome;
+        result["completed_battle_monster_count"] = completedBattleMonsterCount;
+        result["completed_battle_monsters_alive"] = completedBattleMonstersAlive;
+        result["completed_battle_monsters"] = completedBattleMonsters;
         return result;
     }
 

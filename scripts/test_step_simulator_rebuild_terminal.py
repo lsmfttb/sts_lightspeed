@@ -17,6 +17,7 @@ import importlib.machinery
 import pathlib
 import sys
 from collections.abc import Sequence
+from collections.abc import Mapping
 from typing import Any
 
 REPLAY_ACTIONS = (
@@ -113,6 +114,118 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def assert_active_monster_shape(snapshot: Mapping[str, Any]) -> None:
+    """Check the existing active-battle shape and string identity fields."""
+
+    monsters = snapshot.get("battle_monsters")
+    require(
+        isinstance(monsters, Sequence) and not isinstance(monsters, (str, bytes)),
+        f"active battle_monsters is not an ordered sequence: {snapshot}",
+    )
+    count = snapshot.get("battle_monster_count")
+    require(
+        isinstance(count, int) and not isinstance(count, bool),
+        f"active battle_monster_count is not an integer: {snapshot}",
+    )
+    require(count == len(monsters), f"active monster count/list mismatch: {snapshot}")
+    for index, monster in enumerate(monsters):
+        require(isinstance(monster, Mapping), f"active monster {index} is not an object")
+        require(
+            monster.get("monster_index") == index,
+            f"active monster occurrence order changed: {snapshot}",
+        )
+        require(
+            isinstance(monster.get("id"), int) and not isinstance(monster.get("id"), bool),
+            f"active monster numeric id changed shape: {snapshot}",
+        )
+        require(
+            isinstance(monster.get("id_label"), str) and monster["id_label"],
+            f"active monster id_label is not a string identity: {snapshot}",
+        )
+        require(
+            isinstance(monster.get("name"), str) and monster["name"],
+            f"active monster name is not a string identity: {snapshot}",
+        )
+
+
+def assert_terminal_monster_telemetry(
+    transition: Mapping[str, Any], expected_outcome: str
+) -> None:
+    monsters = transition.get("completed_battle_monsters")
+    require(
+        isinstance(monsters, Sequence) and not isinstance(monsters, (str, bytes)),
+        f"terminal copied monsters are not an ordered sequence: {transition}",
+    )
+    count = transition.get("completed_battle_monster_count")
+    alive = transition.get("completed_battle_monsters_alive")
+    require(
+        isinstance(count, int) and not isinstance(count, bool),
+        f"terminal copied monster count is not an integer: {transition}",
+    )
+    require(
+        isinstance(alive, int) and not isinstance(alive, bool),
+        f"terminal copied alive count is not an integer: {transition}",
+    )
+    require(
+        transition.get("completed_battle_outcome") == expected_outcome,
+        f"terminal outcome changed: {transition}",
+    )
+    require(
+        count == len(monsters),
+        f"terminal copied monster count/list mismatch: {transition}",
+    )
+    alive_from_rows = 0
+    for index, monster in enumerate(monsters):
+        require(isinstance(monster, Mapping), f"terminal monster {index} is not an object")
+        require(
+            monster.get("monster_index") == index,
+            f"terminal copied monster occurrence order changed: {transition}",
+        )
+        require(
+            isinstance(monster.get("id_label"), str) and monster["id_label"],
+            f"terminal copied monster id_label is not a string: {transition}",
+        )
+        require(
+            isinstance(monster.get("name"), str) and monster["name"],
+            f"terminal copied monster name is not a string: {transition}",
+        )
+        require(
+            isinstance(monster.get("current_hp"), int)
+            and not isinstance(monster.get("current_hp"), bool),
+            f"terminal copied monster HP is not an integer: {transition}",
+        )
+        alive_from_rows += int(monster.get("alive") is True)
+    require(
+        alive == alive_from_rows,
+        f"terminal copied alive count/list mismatch: {transition}",
+    )
+
+
+def assert_active_and_loss_paths(sts: Any) -> None:
+    active_sim = sts.StepSimulator(sts.CharacterClass.IRONCLAD, 1, 20)
+    active_snapshot: Mapping[str, Any] | None = None
+    for _ in range(32):
+        candidate = dict(active_sim.snapshot())
+        if candidate.get("battle_active") is True:
+            active_snapshot = candidate
+            break
+        actions = active_sim.legal_actions()
+        require(len(actions) > 0, "seed 1 reached no action before an active battle")
+        active_sim.step(actions[0])
+    require(active_snapshot is not None, "seed 1 did not expose an active battle snapshot")
+    assert_active_monster_shape(active_snapshot)
+
+    loss_sim = sts.StepSimulator(sts.CharacterClass.IRONCLAD, 1, 20)
+    for _ in range(64):
+        actions = loss_sim.legal_actions()
+        require(len(actions) > 0, "seed 1 loss path reached no legal action")
+        transition = dict(loss_sim.step(actions[0]))
+        if "completed_battle_outcome" in transition:
+            assert_terminal_monster_telemetry(transition, "PLAYER_LOSS")
+            return
+    raise AssertionError("seed 1 did not produce a terminal loss within 64 actions")
+
+
 def find_action(actions: Sequence[Any], scope: str, bits: int, kind: str) -> Any:
     matches = [
         action
@@ -202,6 +315,7 @@ def main() -> int:
         "battle_outcome" not in ordinary_entry,
         f"ordinary entry retained stale battle fields: {ordinary_entry}",
     )
+    assert_terminal_monster_telemetry(ordinary_entry, "PLAYER_VICTORY")
     require(
         len(sim.legal_actions()) > 0,
         "ordinary entry left no legal game actions",
@@ -213,6 +327,13 @@ def main() -> int:
     print(f"replayed_actions: {len(REPLAY_ACTIONS)}")
     print(f"ordinary_entry_screen: {ordinary_entry['screen_state']}")
     print(f"completed_battle_outcome: {ordinary_entry['completed_battle_outcome']}")
+    print(
+        "completed_battle_monster_telemetry: "
+        f"count={ordinary_entry['completed_battle_monster_count']}, "
+        f"alive={ordinary_entry['completed_battle_monsters_alive']}"
+    )
+    assert_active_and_loss_paths(sts)
+    print("active-shape-and-terminal-loss-telemetry: passed")
     print("changed_and_noop_rebuild_paths: passed")
     return 0
 
