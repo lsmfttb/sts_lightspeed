@@ -44,6 +44,28 @@ namespace sts::search {
 
     // to find a solution to a battle with tree pruning
     struct BattleScumSearcher2 {
+        struct CombatHandcraftedH1 {
+            bool available = false;
+            std::string unavailableReason = "not_evaluated";
+            double playerHpFraction = 0;
+            double activeEnemyHpFraction = 0;
+            double blockFraction = 0;
+            double turnFraction = 0;
+            double raw = 0;
+            double value = 0;
+        };
+
+        struct ProgressiveBiasAuditRow {
+            std::int64_t parentExpansionOrdinal = 0;
+            int parentDepth = 0;
+            int childEdgeIndex = 0;
+            std::int64_t childVisitCount = 0;
+            CombatHandcraftedH1 childH1;
+            double baseScore = 0;
+            double biasContribution = 0;
+            double finalScore = 0;
+        };
+
         struct StateUtilizationRecord {
             std::int64_t expansionOrdinal = 0;
             int depth = 0;
@@ -69,6 +91,9 @@ namespace sts::search {
             double evaluationSum = 0;
             std::vector<Edge> edges;
             std::vector<double> policyPriors;
+            // Empty for the frozen Search-v2 path. Indexed by ordered tree edge.
+            std::vector<CombatHandcraftedH1> childHeuristics;
+            std::int64_t expansionOrdinal = 0;
         };
 
         struct Edge {
@@ -94,6 +119,19 @@ namespace sts::search {
         std::int64_t expandedNodeCount = 0;
         std::int64_t policyPriorCallCount = 0;
         std::int64_t leafValueCallCount = 0;
+        std::int64_t rolloutCount = 0;
+        std::int64_t terminalUtilityEvaluationCount = 0;
+
+        // Fixed T088 heuristic/weight; no learned callback or parameter tuning.
+        bool progressiveBiasEnabled = false;
+        static constexpr double progressiveBiasWeight = 0.50;
+        std::size_t progressiveBiasAuditLimit = 0;
+        std::vector<ProgressiveBiasAuditRow> progressiveBiasAudit;
+        std::int64_t heuristicSuccessorTransitionCount = 0;
+        std::int64_t heuristicAvailableCount = 0;
+        std::int64_t heuristicTerminalUnavailableCount = 0;
+        std::int64_t heuristicInvalidUnavailableCount = 0;
+        std::int64_t progressiveBiasScoreCount = 0;
 
         std::vector<Action> bestActionSequence;
         std::default_random_engine randGen;
@@ -119,8 +157,11 @@ namespace sts::search {
         [[nodiscard]] bool isTerminalState(const BattleContext &bc) const;
 
         double evaluateEdge(const Node &parent, int edgeIdx);
-        int selectBestEdgeToSearch(const Node &cur);
+        int selectBestEdgeToSearch(const Node &cur, int parentDepth=0);
         int selectFirstActionForLeafNode(const Node &leafNode);
+        static CombatHandcraftedH1 combatHandcraftedH1(const BattleContext &bc);
+        void prepareChildHeuristics(Node &node, const BattleContext &bc);
+        double evaluateTreePolicyEdge(const Node &parent, int edgeIdx, int parentDepth);
 
         void playoutRandom(BattleContext &state, std::vector<Action> &actionStack);
 

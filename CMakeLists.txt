@@ -34,3 +34,7 @@ target_link_directories(small-test PRIVATE json::nlohmann_json)
 target_include_directories(small-test PUBLIC include)
 target_include_directories(small-test PUBLIC json/include)
 target_include_directories(small-test PUBLIC bindings)
+
+# Bounded search-mechanism checks; not a cohort/canary runner.
+add_executable(test-progressive-bias apps/test-progressive-bias.cpp ${sts_lightspeed_SOURCES})
+target_include_directories(test-progressive-bias PRIVATE include json/include)
