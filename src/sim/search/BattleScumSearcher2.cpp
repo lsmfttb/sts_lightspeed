@@ -281,9 +281,24 @@ void search::BattleScumSearcher2::recordExpandedState(
 
 void search::BattleScumSearcher2::search(int64_t simulations) {
     g_debug_scum_search = this;
+    // A search() invocation reports only its own work.  The tree may be
+    // deliberately retained between invocations, but its accumulated
+    // statistics are not confused with this call's audit/work telemetry.
     actionExecutionCount = 0;
+    expandedNodeCount = 0;
+    policyPriorCallCount = 0;
+    leafValueCallCount = 0;
+    rolloutCount = 0;
+    terminalUtilityEvaluationCount = 0;
+    heuristicSuccessorTransitionCount = 0;
+    heuristicAvailableCount = 0;
+    heuristicTerminalUnavailableCount = 0;
+    heuristicInvalidUnavailableCount = 0;
+    progressiveBiasScoreCount = 0;
+    progressiveBiasAudit.clear();
 
     if (isTerminalState(*rootState)) {
+        ++terminalUtilityEvaluationCount;
         auto evaluation = evaluateEndState(*rootState);
         outcomePlayerHp = rootState->player.curHp;
         bestActionSequence = {};
@@ -355,7 +370,7 @@ void search::BattleScumSearcher2::step() {
             return;
 
         } else {
-            const auto selectIdx = selectBestEdgeToSearch(curNode);
+            const auto selectIdx = selectBestEdgeToSearch(curNode, static_cast<int>(searchStack.size()) - 1);
             auto &edgeTaken = curNode.edges[selectIdx];
 
 //            edgeTaken.action.printDesc(std::cout, curState) << std::endl;
@@ -418,7 +433,7 @@ void search::BattleScumSearcher2::stepFromRootEdge(int rootEdgeIdx) {
             updateFromPlayout(searchStack, actionStack, curState);
             return;
         } else {
-            const auto selectIdx = selectBestEdgeToSearch(curNode);
+            const auto selectIdx = selectBestEdgeToSearch(curNode, static_cast<int>(searchStack.size()) - 1);
             auto &edgeTaken = curNode.edges[selectIdx];
 
             ++actionExecutionCount;
@@ -490,6 +505,7 @@ void search::BattleScumSearcher2::updateFromEvaluation(const std::vector<Node *>
 }
 
 void search::BattleScumSearcher2::updateFromPlayout(const std::vector<Node *> &stack, const std::vector<Action> &actionStack, const BattleContext &endState) {
+    ++terminalUtilityEvaluationCount;
     const auto evaluation = evaluateEndState(endState);
     updateFromEvaluation(stack, actionStack, evaluation, &endState);
 }
@@ -522,16 +538,97 @@ double search::BattleScumSearcher2::evaluateEdge(const search::BattleScumSearche
     return qualityValue + explorationValue + policyValue;
 }
 
-int search::BattleScumSearcher2::selectBestEdgeToSearch(const search::BattleScumSearcher2::Node &cur) {
+search::BattleScumSearcher2::CombatHandcraftedH1 search::BattleScumSearcher2::combatHandcraftedH1(const BattleContext &bc) {
+    CombatHandcraftedH1 result;
+    if (bc.outcome != Outcome::UNDECIDED) {
+        result.unavailableReason = "terminal_state";
+        return result;
+    }
+    // These are the complete H1 inputs. No cards, intent, RNG, or hidden-state
+    // identity is inspected. Non-targetable enemies do not enter either sum.
+    result.unavailableReason = "invalid_h1_input";
+    if (bc.player.maxHp <= 0 || bc.player.curHp < 0 || bc.player.block < 0) {
+        return result;
+    }
+    double enemyHp = 0;
+    double enemyMaxHp = 0;
+    for (int i = 0; i < bc.monsters.monsterCount; ++i) {
+        const auto &monster = bc.monsters.arr[i];
+        if (monster.isTargetable()) {
+            if (monster.curHp < 0 || monster.maxHp <= 0) {
+                return result;
+            }
+            enemyHp += monster.curHp;
+            enemyMaxHp += monster.maxHp;
+        }
+    }
+    result.playerHpFraction = static_cast<double>(bc.player.curHp) / bc.player.maxHp;
+    result.activeEnemyHpFraction = enemyMaxHp == 0 ? 0 : enemyHp / enemyMaxHp;
+    result.blockFraction = static_cast<double>(bc.player.block)
+            / (static_cast<double>(bc.player.maxHp) + bc.player.block);
+    result.turnFraction = std::min(std::max(bc.turn, 0), 20) / 20.0;
+    result.raw = 2.0 * result.playerHpFraction - 2.0 * result.activeEnemyHpFraction
+            + 0.5 * result.blockFraction - 0.1 * result.turnFraction;
+    result.value = std::tanh(result.raw);
+    result.available = true;
+    result.unavailableReason.clear();
+    return result;
+}
+
+void search::BattleScumSearcher2::prepareChildHeuristics(Node &node, const BattleContext &bc) {
+    if (!progressiveBiasEnabled) {
+        return;
+    }
+    node.childHeuristics.reserve(node.edges.size());
+    for (const auto &edge : node.edges) {
+        BattleContext child(bc);
+        ++actionExecutionCount;
+        ++heuristicSuccessorTransitionCount;
+        edge.action.execute(child);
+        auto heuristic = combatHandcraftedH1(child);
+        if (heuristic.available) {
+            ++heuristicAvailableCount;
+        } else if (heuristic.unavailableReason == "terminal_state") {
+            ++heuristicTerminalUnavailableCount;
+        } else {
+            ++heuristicInvalidUnavailableCount;
+        }
+        node.childHeuristics.push_back(std::move(heuristic));
+    }
+}
+
+double search::BattleScumSearcher2::evaluateTreePolicyEdge(const Node &parent, int edgeIdx, int parentDepth) {
+    // Keep evaluateEdge byte-for-byte frozen, including its zero-range behavior.
+    const double baseScore = evaluateEdge(parent, edgeIdx);
+    if (!progressiveBiasEnabled) {
+        return baseScore;
+    }
+    const auto &heuristic = parent.childHeuristics.at(edgeIdx);
+    const auto visits = parent.edges[edgeIdx].node.simulationCount;
+    const double bias = heuristic.available
+            ? progressiveBiasWeight * heuristic.value / (1 + visits) : 0.0;
+    const double finalScore = baseScore + bias;
+    ++progressiveBiasScoreCount;
+    if (progressiveBiasAudit.size() < progressiveBiasAuditLimit) {
+        progressiveBiasAudit.push_back({parent.expansionOrdinal, parentDepth,
+                edgeIdx, visits, heuristic, baseScore, bias, finalScore});
+    }
+    return finalScore;
+}
+
+int search::BattleScumSearcher2::selectBestEdgeToSearch(const search::BattleScumSearcher2::Node &cur, int parentDepth) {
     if (cur.edges.size() == 1) {
+        if (progressiveBiasEnabled) {
+            evaluateTreePolicyEdge(cur, 0, parentDepth);
+        }
         return 0;
     }
 
     auto bestEdge = 0;
-    auto bestEdgeValue = evaluateEdge(cur, bestEdge);
+    auto bestEdgeValue = evaluateTreePolicyEdge(cur, bestEdge, parentDepth);
 
     for (int i = 1; i < cur.edges.size(); ++i) {
-        const auto value = evaluateEdge(cur, i);
+        const auto value = evaluateTreePolicyEdge(cur, i, parentDepth);
         if (value > bestEdgeValue) {
             bestEdge = i;
             bestEdgeValue = value;
@@ -551,6 +648,7 @@ int search::BattleScumSearcher2::selectFirstActionForLeafNode(const search::Batt
 }
 
 void search::BattleScumSearcher2::playoutRandom(BattleContext &state, std::vector<Action> &actionStack) {
+    ++rolloutCount;
     Node tempNode; // temp
     while (!isTerminalState(state)) {
         ++simulationIdx;
@@ -600,7 +698,9 @@ void search::BattleScumSearcher2::enumerateActionsForNode(search::BattleScumSear
 
     if (applyPriors) {
         ++expandedNodeCount;
+        node.expansionOrdinal = expandedNodeCount;
         applyPolicyPriors(node, bc);
+        prepareChildHeuristics(node, bc);
     }
 
 #ifdef sts_print_debug

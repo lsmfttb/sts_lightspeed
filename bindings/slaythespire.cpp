@@ -1002,12 +1002,78 @@ struct StepSimulator {
         report["tree_internal_telemetry"] = treeTelemetry;
     }
 
+    void appendClassicalSearchTelemetry(
+            pybind11::dict &report,
+            const search::BattleScumSearcher2 &searcher) const {
+        pybind11::dict work;
+        work["schema_id"] = "native-battle-search-work-v1";
+        work["action_execution_count"] = searcher.actionExecutionCount;
+        work["successor_transition_count"] = searcher.actionExecutionCount;
+        work["tree_and_rollout_action_execution_count"] =
+                searcher.actionExecutionCount - searcher.heuristicSuccessorTransitionCount;
+        work["heuristic_successor_transition_count"] = searcher.heuristicSuccessorTransitionCount;
+        work["tree_node_expansion_count"] = searcher.expandedNodeCount;
+        work["rollout_count"] = searcher.rolloutCount;
+        work["terminal_utility_evaluation_count"] = searcher.terminalUtilityEvaluationCount;
+        work["model_calls"] = searcher.policyPriorCallCount + searcher.leafValueCallCount;
+        report["work_counters"] = work;
+
+        pybind11::dict bias;
+        bias["schema_id"] = "native-battle-search-progressive-bias-h1-v1";
+        bias["enabled"] = searcher.progressiveBiasEnabled;
+        bias["heuristic"] = "combat_handcrafted_h1";
+        bias["weight"] = search::BattleScumSearcher2::progressiveBiasWeight;
+        bias["heuristic_available_count"] = searcher.heuristicAvailableCount;
+        bias["heuristic_terminal_unavailable_count"] = searcher.heuristicTerminalUnavailableCount;
+        bias["heuristic_invalid_unavailable_count"] = searcher.heuristicInvalidUnavailableCount;
+        bias["score_count"] = searcher.progressiveBiasScoreCount;
+        bias["audit_limit"] = searcher.progressiveBiasAuditLimit;
+        bias["audit_dropped_count"] = searcher.progressiveBiasScoreCount
+                - static_cast<std::int64_t>(searcher.progressiveBiasAudit.size());
+        pybind11::list rows;
+        for (const auto &source : searcher.progressiveBiasAudit) {
+            pybind11::dict row;
+            row["parent_expansion_ordinal"] = source.parentExpansionOrdinal;
+            row["parent_depth"] = source.parentDepth;
+            row["child_edge_index"] = source.childEdgeIndex;
+            row["child_visit_count"] = source.childVisitCount;
+            row["h1_available"] = source.childH1.available;
+            row["h1_unavailable_reason"] = source.childH1.available
+                    ? pybind11::object(pybind11::none())
+                    : pybind11::object(pybind11::str(source.childH1.unavailableReason));
+            if (source.childH1.available) {
+                pybind11::dict h1;
+                h1["player_hp_fraction"] = source.childH1.playerHpFraction;
+                h1["active_enemy_hp_fraction"] = source.childH1.activeEnemyHpFraction;
+                h1["block_fraction"] = source.childH1.blockFraction;
+                h1["turn_fraction"] = source.childH1.turnFraction;
+                h1["h_raw"] = source.childH1.raw;
+                h1["value"] = source.childH1.value;
+                row["child_h1"] = h1;
+            } else {
+                row["child_h1"] = pybind11::none();
+            }
+            // Do not repair or conceal the frozen UCT term's inf/NaN values.
+            row["base_score"] = source.baseScore;
+            row["bias_contribution"] = source.biasContribution;
+            row["final_score"] = source.finalScore;
+            row["base_score_finite"] = std::isfinite(source.baseScore);
+            row["final_score_finite"] = std::isfinite(source.finalScore);
+            rows.append(row);
+        }
+        bias["audit_rows"] = rows;
+        report["progressive_bias_telemetry"] = bias;
+    }
+
     pybind11::dict battleSearchV2Impl(
             std::int64_t simulations,
             bool includePotions,
             const pybind11::object &policyPriorCallback,
             const pybind11::object &leafValueCallback,
-            bool includeTreeGeometry) {
+            bool includeTreeGeometry,
+            bool includeClassicalTelemetry=false,
+            bool progressiveBiasEnabled=false,
+            std::size_t progressiveBiasAuditLimit=0) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error("battle search v2 requested outside battle");
@@ -1026,6 +1092,8 @@ struct StepSimulator {
 
         search::BattleScumSearcher2 searcher(bc);
         searcher.includePotions = includePotions;
+        searcher.progressiveBiasEnabled = progressiveBiasEnabled;
+        searcher.progressiveBiasAuditLimit = progressiveBiasAuditLimit;
         if (usePolicyPriors) {
             const pybind11::function callback = policyPriorCallback.cast<pybind11::function>();
             searcher.policyPriorFnc = [this, callback](
@@ -1080,6 +1148,28 @@ struct StepSimulator {
         if (includeTreeGeometry) {
             appendTreeGeometryTelemetry(report, searcher);
         }
+        if (includeClassicalTelemetry) {
+            appendClassicalSearchTelemetry(report, searcher);
+        }
+        return report;
+    }
+
+    pybind11::dict battleSearchV2WithWorkCounters(std::int64_t simulations, bool includePotions) {
+        // The unchanged unguided A/B search, with additive reporting only.
+        return battleSearchV2Impl(simulations, includePotions, pybind11::none(),
+                pybind11::none(), false, true);
+    }
+
+    pybind11::dict battleSearchV2WithProgressiveBias(
+            std::int64_t simulations, bool includePotions, bool biasEnabled,
+            int auditLimit) {
+        if (auditLimit < 0 || auditLimit > 4096) {
+            throw std::invalid_argument("progressive bias audit_limit must be in [0, 4096]");
+        }
+        auto report = battleSearchV2Impl(simulations, includePotions, pybind11::none(),
+                pybind11::none(), false, true, biasEnabled, auditLimit);
+        report["native_api"] = "StepSimulator.battle_search_v2_with_progressive_bias.v1";
+        report["patch_identity"] = "sts_lightspeed_battle_search_v2_progressive_bias_h1_v1";
         return report;
     }
 
@@ -1603,6 +1693,18 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),
             pybind11::arg("leaf_value_callback") = pybind11::none())
+        .def(
+            "battle_search_v2_with_work_counters",
+            &StepSimulator::battleSearchV2WithWorkCounters,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false)
+        .def(
+            "battle_search_v2_with_progressive_bias",
+            &StepSimulator::battleSearchV2WithProgressiveBias,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false,
+            pybind11::arg("bias_enabled") = true,
+            pybind11::arg("audit_limit") = 256)
         .def(
             "battle_search_v2_with_state_utilization",
             &StepSimulator::battleSearchV2WithStateUtilization,
