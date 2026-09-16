@@ -1032,8 +1032,9 @@ struct StepSimulator {
                 return;
             }
 
-            if (state.inputState == InputState::PLAYER_NORMAL ||
-                state.inputState == InputState::CARD_SELECT) {
+            if (depth >= 1 &&
+                (state.inputState == InputState::PLAYER_NORMAL ||
+                 state.inputState == InputState::CARD_SELECT)) {
                 pybind11::dict row;
                 row["occurrence_identity"] = occurrenceIdentity;
                 row["tree_depth"] = depth;
@@ -1415,6 +1416,19 @@ struct StepSimulator {
                 nullptr,
                 pybind11::none());
         report["model_calls"] = 0;
+        pybind11::dict teacherConfig;
+        teacherConfig["schema_id"] = "t092-frozen-search-v2-teacher-config-v1";
+        teacherConfig["implementation"] = "BattleScumSearcher2";
+        teacherConfig["search_api"] = "StepSimulator.battle_search_v2";
+        teacherConfig["information_regime"] = "full_simulator_state_oracle_like";
+        teacherConfig["simulations"] = simulations;
+        teacherConfig["root_selection"] = "highest_mean";
+        teacherConfig["include_potions"] = false;
+        teacherConfig["policy_prior"] = pybind11::none();
+        teacherConfig["learned_leaf_value"] = pybind11::none();
+        teacherConfig["rollout"] = "playoutRandom";
+        teacherConfig["terminal_utility"] = "evaluateEndState";
+        report["teacher_config"] = teacherConfig;
         pybind11::dict mechanismTelemetry;
         mechanismTelemetry["expanded_nodes"] = searcher.expandedNodeCount;
         mechanismTelemetry["policy_prior_calls"] = 0;

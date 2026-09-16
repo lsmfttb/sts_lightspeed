@@ -43,11 +43,18 @@ def main() -> int:
         assert off[field] == on[field], field
     assert on["native_api"] == "StepSimulator.battle_search_v2_with_internal_teacher_telemetry.v1"
     telemetry = on["tree_internal_telemetry"]["internal_teacher_telemetry"]
+    teacher = on["teacher_config"]
+    assert teacher["schema_id"] == "t092-frozen-search-v2-teacher-config-v1"
+    assert teacher["simulations"] == 8
+    assert teacher["include_potions"] is False
+    assert teacher["policy_prior"] is None
+    assert teacher["learned_leaf_value"] is None
     assert telemetry["search_rng_or_counter_mutated"] is False
     assert telemetry["raw_private_state_exported"] is False
     assert telemetry["candidate_count"] == len(telemetry["rows"])
     assert not _contains_forbidden(telemetry["rows"])
     for row in telemetry["rows"]:
+        assert row["tree_depth"] >= 1
         assert row["input_state"] in {"PLAYER_NORMAL", "CARD_SELECT"}
         for child in row["teacher_searchable_actions"]:
             assert child["visits"] > 0 or child["mean_value"] is None
