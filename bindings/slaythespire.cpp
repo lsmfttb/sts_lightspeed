@@ -1437,6 +1437,7 @@ struct StepSimulator {
         mechanismTelemetry["leaf_value_boundary"] = "disabled";
         report["tree_internal_telemetry"] = mechanismTelemetry;
         appendInternalTeacherTelemetry(report, searcher);
+        appendTreeGeometryTelemetry(report, searcher);
         return report;
     }
 

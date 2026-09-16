@@ -25,6 +25,7 @@ REQUIRED_STEP_SIMULATOR_METHODS = (
     "battle_search",
     "battle_search_v2",
     "battle_search_v2_with_tree_geometry",
+    "battle_search_v2_with_internal_teacher_telemetry",
     "battle_search_with_root_priors",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
