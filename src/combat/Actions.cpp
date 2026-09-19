@@ -197,6 +197,7 @@ Action Actions::ShuffleDrawPile() {
                 bc.cards.drawPile.end(),
                 java::Random(bc.shuffleRng.randomLong())
         );
+        bc.clearKnownDrawOrder();
     }};
 }
 
@@ -207,6 +208,7 @@ Action Actions::ShuffleTempCardIntoDrawPile(CardId id, int count) {
             const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
             bc.cards.createTempCardInDrawPile(idx, c);
         }
+        bc.invalidateAfterUnknownDrawInsertion();
     }};
 }
 
@@ -245,6 +247,9 @@ Action Actions::MakeTempCardInDrawPile(const CardInstance &c, int amount, bool s
                 bc.cards.createTempCardInDrawPile(idx, c);
             }
             // todo else
+        }
+        if (shuffleInto) {
+            bc.invalidateAfterUnknownDrawInsertion();
         }
     }};
 }
@@ -558,6 +563,7 @@ Action Actions::PutRandomCardsInDrawPile(CardType type, int count) {
             const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
             bc.cards.createTempCardInDrawPile(idx, card);
         }
+        bc.invalidateAfterUnknownDrawInsertion();
     }};
 }
 

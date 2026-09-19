@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <array>
+#include <map>
 
 #include "sts_common.h"
 
@@ -32,6 +33,17 @@ namespace sts {
         UNDECIDED=0,
         PLAYER_VICTORY,
         PLAYER_LOSS,
+    };
+
+    // Exact draw facts and unrepresented player knowledge have different
+    // lifetimes.  Keep the latter typed so a transition can clear only the
+    // reason it actually resolves (for example, shuffling exact order does
+    // not resolve subset-membership knowledge).
+    enum class DrawKnowledgeUnsupportedReason : std::uint8_t {
+        NONE = 0,
+        SUBSET_MEMBERSHIP = 1 << 0,
+        UNKNOWN_INSERTION = 1 << 1,
+        INCONSISTENT_EXACT_FACT = 1 << 2,
     };
 
     static constexpr const char * battleOutcomeStrings[] {
@@ -88,6 +100,16 @@ namespace sts {
         Player player;
         MonsterGroup monsters;
         CardManager cards;
+
+        // Epistemic state only.  The vector records a known top prefix,
+        // ordered from the top of the draw pile down.  The map records exact
+        // known positions from the top that are not part of that prefix (for
+        // example Forethought's known bottom placement).  Neither affects
+        // mechanics, RNG, or legal actions, and ordinary checkpoint copies
+        // retain the same current player knowledge.
+        std::vector<std::int16_t> knownDrawTopUniqueIds;
+        std::map<std::int32_t, std::int16_t> knownDrawPositionUniqueIds;
+        std::uint8_t knownDrawUnsupportedReasons = 0;
 
         CardQueueItem curCardQueueItem;
 
@@ -187,6 +209,15 @@ namespace sts {
 
         void onManualDiscard(const CardInstance &c);
         void onShuffle();
+        void clearKnownDrawOrder();
+        void noteKnownDrawTop(const CardInstance &c);
+        void noteKnownDrawBottom(const CardInstance &c);
+        void consumeKnownDrawTop(const CardInstance &c);
+        void consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c);
+        void markDrawKnowledgeUnsupported(
+                DrawKnowledgeUnsupportedReason reason =
+                        DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
+        void invalidateAfterUnknownDrawInsertion();
         void triggerAndMoveToExhaustPile(CardInstance c);
         void mummifiedHandOnUsePower();
 

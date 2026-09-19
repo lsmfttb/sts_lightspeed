@@ -136,6 +136,17 @@ std::string canonicalBattleState(const sts::BattleContext &state, bool &complete
         << state.isBattleOver << ',' << state.endTurnQueued << ',' << state.turnHasEnded
         << ',' << state.skipMonsterTurn << ',' << state.potionCount << ',' << state.potionCapacity
         << ',' << state.turn << ',' << state.miscBits << '|';
+    out << "draw-knowledge-reasons|"
+        << static_cast<unsigned int>(state.knownDrawUnsupportedReasons)
+        << "|top|";
+    for (const auto uniqueId : state.knownDrawTopUniqueIds) {
+        out << uniqueId << ',';
+    }
+    out << "|positions|";
+    for (const auto &[position, uniqueId] : state.knownDrawPositionUniqueIds) {
+        out << position << '=' << uniqueId << ';';
+    }
+    out << '|';
     out << "rng|";
     appendRandom(out, state.aiRng);
     appendRandom(out, state.cardRandomRng);

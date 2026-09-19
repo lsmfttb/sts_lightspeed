@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <map>
 #include <numeric>
+#include <set>
 
 #include "sim/ConsoleSimulator.h"
 #include "sim/search/ScumSearchAgent2.h"
@@ -359,6 +360,140 @@ pybind11::dict cardSnapshot(
     return ret;
 }
 
+enum class MonsterMiscKnowledgeClass {
+    NONE,
+    PRIVATE_ONLY,
+    PUBLIC_SEMANTIC,
+    MIXED_UNSUPPORTED,
+};
+
+MonsterMiscKnowledgeClass classifyMonsterMiscKnowledge(const MonsterId id) {
+    // Classify the meaning of the native slot rather than treating every
+    // MonsterId that touches miscInfo as unsupported.  Private-only random
+    // parameters (Louse/Darkling) can simply remain hidden; observed counters
+    // get semantic names below; only an actually mixed/unseparated value is
+    // allowed to make the public state unsupported.
+    switch (id) {
+        case MonsterId::GREEN_LOUSE:
+        case MonsterId::RED_LOUSE:
+        case MonsterId::DARKLING:
+            return MonsterMiscKnowledgeClass::PRIVATE_ONLY;
+        case MonsterId::RED_SLAVER:
+        case MonsterId::HEXAGHOST:
+        case MonsterId::GREMLIN_WIZARD:
+        case MonsterId::LOOTER:
+        case MonsterId::MUGGER:
+        case MonsterId::BOOK_OF_STABBING:
+        case MonsterId::THE_CHAMP:
+        case MonsterId::BRONZE_ORB:
+        case MonsterId::BRONZE_AUTOMATON:
+        case MonsterId::SPIKER:
+        case MonsterId::WRITHING_MASS:
+        case MonsterId::THE_GUARDIAN:
+        case MonsterId::TIME_EATER:
+        case MonsterId::AWAKENED_ONE:
+            return MonsterMiscKnowledgeClass::PUBLIC_SEMANTIC;
+        default:
+            return MonsterMiscKnowledgeClass::NONE;
+    }
+}
+
+MonsterMiscKnowledgeClass classifyMonsterMiscKnowledge(
+        const BattleContext &bc,
+        const Monster &monster) {
+    const auto classification = classifyMonsterMiscKnowledge(monster.id);
+    if (!bc.player.hasRelic<R::RUNIC_DOME>()
+            || classification != MonsterMiscKnowledgeClass::PUBLIC_SEMANTIC) {
+        return classification;
+    }
+
+    // Runic Dome hides the current intent.  These monsters use miscInfo both
+    // for a semantic counter and while selecting the next hidden intent:
+    // Monster::rollMove() passes the slot by reference to getMoveForRoll(),
+    // which can mutate it before moveHistory[0] is updated.  Reading the
+    // native slot here would therefore alias hidden roll-time state into a
+    // public semantic field.  Other semantic counters are updated by an
+    // already-observed action and remain separable from the hidden roll.
+    switch (monster.id) {
+        case MonsterId::BOOK_OF_STABBING:
+        case MonsterId::GREMLIN_WIZARD:
+        case MonsterId::THE_CHAMP:
+            return MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED;
+        default:
+            return classification;
+    }
+}
+
+pybind11::list publicMonsterStatuses(const Monster &monster) {
+    pybind11::list statuses;
+    for (int statusIdx = 0;
+            statusIdx < static_cast<int>(MonsterStatus::INVALID); ++statusIdx) {
+        const auto status = static_cast<MonsterStatus>(statusIdx);
+        const bool present = status == MS::STRENGTH
+                ? monster.strength != 0
+                : monster.hasStatusInternal(status);
+        if (!present) {
+            continue;
+        }
+        pybind11::dict statusSnapshot;
+        statusSnapshot["id"] = statusIdx;
+        statusSnapshot["name"] = std::string(enemyStatusStrings[statusIdx]);
+        statusSnapshot["value"] = monster.getStatusInternal(status);
+        statuses.append(statusSnapshot);
+    }
+    return statuses;
+}
+
+void appendPublicMonsterSemanticFields(
+        const Monster &monster,
+        pybind11::dict &ret) {
+    switch (monster.id) {
+        case MonsterId::LOOTER:
+        case MonsterId::MUGGER:
+            ret["stolen_gold"] = monster.miscInfo;
+            break;
+        case MonsterId::RED_SLAVER:
+            ret["entangle_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::HEXAGHOST:
+            ret["divider_damage"] = monster.miscInfo;
+            break;
+        case MonsterId::GREMLIN_WIZARD:
+            ret["charge_count"] = monster.miscInfo;
+            break;
+        case MonsterId::BOOK_OF_STABBING:
+            ret["stabs_used"] = monster.miscInfo;
+            break;
+        case MonsterId::THE_CHAMP:
+            ret["defensive_stance_uses"] = monster.miscInfo & 0x3;
+            ret["phase_two"] = (monster.miscInfo & 0x4) != 0;
+            break;
+        case MonsterId::BRONZE_ORB:
+            ret["stasis_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::BRONZE_AUTOMATON:
+            ret["last_boost_was_flail"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::SPIKER:
+            ret["thorns_used"] = monster.miscInfo;
+            break;
+        case MonsterId::WRITHING_MASS:
+            ret["implant_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::THE_GUARDIAN:
+            ret["mode_shift"] = monster.getStatusInternal(MS::MODE_SHIFT);
+            break;
+        case MonsterId::TIME_EATER:
+            ret["haste_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::AWAKENED_ONE:
+            ret["phase_two"] = monster.miscInfo != 0;
+            break;
+        default:
+            break;
+    }
+}
+
 pybind11::dict monsterSnapshot(const BattleContext &bc, int monsterIdx) {
     const auto &monster = bc.monsters.arr[monsterIdx];
     const auto damage = monster.getMoveBaseDamage(bc);
@@ -389,9 +524,56 @@ pybind11::dict monsterSnapshot(const BattleContext &bc, int monsterIdx) {
     ret["plated_armor"] = monster.platedArmor;
     ret["regen"] = monster.regen;
     ret["half_dead"] = monster.halfDead;
+    // This is the long-standing native snapshot contract consumed by
+    // StepSimulator.snapshot(), battle-search snapshots, and completed-battle
+    // snapshots.  Keep the raw fields and semantics unchanged; the
+    // T096-specific semantic projection below is intentionally separate.
     ret["misc_info"] = monster.miscInfo;
     ret["unique_power_0"] = monster.uniquePower0;
     ret["unique_power_1"] = monster.uniquePower1;
+    return ret;
+}
+
+pybind11::dict publicInformationMonsterSnapshot(
+        const BattleContext &bc,
+        int monsterIdx) {
+    const auto &monster = bc.monsters.arr[monsterIdx];
+    const auto damage = monster.getMoveBaseDamage(bc);
+
+    pybind11::dict ret;
+    ret["monster_index"] = monsterIdx;
+    ret["id"] = static_cast<int>(monster.id);
+    ret["id_label"] = monsterIdLabel(monster.id);
+    ret["name"] = std::string(monster.getName());
+    ret["current_hp"] = monster.curHp;
+    ret["max_hp"] = monster.maxHp;
+    ret["block"] = monster.block;
+    ret["alive"] = monster.isAlive();
+    ret["targetable"] = monster.isTargetable();
+    ret["attacking"] = monster.isAttacking();
+    ret["intent_category"] = monster.isAttacking() ? "ATTACK" : "NON_ATTACK";
+    ret["current_move"] = std::string(monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
+    ret["move_id"] = static_cast<int>(monster.moveHistory[0]);
+    ret["last_move_id"] = static_cast<int>(monster.moveHistory[1]);
+    ret["move_base_damage"] = damage.damage;
+    ret["move_hits"] = damage.attackCount;
+    ret["strength"] = monster.strength;
+    ret["vulnerable"] = monster.vulnerable;
+    ret["weak"] = monster.weak;
+    ret["artifact"] = monster.artifact;
+    ret["poison"] = monster.poison;
+    ret["metallicize"] = monster.metallicize;
+    ret["plated_armor"] = monster.platedArmor;
+    ret["regen"] = monster.regen;
+    ret["half_dead"] = monster.halfDead;
+    ret["public_statuses"] = publicMonsterStatuses(monster);
+    const auto knowledgeClass = classifyMonsterMiscKnowledge(bc, monster);
+    if (knowledgeClass != MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED) {
+        appendPublicMonsterSemanticFields(monster, ret);
+    }
+    ret["information_fidelity"] = knowledgeClass
+            == MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED
+            ? "unsupported_fidelity" : "supported";
     return ret;
 }
 
@@ -450,6 +632,27 @@ pybind11::list monsterGroupSnapshot(const BattleContext &bc) {
     pybind11::list ret;
     for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
         ret.append(monsterSnapshot(bc, idx));
+    }
+    return ret;
+}
+
+pybind11::list publicInformationMonsterGroupSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    const bool hideIntent = bc.player.hasRelic<R::RUNIC_DOME>();
+    for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
+        auto monster = publicInformationMonsterSnapshot(bc, idx);
+        if (hideIntent) {
+            // These fields either state the current intent directly or derive
+            // only from it.  They are deliberately absent, not redacted with
+            // a hidden value, so normal-information consumers cannot mistake
+            // them for an available model feature.
+            for (const char *field : {
+                    "attacking", "intent_category", "current_move", "move_id",
+                    "move_base_damage", "move_hits"}) {
+                monster.attr("pop")(field, pybind11::none());
+            }
+        }
+        ret.append(monster);
     }
     return ret;
 }
@@ -563,6 +766,9 @@ pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
     return ret;
 }
 
+std::size_t knownDrawTopCount(const BattleContext &bc);
+bool knownDrawStateConsistent(const BattleContext &bc);
+
 pybind11::dict makeT096AnchorDistributionMetadata(
         const GameContext &gc,
         const BattleContext &bc) {
@@ -574,9 +780,22 @@ pybind11::dict makeT096AnchorDistributionMetadata(
     const bool exhaustEmpty = bc.cards.exhaustPile.empty();
     ret["schema_id"] = "native-battle-anchor-distribution-audit-v1";
     ret["first_ordinary_player_decision"] = firstOrdinaryPlayerDecision;
-    ret["draw_order_visibility"] = "hidden";
-    ret["stronger_draw_constraint"] = false;
-    ret["draw_knowledge_fidelity"] = "ordinary-hidden-draw-only";
+    const bool frozenEye = bc.player.hasRelic<R::FROZEN_EYE>();
+    const auto knownTopCount = frozenEye ? bc.cards.drawPile.size() : knownDrawTopCount(bc);
+    const bool knownStateConsistent = knownDrawStateConsistent(bc);
+    const bool knownPositions = knownStateConsistent
+            && !bc.knownDrawPositionUniqueIds.empty();
+    ret["draw_order_visibility"] = bc.knownDrawUnsupportedReasons != 0
+            || !knownStateConsistent
+            ? "unsupported_fidelity" : frozenEye ? "full_public_exact"
+            : knownPositions ? "known_positions"
+            : knownTopCount > 0 ? "known_prefix" : "hidden";
+    ret["stronger_draw_constraint"] = bc.knownDrawUnsupportedReasons == 0
+            && knownStateConsistent
+            && (frozenEye || knownTopCount > 0 || knownPositions);
+    ret["draw_knowledge_fidelity"] = bc.knownDrawUnsupportedReasons != 0
+            || !knownStateConsistent
+            ? "unsupported_fidelity" : "native-current-information-v2";
     ret["discard_empty"] = discardEmpty;
     ret["exhaust_empty"] = exhaustEmpty;
     ret["deck_size"] = gc.deck.size();
@@ -688,12 +907,118 @@ std::string hiddenFutureFingerprint(const BattleContext &bc) {
     return digest.str();
 }
 
+std::size_t knownDrawTopCount(const BattleContext &bc) {
+    const auto &known = bc.knownDrawTopUniqueIds;
+    if (known.size() > bc.cards.drawPile.size()) {
+        return 0;
+    }
+    for (std::size_t idx = 0; idx < known.size(); ++idx) {
+        const auto drawIdx = bc.cards.drawPile.size() - 1 - idx;
+        if (bc.cards.drawPile[drawIdx].getUniqueId() != known[idx]) {
+            // Never publish a remembered ordering unless it still agrees with
+            // the native state.  This is a conservative fallback for any
+            // uninstrumented random/reordering mechanic.
+            return 0;
+        }
+    }
+    for (const auto &[position, uniqueId] : bc.knownDrawPositionUniqueIds) {
+        if (position < 0 || static_cast<std::size_t>(position) >= bc.cards.drawPile.size()) {
+            return 0;
+        }
+        const auto drawIdx = bc.cards.drawPile.size() - 1
+                - static_cast<std::size_t>(position);
+        if (bc.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
+            return 0;
+        }
+    }
+    return known.size();
+}
+
+bool knownDrawStateConsistent(const BattleContext &bc) {
+    const auto &known = bc.knownDrawTopUniqueIds;
+    if (known.size() > bc.cards.drawPile.size()) {
+        return false;
+    }
+    for (std::size_t idx = 0; idx < known.size(); ++idx) {
+        const auto drawIdx = bc.cards.drawPile.size() - 1 - idx;
+        if (bc.cards.drawPile[drawIdx].getUniqueId() != known[idx]) {
+            return false;
+        }
+    }
+    for (const auto &[position, uniqueId] : bc.knownDrawPositionUniqueIds) {
+        if (position < static_cast<std::int32_t>(known.size())
+                || static_cast<std::size_t>(position) >= bc.cards.drawPile.size()) {
+            return false;
+        }
+        const auto drawIdx = bc.cards.drawPile.size() - 1
+                - static_cast<std::size_t>(position);
+        if (bc.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
+            return false;
+        }
+    }
+    return true;
+}
+
+pybind11::list knownDrawTopSnapshot(const BattleContext &bc, std::size_t count) {
+    pybind11::list ret;
+    for (std::size_t idx = 0; idx < count; ++idx) {
+        const auto drawIdx = static_cast<int>(bc.cards.drawPile.size() - 1 - idx);
+        ret.append(cardSnapshot(bc, bc.cards.drawPile[drawIdx], drawIdx, false));
+    }
+    return ret;
+}
+
+pybind11::list knownDrawPositionSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (const auto &[position, uniqueId] : bc.knownDrawPositionUniqueIds) {
+        const auto drawIdx = static_cast<int>(bc.cards.drawPile.size() - 1
+                - static_cast<std::size_t>(position));
+        pybind11::dict fact;
+        fact["position_from_top"] = position;
+        fact["card"] = cardSnapshot(bc, bc.cards.drawPile[drawIdx], drawIdx, false);
+        ret.append(fact);
+    }
+    return ret;
+}
+
+bool publicInformationUnsupported(const BattleContext &bc) {
+    if (bc.knownDrawUnsupportedReasons != 0 || !knownDrawStateConsistent(bc)) {
+        return true;
+    }
+    for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
+        if (classifyMonsterMiscKnowledge(bc, bc.monsters.arr[idx])
+                == MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED) {
+            return true;
+        }
+    }
+    return false;
+}
+
+pybind11::list drawKnowledgeUnsupportedReasonSnapshot(const std::uint8_t reasons) {
+    pybind11::list ret;
+    if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::SUBSET_MEMBERSHIP)) {
+        ret.append("subset_membership");
+    }
+    if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)) {
+        ret.append("unknown_insertion");
+    }
+    if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT)) {
+        ret.append("inconsistent_exact_fact");
+    }
+    return ret;
+}
+
 pybind11::dict makeT096PublicInformationProjection(
         const GameContext &gc,
         const BattleContext &bc,
         const std::vector<LightSpeedAction> &actions) {
+    const bool drawStateConsistent = knownDrawStateConsistent(bc);
+    const auto projectedDrawUnsupportedReasons = static_cast<std::uint8_t>(
+            bc.knownDrawUnsupportedReasons
+            | (drawStateConsistent ? 0 : static_cast<std::uint8_t>(
+                    DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT)));
     pybind11::dict ret;
-    ret["schema_id"] = "native-battle-public-information-v1";
+    ret["schema_id"] = "native-battle-public-information-v2";
     ret["information_regime"] = "normal_information";
     ret["screen_identity"] = "BATTLE";
     ret["act"] = gc.act;
@@ -707,7 +1032,11 @@ pybind11::dict makeT096PublicInformationProjection(
     ret["discard_pile"] = pileSnapshot(bc, bc.cards.discardPile);
     ret["exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);
     ret["draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
-    ret["monsters"] = monsterGroupSnapshot(bc);
+    ret["monsters"] = publicInformationMonsterGroupSnapshot(bc);
+    ret["information_fidelity"] = publicInformationUnsupported(bc)
+            ? "unsupported_fidelity" : "supported";
+    ret["draw_knowledge_unsupported_reasons"] =
+            drawKnowledgeUnsupportedReasonSnapshot(projectedDrawUnsupportedReasons);
     pybind11::dict resources;
     resources["deck"] = deckSnapshot(gc);
     resources["relics"] = relicListSnapshot(gc);
@@ -720,23 +1049,60 @@ pybind11::dict makeT096PublicInformationProjection(
 
     pybind11::dict visibility;
     pybind11::dict drawOrder;
-    drawOrder["classification"] = "hidden";
-    drawOrder["constraint"] = "ordinary draw order is not exposed";
-    drawOrder["fidelity"] = "native-ordinary-hidden-draw-v1";
+    const bool frozenEye = bc.player.hasRelic<R::FROZEN_EYE>();
+    const auto knownTopCount = frozenEye ? bc.cards.drawPile.size() : knownDrawTopCount(bc);
+    const bool knownStateConsistent = drawStateConsistent;
+    const bool hasKnownPositions = knownStateConsistent
+            && !bc.knownDrawPositionUniqueIds.empty();
+    if (projectedDrawUnsupportedReasons != 0 || !knownStateConsistent) {
+        drawOrder["classification"] = "unsupported_fidelity";
+        drawOrder["constraint"] = "an information-changing draw transition is not modeled exactly";
+        drawOrder["fidelity"] = "unsupported_fidelity";
+        drawOrder["unsupported_reasons"] = drawKnowledgeUnsupportedReasonSnapshot(
+                projectedDrawUnsupportedReasons);
+        if (knownStateConsistent && knownTopCount > 0) {
+            drawOrder["known_top_prefix"] = knownDrawTopSnapshot(bc, knownTopCount);
+        }
+        if (hasKnownPositions) {
+            drawOrder["known_positions"] = knownDrawPositionSnapshot(bc);
+        }
+    } else if (frozenEye) {
+        drawOrder["classification"] = "full_public_exact";
+        drawOrder["constraint"] = "Frozen Eye makes the current draw order visible";
+        drawOrder["fidelity"] = "native-current-information-v2";
+        drawOrder["visible_order_from_top"] =
+                knownDrawTopSnapshot(bc, knownTopCount);
+    } else if (knownTopCount > 0 || hasKnownPositions) {
+        const auto classification = hasKnownPositions ? "known_positions" : "known_prefix";
+        drawOrder["classification"] = classification;
+        drawOrder["constraint"] = hasKnownPositions
+                ? "public deterministic exact draw-pile positions"
+                : "public deterministic top-of-draw-pile placement";
+        drawOrder["fidelity"] = "native-current-information-v2";
+        if (knownTopCount > 0) {
+            drawOrder["known_top_prefix"] = knownDrawTopSnapshot(bc, knownTopCount);
+        }
+        if (hasKnownPositions) {
+            drawOrder["known_positions"] = knownDrawPositionSnapshot(bc);
+        }
+    } else {
+        drawOrder["classification"] = "hidden";
+        drawOrder["constraint"] = "ordinary draw order is not exposed";
+        drawOrder["fidelity"] = "native-current-information-v2";
+    }
     visibility["draw_order"] = drawOrder;
+    visibility["information_fidelity"] = publicInformationUnsupported(bc)
+            ? "unsupported_fidelity" : "supported";
     pybind11::dict enemyIntent;
-    enemyIntent["classification"] = "public_exact";
-    enemyIntent["source"] = "native Monster move state";
-    enemyIntent["fidelity"] = "native-ordinary-visible-intent-v1";
+    if (bc.player.hasRelic<R::RUNIC_DOME>()) {
+        enemyIntent["classification"] = "hidden";
+        enemyIntent["fidelity"] = "native-current-information-v2";
+    } else {
+        enemyIntent["classification"] = "public_exact";
+        enemyIntent["source"] = "native Monster move state";
+        enemyIntent["fidelity"] = "native-current-information-v2";
+    }
     visibility["enemy_intent"] = enemyIntent;
-    pybind11::dict drawKnowledge;
-    drawKnowledge["classification"] = "unsupported_fidelity";
-    drawKnowledge["reason"] = "Headbutt/Frozen Eye knowledge tracking is not exposed by this native build";
-    visibility["draw_knowledge"] = drawKnowledge;
-    pybind11::dict hiddenIntent;
-    hiddenIntent["classification"] = "unsupported_fidelity";
-    hiddenIntent["reason"] = "Runic Dome visibility semantics are not exposed by this native build";
-    visibility["intent_hidden_mechanics"] = hiddenIntent;
     ret["visibility"] = visibility;
 
     pybind11::list publicActions;
@@ -745,8 +1111,17 @@ pybind11::dict makeT096PublicInformationProjection(
     }
     ret["ordered_public_legal_actions"] = publicActions;
     pybind11::dict membership;
-    membership["classification"] = "public_constraint";
-    membership["value"] = "membership not ordered; exact membership is not exposed";
+    membership["classification"] = projectedDrawUnsupportedReasons != 0
+            ? "unsupported_fidelity" : frozenEye ? "full_public_exact" : "public_constraint";
+    if (projectedDrawUnsupportedReasons != 0) {
+        membership["unsupported_reasons"] = drawKnowledgeUnsupportedReasonSnapshot(
+                projectedDrawUnsupportedReasons);
+    }
+    if (frozenEye) {
+        membership["visible_order_from_top"] = knownDrawTopSnapshot(bc, knownTopCount);
+    } else {
+        membership["value"] = "membership not ordered; exact membership is not exposed";
+    }
     ret["draw_pile_membership"] = membership;
     return ret;
 }
@@ -1012,6 +1387,443 @@ struct StepSimulator {
         return makeT096AnchorDistributionMetadata(gc, bc);
     }
 
+    pybind11::dict t096VisibilityAudit() {
+        const auto savedBattleContext = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedScreenState = gc.screenState;
+        const auto savedGameOutcome = gc.outcome;
+
+        gc.screenState = ScreenState::BATTLE;
+        gc.outcome = GameOutcome::UNDECIDED;
+        bc = BattleContext();
+        bc.inputState = InputState::PLAYER_NORMAL;
+        bc.turn = 1;
+        bc.monsters.monsterCount = 1;
+        bc.monsters.monstersAlive = 1;
+        auto &monster = bc.monsters.arr[0];
+        monster.idx = 0;
+        monster.id = MonsterId::JAW_WORM;
+        monster.curHp = 30;
+        monster.maxHp = 30;
+        monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+        monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+
+        CardInstance privateCardA(CardId::STRIKE_RED);
+        privateCardA.setUniqueId(100);
+        CardInstance privateCardB(CardId::DEFEND_RED);
+        privateCardB.setUniqueId(101);
+        CardInstance knownCardA(CardId::BASH);
+        knownCardA.setUniqueId(102);
+        CardInstance knownCardB(CardId::HEADBUTT);
+        knownCardB.setUniqueId(103);
+        bc.cards.drawPile.push_back(privateCardA);
+        bc.cards.drawPile.push_back(privateCardB);
+        bc.cards.discardPile.push_back(knownCardA);
+        bc.cards.discardPile.push_back(knownCardB);
+
+        // Headbutt is the native deterministic public placement used by the
+        // issue contract.  Two placements establish a top-first known prefix.
+        bc.chooseHeadbuttCard(0);
+        bc.chooseHeadbuttCard(0);
+        battleActive = true;
+
+        const auto projection = t096PublicInformationProjection();
+        const auto projectionVisibility = projection["visibility"].cast<pybind11::dict>();
+        const auto projectionDrawOrder = projectionVisibility["draw_order"].cast<pybind11::dict>();
+        const bool projectionKnownPrefix = projectionDrawOrder["classification"]
+                .cast<std::string>() == "known_prefix"
+                && projectionDrawOrder["known_top_prefix"].cast<pybind11::list>().size() == 2;
+        const auto checkpoint = bc;
+        const auto nativeMonsterRows = monsterGroupSnapshot(checkpoint);
+        const auto publicMonsterRows = publicInformationMonsterGroupSnapshot(checkpoint);
+        const auto nativeMonster = nativeMonsterRows[0].cast<pybind11::dict>();
+        const auto publicMonster = publicMonsterRows[0].cast<pybind11::dict>();
+        const bool nativeSnapshotContract = nativeMonster.contains("misc_info")
+                && nativeMonster.contains("unique_power_0")
+                && nativeMonster.contains("unique_power_1")
+                && !publicMonster.contains("misc_info")
+                && !publicMonster.contains("unique_power_0")
+                && !publicMonster.contains("unique_power_1")
+                && publicMonster.contains("public_statuses")
+                && publicMonster.contains("information_fidelity");
+        const bool checkpointPreserves = checkpoint.knownDrawTopUniqueIds
+                == bc.knownDrawTopUniqueIds
+                && checkpoint.knownDrawPositionUniqueIds
+                        == bc.knownDrawPositionUniqueIds
+                && checkpoint.knownDrawUnsupportedReasons
+                        == bc.knownDrawUnsupportedReasons;
+        const auto knownTopCount = knownDrawTopCount(bc);
+        const auto anchorPublicActions = projection["ordered_public_legal_actions"]
+                .cast<pybind11::list>();
+
+        const auto particles = sampleHiddenFutureParticles(0x12345678ULL, 0, 8);
+        bool particlePrefixPreserved = true;
+        bool samplerPublicInformationInvariant = true;
+        std::set<std::string> particleFingerprints;
+        for (const auto &particleHandle : particles) {
+            const auto particle = particleHandle.cast<pybind11::dict>();
+            particleFingerprints.insert(
+                    particle["hidden_future_fingerprint"].cast<std::string>());
+            const auto particleProjection = particle["public_information_projection"]
+                    .cast<pybind11::dict>();
+            samplerPublicInformationInvariant = samplerPublicInformationInvariant
+                    && particleProjection.equal(projection)
+                    && particleProjection["ordered_public_legal_actions"]
+                            .cast<pybind11::list>().equal(anchorPublicActions);
+            const auto visibility = particleProjection["visibility"].cast<pybind11::dict>();
+            const auto drawOrder = visibility["draw_order"].cast<pybind11::dict>();
+            const auto prefix = drawOrder["known_top_prefix"].cast<pybind11::list>();
+            particlePrefixPreserved = particlePrefixPreserved && prefix.size() == 2;
+            if (prefix.size() == 2) {
+                particlePrefixPreserved = particlePrefixPreserved
+                        && prefix[0].cast<pybind11::dict>()["id"].cast<int>()
+                                == static_cast<int>(CardId::HEADBUTT)
+                        && prefix[1].cast<pybind11::dict>()["id"].cast<int>()
+                                == static_cast<int>(CardId::BASH);
+            }
+        }
+
+        bc = checkpoint;
+        bc.playTopCardInDrawPile(0, false); // Havoc consumes knownCardB.
+        const bool havocConsumesTopPreservesSuffix = knownDrawTopCount(bc) == 1
+                && bc.knownDrawTopUniqueIds.size() == 1
+                && bc.knownDrawTopUniqueIds.front() == knownCardA.getUniqueId();
+
+        bc = checkpoint;
+        bc.knownDrawTopUniqueIds.clear();
+        CardInstance reboundCard(CardId::STRIKE_RED);
+        reboundCard.setUniqueId(104);
+        bc.curCardQueueItem = CardQueueItem(reboundCard, 0, 0);
+        bc.curCardQueueItem.triggerOnUse = false;
+        bc.player.setHasStatus<PS::REBOUND>(true);
+        bc.player.setStatusValueNoChecks<PS::REBOUND>(1);
+        bc.onAfterUseCard();
+        const auto reboundProjection = t096PublicInformationProjection();
+        const auto reboundVisibility = reboundProjection["visibility"].cast<pybind11::dict>();
+        const auto reboundDrawOrder = reboundVisibility["draw_order"].cast<pybind11::dict>();
+        bool reboundParticlesPreserved = reboundDrawOrder.contains("known_top_prefix");
+        if (reboundParticlesPreserved) {
+            const auto reboundPrefix = reboundDrawOrder["known_top_prefix"].cast<pybind11::list>();
+            reboundParticlesPreserved = reboundPrefix.size() == 1
+                    && reboundPrefix[0].cast<pybind11::dict>()["id"].cast<int>()
+                            == static_cast<int>(CardId::STRIKE_RED);
+        }
+        const auto reboundParticles = sampleHiddenFutureParticles(0x13579BDFULL, 0, 4);
+        for (const auto &particleHandle : reboundParticles) {
+            const auto particle = particleHandle.cast<pybind11::dict>();
+            const auto particleProjection = particle["public_information_projection"]
+                    .cast<pybind11::dict>();
+            const auto particleVisibility = particleProjection["visibility"]
+                    .cast<pybind11::dict>();
+            const auto particleDrawOrder = particleVisibility["draw_order"]
+                    .cast<pybind11::dict>();
+            if (!particleDrawOrder.contains("known_top_prefix")) {
+                reboundParticlesPreserved = false;
+            } else {
+                const auto particlePrefix = particleDrawOrder["known_top_prefix"]
+                        .cast<pybind11::list>();
+                reboundParticlesPreserved = reboundParticlesPreserved
+                        && particlePrefix.size() == 1
+                        && particlePrefix[0].cast<pybind11::dict>()["id"].cast<int>()
+                                == static_cast<int>(CardId::STRIKE_RED);
+            }
+        }
+
+        bc = checkpoint;
+        bc.knownDrawTopUniqueIds.clear();
+        bc.knownDrawPositionUniqueIds.clear();
+        CardInstance forethoughtCard(CardId::DEFEND_RED);
+        forethoughtCard.setUniqueId(105);
+        bc.cards.cardsInHand = 1;
+        bc.cards.hand[0] = forethoughtCard;
+        bc.chooseForethoughtCard(0);
+        const auto forethoughtProjection = t096PublicInformationProjection();
+        const auto forethoughtVisibility = forethoughtProjection["visibility"]
+                .cast<pybind11::dict>();
+        const auto forethoughtDrawOrder = forethoughtVisibility["draw_order"]
+                .cast<pybind11::dict>();
+        bool forethoughtPositionPreserved =
+                forethoughtDrawOrder["classification"].cast<std::string>()
+                        == "known_positions"
+                && forethoughtDrawOrder.contains("known_positions");
+        if (forethoughtPositionPreserved) {
+            const auto positions = forethoughtDrawOrder["known_positions"]
+                    .cast<pybind11::list>();
+            forethoughtPositionPreserved = positions.size() == 1
+                    && positions[0].cast<pybind11::dict>()["position_from_top"]
+                            .cast<int>() == static_cast<int>(bc.cards.drawPile.size() - 1)
+                    && positions[0].cast<pybind11::dict>()["card"].cast<pybind11::dict>()
+                            ["id"].cast<int>() == static_cast<int>(CardId::DEFEND_RED);
+        }
+        const auto forethoughtParticles = sampleHiddenFutureParticles(0x2468ACE0ULL, 0, 4);
+        for (const auto &particleHandle : forethoughtParticles) {
+            const auto particle = particleHandle.cast<pybind11::dict>();
+            const auto particleProjection = particle["public_information_projection"]
+                    .cast<pybind11::dict>();
+            const auto particleDrawOrder = particleProjection["visibility"]
+                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+            forethoughtPositionPreserved = forethoughtPositionPreserved
+                    && particleDrawOrder["classification"].cast<std::string>()
+                            == "known_positions"
+                    && particleDrawOrder.contains("known_positions");
+        }
+
+        bc = checkpoint;
+        bc.cardSelectInfo.cardSelectTask = CardSelectTask::SECRET_TECHNIQUE;
+        const int subsetRevealIdx = 0;
+        bc.chooseDrawToHandCards(&subsetRevealIdx, 1);
+        const auto subsetRevealProjection = t096PublicInformationProjection();
+        const auto subsetRevealDrawOrder = subsetRevealProjection["visibility"]
+                .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+        const bool subsetRevealFailsClosed = subsetRevealDrawOrder["classification"]
+                .cast<std::string>() == "unsupported_fidelity"
+                && subsetRevealProjection["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity";
+        Actions::ShuffleDrawPile().actFunc(bc);
+        const auto subsetRevealShuffleProjection = t096PublicInformationProjection();
+        const auto subsetRevealShuffleDrawOrder = subsetRevealShuffleProjection["visibility"]
+                .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+        const bool subsetRevealShuffleStaysUnsupported = subsetRevealShuffleDrawOrder[
+                "classification"].cast<std::string>() == "unsupported_fidelity"
+                && subsetRevealShuffleProjection["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity"
+                && subsetRevealShuffleDrawOrder["unsupported_reasons"]
+                        .cast<pybind11::list>()[0].cast<std::string>()
+                                == "subset_membership";
+        bool subsetRevealSamplerFailsClosed = false;
+        try {
+            (void) sampleHiddenFutureParticles(0x10203040ULL, 0, 1);
+        } catch (const std::runtime_error &) {
+            subsetRevealSamplerFailsClosed = true;
+        }
+
+        bc = checkpoint;
+        Actions::ShuffleTempCardIntoDrawPile(CardId::BURN, 1).actFunc(bc);
+        const auto insertionProjection = t096PublicInformationProjection();
+        const auto insertionDrawOrder = insertionProjection["visibility"]
+                .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+        const bool randomInsertionReasonTyped = insertionDrawOrder["classification"]
+                .cast<std::string>() == "unsupported_fidelity"
+                && insertionDrawOrder["unsupported_reasons"].cast<pybind11::list>()[0]
+                        .cast<std::string>() == "unknown_insertion";
+
+        Monster book;
+        book.id = MonsterId::BOOK_OF_STABBING;
+        book.idx = 0;
+        book.curHp = 100;
+        book.maxHp = 100;
+        book.miscInfo = 1;
+        book.moveHistory[0] = MMID::BOOK_OF_STABBING_SINGLE_STAB;
+        bool bookRollMutatesMisc = false;
+        for (std::uint64_t seed = 1; seed <= 10000 && !bookRollMutatesMisc; ++seed) {
+            Monster candidate = book;
+            BattleContext rollContext = checkpoint;
+            rollContext.aiRng = Random(seed);
+            candidate.rollMove(rollContext);
+            if (candidate.miscInfo != book.miscInfo) {
+                book = candidate;
+                bookRollMutatesMisc = true;
+            }
+        }
+
+        bc = checkpoint;
+        bc.player.setHasRelic<R::FROZEN_EYE>(true);
+        const auto frozenProjection = t096PublicInformationProjection();
+        const auto frozenVisibility = frozenProjection["visibility"].cast<pybind11::dict>();
+        const auto frozenDrawOrder = frozenVisibility["draw_order"].cast<pybind11::dict>();
+        const auto frozenVisibleOrder = frozenDrawOrder["visible_order_from_top"].cast<pybind11::list>();
+        const auto frozenParticles = sampleHiddenFutureParticles(0x87654321ULL, 0, 4);
+        bool frozenParticlesPreserved = true;
+        for (const auto &particleHandle : frozenParticles) {
+            const auto particle = particleHandle.cast<pybind11::dict>();
+            frozenParticlesPreserved = frozenParticlesPreserved
+                    && particle["public_information_projection"].cast<pybind11::dict>()
+                            .equal(frozenProjection);
+        }
+
+        bc = checkpoint;
+        bc.monsters.arr[0] = book;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto domeProjection = t096PublicInformationProjection();
+        const auto domeMonsters = domeProjection["monsters"].cast<pybind11::list>();
+        const auto domeMonster = domeMonsters[0].cast<pybind11::dict>();
+        const bool domeHidesCurrentIntent = !domeMonster.contains("attacking")
+                && !domeMonster.contains("intent_category")
+                && !domeMonster.contains("current_move")
+                && !domeMonster.contains("move_id")
+                && !domeMonster.contains("move_base_damage")
+                && !domeMonster.contains("move_hits");
+        const bool domePreservesPreviousMove = domeMonster.contains("last_move_id")
+                && domeMonster["last_move_id"].cast<int>()
+                        == static_cast<int>(MMID::BOOK_OF_STABBING_SINGLE_STAB);
+        const bool domeSanitizesRollMisc = bookRollMutatesMisc
+                && !domeMonster.contains("misc_info")
+                && !domeMonster.contains("unique_power_0")
+                && !domeMonster.contains("unique_power_1")
+                && !domeMonster.contains("stabs_used")
+                && domeMonster["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity"
+                && domeProjection["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity";
+
+        Monster bookWithDifferentHiddenCounter = book;
+        bookWithDifferentHiddenCounter.miscInfo = book.miscInfo + 3;
+        bc = checkpoint;
+        bc.monsters.arr[0] = bookWithDifferentHiddenCounter;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto domeCounterVariantProjection = t096PublicInformationProjection();
+        const bool hiddenCounterTimingInvariant = domeProjection.equal(
+                domeCounterVariantProjection);
+        bool mixedDomeSamplerFailsClosed = false;
+        try {
+            (void) sampleHiddenFutureParticles(0x31415926ULL, 0, 1);
+        } catch (const std::runtime_error &) {
+            mixedDomeSamplerFailsClosed = true;
+        }
+
+        Monster louse;
+        louse.id = MonsterId::GREEN_LOUSE;
+        louse.idx = 0;
+        louse.curHp = 20;
+        louse.maxHp = 20;
+        louse.miscInfo = 7;
+        louse.moveHistory[0] = MMID::GREEN_LOUSE_BITE;
+        bc = checkpoint;
+        bc.monsters.arr[0] = louse;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto louseProjection = t096PublicInformationProjection();
+        const auto louseMonster = louseProjection["monsters"].cast<pybind11::list>()[0]
+                .cast<pybind11::dict>();
+        const bool hiddenMiscNotProjected = !louseMonster.contains("misc_info")
+                && louseMonster["information_fidelity"].cast<std::string>()
+                        == "supported"
+                && louseProjection["information_fidelity"].cast<std::string>()
+                        == "supported";
+        Monster louseWithDifferentPrivateState = louse;
+        louseWithDifferentPrivateState.miscInfo = louse.miscInfo + 4;
+        bc = checkpoint;
+        bc.monsters.arr[0] = louseWithDifferentPrivateState;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto lousePrivateVariantProjection = t096PublicInformationProjection();
+        const bool privateHiddenStateProjectionInvariant = lousePrivateVariantProjection
+                .equal(louseProjection);
+        bool privateHiddenMiscSamplerSupported = true;
+        try {
+            (void) sampleHiddenFutureParticles(0x50607080ULL, 0, 1);
+        } catch (const std::runtime_error &) {
+            privateHiddenMiscSamplerSupported = false;
+        }
+
+        Monster looter;
+        looter.id = MonsterId::LOOTER;
+        looter.idx = 0;
+        looter.curHp = 40;
+        looter.maxHp = 40;
+        looter.miscInfo = 17; // cumulative stolen gold, not a safe public raw field
+        looter.moveHistory[0] = MMID::LOOTER_MUG;
+        bc = checkpoint;
+        bc.monsters.arr[0] = looter;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto looterProjection = t096PublicInformationProjection();
+        const auto looterMonster = looterProjection["monsters"].cast<pybind11::list>()[0]
+                .cast<pybind11::dict>();
+        const bool looterPublicCounterPreserved = !looterMonster.contains("misc_info")
+                && !looterMonster.contains("unique_power_0")
+                && !looterMonster.contains("unique_power_1")
+                && looterMonster.contains("stolen_gold")
+                && looterMonster["stolen_gold"].cast<int>() == looter.miscInfo
+                && looterMonster["information_fidelity"].cast<std::string>()
+                        == "supported"
+                && looterProjection["information_fidelity"].cast<std::string>()
+                        == "supported";
+
+        Monster visiblePower = louse;
+        visiblePower.id = MonsterId::JAW_WORM;
+        visiblePower.miscInfo = 0;
+        visiblePower.setHasStatus<MS::TIME_WARP>(true);
+        visiblePower.setStatus<MS::TIME_WARP>(3);
+        bc.monsters.arr[0] = visiblePower;
+        const auto visiblePowerProjection = t096PublicInformationProjection();
+        const auto visiblePowerMonster = visiblePowerProjection["monsters"]
+                .cast<pybind11::list>()[0].cast<pybind11::dict>();
+        bool visiblePowerRetained = false;
+        for (const auto &statusHandle : visiblePowerMonster["public_statuses"]
+                .cast<pybind11::list>()) {
+            const auto status = statusHandle.cast<pybind11::dict>();
+            if (status["name"].cast<std::string>() == "Time Warp"
+                    && status["value"].cast<int>() == 3) {
+                visiblePowerRetained = true;
+            }
+        }
+
+        Monster wizard;
+        wizard.id = MonsterId::GREMLIN_WIZARD;
+        wizard.idx = 0;
+        wizard.curHp = 50;
+        wizard.maxHp = 50;
+        wizard.miscInfo = 2;
+        wizard.moveHistory[0] = MMID::GREMLIN_WIZARD_CHARGING;
+        BattleContext wizardContext = checkpoint;
+        wizard.takeTurn(wizardContext);
+        bc = checkpoint;
+        bc.monsters.arr[0] = wizard;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto wizardProjection = t096PublicInformationProjection();
+        const auto wizardMonster = wizardProjection["monsters"].cast<pybind11::list>()[0]
+                .cast<pybind11::dict>();
+        const bool directSetMiscFailClosed = !wizardMonster.contains("misc_info")
+                && !wizardMonster.contains("charge_count")
+                && wizardMonster["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity"
+                && wizardProjection["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity"
+                && !wizardMonster.contains("current_move");
+
+        pybind11::dict report;
+        report["schema_id"] = "native-battle-visibility-audit-v1";
+        report["headbutt_known_prefix"] = knownTopCount == 2 && projectionKnownPrefix;
+        report["native_snapshot_contract"] = nativeSnapshotContract;
+        report["checkpoint_preserves_known_prefix"] = checkpointPreserves;
+        report["sampler_preserves_known_prefix"] = particlePrefixPreserved;
+        report["sampler_public_information_invariant"] = samplerPublicInformationInvariant;
+        report["sampler_private_remainder_diverse"] = particleFingerprints.size() > 1;
+        report["havoc_consumes_top_preserves_suffix"] = havocConsumesTopPreservesSuffix;
+        report["rebound_establishes_known_top"] = reboundParticlesPreserved;
+        report["forethought_known_position_preserved"] = forethoughtPositionPreserved;
+        report["subset_reveal_fails_closed"] = subsetRevealFailsClosed;
+        report["subset_reveal_shuffle_stays_unsupported"] = subsetRevealShuffleStaysUnsupported;
+        report["subset_reveal_sampler_fails_closed"] = subsetRevealSamplerFailsClosed;
+        report["draw_knowledge_reason_typed"] = randomInsertionReasonTyped;
+        report["frozen_eye_full_order"] = frozenDrawOrder["classification"]
+                .cast<std::string>() == "full_public_exact"
+                && frozenVisibleOrder.size() == bc.cards.drawPile.size();
+        report["frozen_eye_sampler_preserves_order"] = frozenParticlesPreserved;
+        report["runic_dome_hides_current_intent"] = domeHidesCurrentIntent;
+        report["runic_dome_preserves_previous_move"] = domePreservesPreviousMove;
+        report["runic_dome_sanitizes_roll_misc"] = domeSanitizesRollMisc;
+        report["runic_dome_hidden_counter_timing_invariant"] =
+                hiddenCounterTimingInvariant;
+        report["runic_dome_mixed_counter_sampler_fails_closed"] =
+                mixedDomeSamplerFailsClosed;
+        report["runic_dome_hides_louse_misc"] = hiddenMiscNotProjected;
+        report["private_hidden_state_projection_invariant"] =
+                privateHiddenStateProjectionInvariant;
+        report["runic_dome_looter_public_counter_preserved"] =
+                looterPublicCounterPreserved;
+        // Keep the historical audit key for downstream consumers while the
+        // value now asserts the supported semantic counter contract.
+        report["runic_dome_looter_misc_fails_closed"] = looterPublicCounterPreserved;
+        report["private_hidden_misc_sampler_supported"] = privateHiddenMiscSamplerSupported;
+        report["runic_dome_retains_visible_power"] = visiblePowerRetained;
+        report["runic_dome_direct_misc_fail_closed"] = directSetMiscFailClosed;
+
+        bc = savedBattleContext;
+        battleActive = savedBattleActive;
+        gc.screenState = savedScreenState;
+        gc.outcome = savedGameOutcome;
+        return report;
+    }
+
     pybind11::list sampleHiddenFutureParticles(
             std::uint64_t samplerSeed,
             int particleStart,
@@ -1020,6 +1832,10 @@ struct StepSimulator {
         if (!battleActive) {
             throw std::runtime_error(
                     "T096 hidden-future sampling requested outside battle");
+        }
+        if (publicInformationUnsupported(bc)) {
+            throw std::runtime_error(
+                    "T096 hidden-future sampling unavailable: unsupported_fidelity");
         }
         if (particleStart < 0) {
             throw std::invalid_argument(
@@ -1046,11 +1862,56 @@ struct StepSimulator {
             particleSeed ^= particleSeed >> 31;
 
             BattleContext particle = bc;
-            java::Random randomizer(particleSeed);
-            java::Collections::shuffle(
-                    particle.cards.drawPile.begin(),
-                    particle.cards.drawPile.end(),
-                    randomizer);
+            const bool frozenEye = particle.player.hasRelic<R::FROZEN_EYE>();
+            const auto knownTop = frozenEye ? particle.cards.drawPile.size()
+                    : knownDrawTopCount(particle);
+            if (!frozenEye && particle.knownDrawUnsupportedReasons == 0
+                    && knownDrawStateConsistent(particle)) {
+                java::Random randomizer(particleSeed);
+                // Shuffle only unconstrained positions.  Draw-pile top is
+                // the vector back; exact position facts are measured from
+                // that top and therefore survive particle generation.
+                std::vector<bool> fixed(particle.cards.drawPile.size(), false);
+                for (std::size_t position = 0; position < knownTop; ++position) {
+                    fixed[particle.cards.drawPile.size() - 1 - position] = true;
+                }
+                bool positionStateValid = true;
+                for (const auto &[position, uniqueId] : particle.knownDrawPositionUniqueIds) {
+                    if (position < 0
+                            || static_cast<std::size_t>(position)
+                                    >= particle.cards.drawPile.size()) {
+                        positionStateValid = false;
+                        break;
+                    }
+                    const auto drawIdx = particle.cards.drawPile.size() - 1
+                            - static_cast<std::size_t>(position);
+                    if (particle.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
+                        positionStateValid = false;
+                        break;
+                    }
+                    fixed[drawIdx] = true;
+                }
+                if (!positionStateValid) {
+                    particle.markDrawKnowledgeUnsupported();
+                } else {
+                    std::vector<int> freeIndices;
+                    std::vector<CardInstance> freeCards;
+                    for (int drawIdx = 0;
+                            drawIdx < static_cast<int>(particle.cards.drawPile.size());
+                            ++drawIdx) {
+                        if (!fixed[drawIdx]) {
+                            freeIndices.push_back(drawIdx);
+                            freeCards.push_back(particle.cards.drawPile[drawIdx]);
+                        }
+                    }
+                    java::Collections::shuffle(freeCards.begin(), freeCards.end(), randomizer);
+                    for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
+                        particle.cards.drawPile[freeIndices[idx]] = freeCards[idx];
+                    }
+                }
+            } else if (!frozenEye && !knownDrawStateConsistent(particle)) {
+                particle.markDrawKnowledgeUnsupported();
+            }
 
             std::vector<LightSpeedAction> actions;
             for (const auto &action : enumerateBattleActions(particle)) {
@@ -1268,6 +2129,7 @@ struct StepSimulator {
                      "Player.all_fields_and_status_map",
                      "MonsterGroup.all_fields_and_monster_state",
                      "CardManager.all_counters_and_ordered_piles",
+                     "BattleContext.epistemic_draw_knowledge",
                      "CardQueue.all_slots_and_indices",
                      "BattleContext.curCardQueueItem.all_fields",
                      "ActionQueue.indices_size_and_clear_bits",
@@ -1976,6 +2838,7 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("public_projection", &StepSimulator::publicProjection)
         .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
         .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
+        .def("t096_visibility_audit", &StepSimulator::t096VisibilityAudit)
         .def(
             "sample_hidden_future_particles",
             &StepSimulator::sampleHiddenFutureParticles,

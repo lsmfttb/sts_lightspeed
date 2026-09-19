@@ -28,6 +28,7 @@ REQUIRED_STEP_SIMULATOR_METHODS = (
     "battle_search_with_root_priors",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
+    "t096_public_information_projection",
 )
 
 REQUIRED_SNAPSHOT_FIELDS = (
@@ -167,6 +168,48 @@ def main() -> int:
             reset_snapshot.get("screen_state") == snapshot.get("screen_state"),
             "reset changed initial screen_state for the same seed",
         )
+
+        # The native battle snapshot keeps its established raw fields while
+        # the T096 projection exposes a separate semantic monster schema.
+        battle_sim = sts.StepSimulator(sts.CharacterClass.IRONCLAD, 1, 20)
+        active_snapshot = None
+        for _ in range(32):
+            candidate = require_mapping(battle_sim.snapshot(), "active battle snapshot")
+            if candidate.get("battle_active") is True:
+                active_snapshot = candidate
+                break
+            actions = require_sequence(
+                battle_sim.legal_actions(), "active battle entry actions"
+            )
+            require(len(actions) > 0, "active battle seed reached no entry action")
+            battle_sim.step(actions[0])
+        require(active_snapshot is not None, "active battle snapshot was not reached")
+        native_monsters = require_sequence(
+            active_snapshot["battle_monsters"], "snapshot['battle_monsters']"
+        )
+        require(len(native_monsters) > 0, "active battle has no native monster rows")
+        native_monster = require_mapping(native_monsters[0], "native battle monster row")
+        for field_name in ("misc_info", "unique_power_0", "unique_power_1"):
+            require(
+                field_name in native_monster,
+                f"native monster snapshot lost field: {field_name}",
+            )
+        semantic_projection = require_mapping(
+            battle_sim.t096_public_information_projection(),
+            "StepSimulator.t096_public_information_projection()",
+        )
+        semantic_monsters = require_sequence(
+            semantic_projection["monsters"], "T096 projection monsters"
+        )
+        require(len(semantic_monsters) > 0, "T096 projection has no monster rows")
+        semantic_monster = require_mapping(semantic_monsters[0], "semantic public monster row")
+        for field_name in ("misc_info", "unique_power_0", "unique_power_1"):
+            require(
+                field_name not in semantic_monster,
+                f"T096 projection leaked raw field: {field_name}",
+            )
+        require("public_statuses" in semantic_monster, "T096 projection lost semantic statuses")
+        require("information_fidelity" in semantic_monster, "T096 projection lost fidelity label")
 
         print("STSRL native API smoke check passed")
         print(f"python_version: {sys.version.split()[0]}")
