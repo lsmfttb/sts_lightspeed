@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <iomanip>
 
 #include "sim/ConsoleSimulator.h"
 #include "sim/search/ScumSearchAgent2.h"
@@ -537,6 +538,126 @@ pybind11::dict publicProjectionActionSnapshot(const LightSpeedAction &action) {
     return ret;
 }
 
+pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
+    pybind11::dict ret;
+    // Native action bits are replay identity, not normal-information input.
+    // Keep the visible action description and public parameters only.
+    ret["scope"] = action.scope;
+    ret["kind"] = action.kind;
+    ret["idx1"] = action.idx1;
+    ret["idx2"] = action.idx2;
+    ret["idx3"] = action.idx3;
+    ret["label"] = action.label;
+    return ret;
+}
+
+void appendRandomState(std::ostringstream &out, const char *name, const Random &rng) {
+    out << name << ':' << rng.counter << ':' << rng.seed0 << ':' << rng.seed1 << ';';
+}
+
+std::string hiddenFutureFingerprint(const BattleContext &bc) {
+    // This is private audit metadata.  It is deliberately not included in the
+    // public-information projection or in any controller/model input.
+    std::ostringstream state;
+    appendRandomState(state, "ai", bc.aiRng);
+    appendRandomState(state, "card", bc.cardRandomRng);
+    appendRandomState(state, "misc", bc.miscRng);
+    appendRandomState(state, "monster", bc.monsterHpRng);
+    appendRandomState(state, "potion", bc.potionRng);
+    appendRandomState(state, "shuffle", bc.shuffleRng);
+    state << "draw:" << bc.cards.drawPile.size() << ':';
+    for (const auto &card : bc.cards.drawPile) {
+        state << static_cast<int>(card.getId()) << ':'
+              << card.getUniqueId() << ':' << card.specialData << ':'
+              << static_cast<int>(card.cost) << ':'
+              << static_cast<int>(card.costForTurn) << ':'
+              << card.upgraded << ':' << card.freeToPlayOnce << ':'
+              << card.retain << ';';
+    }
+    state << "monsters:" << bc.monsters.monsterCount << ':';
+    for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
+        const auto &monster = bc.monsters.arr[idx];
+        state << static_cast<int>(monster.id) << ':' << monster.curHp << ':'
+              << static_cast<int>(monster.moveHistory[0]) << ':'
+              << static_cast<int>(monster.moveHistory[1]) << ':'
+              << monster.miscInfo << ':' << monster.uniquePower0 << ':'
+              << monster.uniquePower1 << ';';
+    }
+    // FNV-1a is sufficient for a compact audit digest; semantic equality is
+    // still represented by the native state construction above.
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char byte : state.str()) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    std::ostringstream digest;
+    digest << "fnv1a64:" << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return digest.str();
+}
+
+pybind11::dict makeT096PublicInformationProjection(
+        const GameContext &gc,
+        const BattleContext &bc,
+        const std::vector<LightSpeedAction> &actions) {
+    pybind11::dict ret;
+    ret["schema_id"] = "native-battle-public-information-v1";
+    ret["information_regime"] = "normal_information";
+    ret["screen_identity"] = "BATTLE";
+    ret["act"] = gc.act;
+    ret["floor_num"] = gc.floorNum;
+    ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
+    ret["turn"] = bc.turn;
+    ret["input_state"] = inputStateLabel(bc.inputState);
+    ret["battle_outcome"] = battleOutcomeLabel(bc.outcome);
+    ret["player"] = playerSnapshot(bc.player);
+    ret["hand"] = handSnapshot(bc);
+    ret["discard_pile"] = pileSnapshot(bc, bc.cards.discardPile);
+    ret["exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);
+    ret["draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
+    ret["monsters"] = monsterGroupSnapshot(bc);
+    pybind11::dict resources;
+    resources["deck"] = deckSnapshot(gc);
+    resources["relics"] = relicListSnapshot(gc);
+    resources["potions"] = potionListSnapshot(bc);
+    resources["gold"] = gc.gold;
+    resources["blue_key"] = gc.blueKey;
+    resources["green_key"] = gc.greenKey;
+    resources["red_key"] = gc.redKey;
+    ret["persistent_resources"] = resources;
+
+    pybind11::dict visibility;
+    pybind11::dict drawOrder;
+    drawOrder["classification"] = "hidden";
+    drawOrder["constraint"] = "ordinary draw order is not exposed";
+    drawOrder["fidelity"] = "native-ordinary-hidden-draw-v1";
+    visibility["draw_order"] = drawOrder;
+    pybind11::dict enemyIntent;
+    enemyIntent["classification"] = "public_exact";
+    enemyIntent["source"] = "native Monster move state";
+    enemyIntent["fidelity"] = "native-ordinary-visible-intent-v1";
+    visibility["enemy_intent"] = enemyIntent;
+    pybind11::dict drawKnowledge;
+    drawKnowledge["classification"] = "unsupported_fidelity";
+    drawKnowledge["reason"] = "Headbutt/Frozen Eye knowledge tracking is not exposed by this native build";
+    visibility["draw_knowledge"] = drawKnowledge;
+    pybind11::dict hiddenIntent;
+    hiddenIntent["classification"] = "unsupported_fidelity";
+    hiddenIntent["reason"] = "Runic Dome visibility semantics are not exposed by this native build";
+    visibility["intent_hidden_mechanics"] = hiddenIntent;
+    ret["visibility"] = visibility;
+
+    pybind11::list publicActions;
+    for (const auto &action : actions) {
+        publicActions.append(publicInformationActionIdentity(action));
+    }
+    ret["ordered_public_legal_actions"] = publicActions;
+    pybind11::dict membership;
+    membership["classification"] = "public_constraint";
+    membership["value"] = "membership not ordered; exact membership is not exposed";
+    ret["draw_pile_membership"] = membership;
+    return ret;
+}
+
 struct StepSimulator {
     GameContext gc;
     BattleContext bc;
@@ -774,6 +895,76 @@ struct StepSimulator {
         ret["candidate_actions"] = publicProjectionAvailable(
                 candidates, "StepSimulator::legalActions");
         return ret;
+    }
+
+    pybind11::dict t096PublicInformationProjection() {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error(
+                    "T096 public-information projection requested outside battle");
+        }
+        std::vector<LightSpeedAction> actions;
+        for (const auto &action : enumerateBattleActions(bc)) {
+            actions.push_back(makeBattleAction(bc, action));
+        }
+        return makeT096PublicInformationProjection(gc, bc, actions);
+    }
+
+    pybind11::list sampleHiddenFutureParticles(
+            std::uint64_t samplerSeed,
+            int particleCount) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error(
+                    "T096 hidden-future sampling requested outside battle");
+        }
+        if (particleCount <= 0 || particleCount > 65536) {
+            throw std::invalid_argument(
+                    "T096 particle_count must be in [1, 65536]");
+        }
+
+        pybind11::list particles;
+        for (int index = 0; index < particleCount; ++index) {
+            // SplitMix-style domain separation gives every accepted particle a
+            // reproducible native sampler seed without exposing native RNG
+            // state to the public projection.
+            std::uint64_t particleSeed = samplerSeed +
+                    0x9E3779B97F4A7C15ULL * static_cast<std::uint64_t>(index + 1);
+            particleSeed ^= particleSeed >> 30;
+            particleSeed *= 0xBF58476D1CE4E5B9ULL;
+            particleSeed ^= particleSeed >> 27;
+            particleSeed *= 0x94D049BB133111EBULL;
+            particleSeed ^= particleSeed >> 31;
+
+            BattleContext particle = bc;
+            java::Random randomizer(particleSeed);
+            java::Collections::shuffle(
+                    particle.cards.drawPile.begin(),
+                    particle.cards.drawPile.end(),
+                    randomizer);
+
+            std::vector<LightSpeedAction> actions;
+            for (const auto &action : enumerateBattleActions(particle)) {
+                actions.push_back(makeBattleAction(particle, action));
+            }
+            pybind11::dict row;
+            row["particle_index"] = index;
+            row["sampler_seed"] = particleSeed;
+            row["public_information_projection"] =
+                    makeT096PublicInformationProjection(gc, particle, actions);
+            row["hidden_future_fingerprint"] = hiddenFutureFingerprint(particle);
+            if (particle.cards.drawPile.empty()) {
+                row["next_draw_card_id"] = pybind11::none();
+                row["next_draw_card_id_label"] = pybind11::none();
+            } else {
+                const auto &next = particle.cards.drawPile.back();
+                row["next_draw_card_id"] = static_cast<int>(next.getId());
+                row["next_draw_card_id_label"] =
+                        std::string(getCardEnumName(next.getId()));
+            }
+            particles.append(row);
+        }
+        return particles;
     }
 
     pybind11::dict completeBattleTransitionIfTerminal() {
@@ -1674,6 +1865,12 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("observation", &StepSimulator::observation)
         .def("legal_actions", &StepSimulator::legalActions)
         .def("public_projection", &StepSimulator::publicProjection)
+        .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
+        .def(
+            "sample_hidden_future_particles",
+            &StepSimulator::sampleHiddenFutureParticles,
+            pybind11::arg("sampler_seed"),
+            pybind11::arg("particle_count"))
         .def(
             "battle_search",
             &StepSimulator::battleSearch,
