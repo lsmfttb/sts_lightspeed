@@ -2799,7 +2799,10 @@ void BattleContext::onManualDiscard(const CardInstance &c) {
 void BattleContext::clearKnownDrawOrder() {
     knownDrawTopUniqueIds.clear();
     knownDrawPositionUniqueIds.clear();
-    knownDrawKnowledgeUnsupported = false;
+    // Clearing exact order constraints is not the same as resolving an
+    // unsupported information transition.  A subset/membership reveal (or an
+    // unknown insertion) can leave the hidden state under-specified even
+    // after a later shuffle, so preserve the fail-closed epistemic marker.
 }
 
 void BattleContext::noteKnownDrawTop(const CardInstance &c) {

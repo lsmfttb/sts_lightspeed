@@ -17,6 +17,7 @@ def main() -> int:
     report = sim.t096_visibility_audit()
     required = (
         "headbutt_known_prefix",
+        "native_snapshot_contract",
         "checkpoint_preserves_known_prefix",
         "sampler_preserves_known_prefix",
         "sampler_private_remainder_diverse",
@@ -24,12 +25,16 @@ def main() -> int:
         "rebound_establishes_known_top",
         "forethought_known_position_preserved",
         "subset_reveal_fails_closed",
+        "subset_reveal_shuffle_stays_unsupported",
+        "subset_reveal_sampler_fails_closed",
         "frozen_eye_full_order",
         "frozen_eye_sampler_preserves_order",
         "runic_dome_hides_current_intent",
         "runic_dome_preserves_previous_move",
         "runic_dome_sanitizes_roll_misc",
         "runic_dome_hides_louse_misc",
+        "runic_dome_looter_misc_fails_closed",
+        "unsupported_monster_sampler_fails_closed",
         "runic_dome_retains_visible_power",
         "runic_dome_direct_misc_fail_closed",
     )
