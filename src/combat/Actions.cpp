@@ -208,6 +208,7 @@ Action Actions::ShuffleTempCardIntoDrawPile(CardId id, int count) {
             const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
             bc.cards.createTempCardInDrawPile(idx, c);
         }
+        bc.markDrawKnowledgeUnsupported();
     }};
 }
 
@@ -246,6 +247,9 @@ Action Actions::MakeTempCardInDrawPile(const CardInstance &c, int amount, bool s
                 bc.cards.createTempCardInDrawPile(idx, c);
             }
             // todo else
+        }
+        if (shuffleInto) {
+            bc.markDrawKnowledgeUnsupported();
         }
     }};
 }
@@ -559,6 +563,7 @@ Action Actions::PutRandomCardsInDrawPile(CardType type, int count) {
             const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
             bc.cards.createTempCardInDrawPile(idx, card);
         }
+        bc.markDrawKnowledgeUnsupported();
     }};
 }
 

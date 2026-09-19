@@ -2001,6 +2001,7 @@ void BattleContext::onAfterUseCard() {
 
         } else if (c.id == CardId::TANTRUM) {
             cards.shuffleIntoDrawPile(cardRandomRng, c);
+            markDrawKnowledgeUnsupported();
 
         } else {
             // The game calls OnCardDrawOrDiscard here which only does two things:
@@ -2797,23 +2798,108 @@ void BattleContext::onManualDiscard(const CardInstance &c) {
 
 void BattleContext::clearKnownDrawOrder() {
     knownDrawTopUniqueIds.clear();
+    knownDrawPositionUniqueIds.clear();
+    knownDrawKnowledgeUnsupported = false;
 }
 
 void BattleContext::noteKnownDrawTop(const CardInstance &c) {
-    // A visible deterministic placement (for example Headbutt) establishes a
-    // new known top card and leaves the formerly known suffix intact.
+    // A visible deterministic placement (for example Headbutt or Rebound)
+    // establishes a new known top card.  Existing exact positions move one
+    // slot away from the top.
+    std::map<std::int32_t, std::int16_t> shiftedBeforeTop;
+    for (const auto &[position, uniqueId] : knownDrawPositionUniqueIds) {
+        shiftedBeforeTop[position + 1] = uniqueId;
+    }
+    knownDrawPositionUniqueIds.swap(shiftedBeforeTop);
     knownDrawTopUniqueIds.insert(knownDrawTopUniqueIds.begin(), c.getUniqueId());
+}
+
+void BattleContext::noteKnownDrawBottom(const CardInstance &c) {
+    // Forethought inserts at vector index zero, i.e. the bottom of the native
+    // draw pile.  A one-card pile is both bottom- and top-known.
+    if (cards.drawPile.size() == 1) {
+        noteKnownDrawTop(c);
+        return;
+    }
+    knownDrawPositionUniqueIds[static_cast<std::int32_t>(cards.drawPile.size() - 1)]
+            = c.getUniqueId();
 }
 
 void BattleContext::consumeKnownDrawTop(const CardInstance &c) {
     if (!knownDrawTopUniqueIds.empty()
-            && knownDrawTopUniqueIds.front() == c.getUniqueId()) {
-        knownDrawTopUniqueIds.erase(knownDrawTopUniqueIds.begin());
-    } else if (!knownDrawTopUniqueIds.empty()) {
+            && knownDrawTopUniqueIds.front() != c.getUniqueId()) {
         // A transition we did not model as a deterministic public draw has
         // occurred.  Conservatively retain no exact-order claim.
         clearKnownDrawOrder();
+        markDrawKnowledgeUnsupported();
+        return;
     }
+    const auto positionZero = knownDrawPositionUniqueIds.find(0);
+    if (positionZero != knownDrawPositionUniqueIds.end()) {
+        if (positionZero->second != c.getUniqueId()) {
+            clearKnownDrawOrder();
+            markDrawKnowledgeUnsupported();
+            return;
+        }
+        knownDrawPositionUniqueIds.erase(positionZero);
+    }
+    if (!knownDrawTopUniqueIds.empty()) {
+        knownDrawTopUniqueIds.erase(knownDrawTopUniqueIds.begin());
+    }
+    std::map<std::int32_t, std::int16_t> shiftedAfterTop;
+    for (const auto &[position, uniqueId] : knownDrawPositionUniqueIds) {
+        shiftedAfterTop[position - 1] = uniqueId;
+    }
+    knownDrawPositionUniqueIds.swap(shiftedAfterTop);
+    // Promote exact position facts that have become a contiguous known top
+    // prefix after consuming the previous top card.
+    while (true) {
+        const auto it = knownDrawPositionUniqueIds.find(0);
+        if (it == knownDrawPositionUniqueIds.end()) {
+            break;
+        }
+        knownDrawTopUniqueIds.push_back(it->second);
+        knownDrawPositionUniqueIds.erase(it);
+    }
+}
+
+void BattleContext::consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c) {
+    const auto pileSize = static_cast<int>(cards.drawPile.size());
+    if (drawPileIdx < 0 || drawPileIdx >= pileSize) {
+        markDrawKnowledgeUnsupported();
+        return;
+    }
+    const auto position = pileSize - 1 - drawPileIdx;
+    if (position < static_cast<int>(knownDrawTopUniqueIds.size())) {
+        if (knownDrawTopUniqueIds[position] != c.getUniqueId()) {
+            clearKnownDrawOrder();
+            markDrawKnowledgeUnsupported();
+            return;
+        }
+        knownDrawTopUniqueIds.erase(knownDrawTopUniqueIds.begin() + position);
+    } else {
+        const auto it = knownDrawPositionUniqueIds.find(position);
+        if (it != knownDrawPositionUniqueIds.end()) {
+            if (it->second != c.getUniqueId()) {
+                clearKnownDrawOrder();
+                markDrawKnowledgeUnsupported();
+                return;
+            }
+            knownDrawPositionUniqueIds.erase(it);
+        }
+    }
+    if (position < pileSize - 1) {
+        std::map<std::int32_t, std::int16_t> shifted;
+        for (const auto &[knownPosition, uniqueId] : knownDrawPositionUniqueIds) {
+            shifted[knownPosition > position ? knownPosition - 1 : knownPosition]
+                    = uniqueId;
+        }
+        knownDrawPositionUniqueIds.swap(shifted);
+    }
+}
+
+void BattleContext::markDrawKnowledgeUnsupported() {
+    knownDrawKnowledgeUnsupported = true;
 }
 
 void BattleContext::onShuffle() {
@@ -2956,6 +3042,7 @@ void BattleContext::chooseCodexCard(CardId id) {
     c.uniqueId = static_cast<std::int16_t>(cards.nextUniqueCardId++);
     cards.notifyAddCardToCombat(c);
     cards.shuffleIntoDrawPile(cardRandomRng, c);
+    markDrawKnowledgeUnsupported();
 }
 
 void BattleContext::chooseDualWieldCard(int handIdx) {
@@ -3058,6 +3145,7 @@ void BattleContext::chooseForethoughtCard(int handIdx) {
 
     cards.insertToDrawPile(0, cards.hand[handIdx]);
     cards.removeFromHandAtIdx(handIdx);
+    noteKnownDrawBottom(cards.drawPile.front());
 }
 
 void BattleContext::chooseHeadbuttCard(int discardIdx) {
@@ -3085,11 +3173,19 @@ void BattleContext::chooseWarcryCard(int handIdx) {
 }
 
 void BattleContext::chooseDrawToHandCards(const int *idxs, int cardCount) {
+    const bool subsetReveal = cardSelectInfo.cardSelectTask == CardSelectTask::SECRET_TECHNIQUE
+            || cardSelectInfo.cardSelectTask == CardSelectTask::SECRET_WEAPON;
     for (int i = 0; i < cardCount; ++i) {
         const auto drawIdx = idxs[i];
         auto c = cards.drawPile[drawIdx];
+        consumeKnownDrawAtIndex(drawIdx, c);
         cards.removeFromDrawPileAtIdx(drawIdx);
         moveToHandHelper(c);
+    }
+    if (subsetReveal) {
+        // These choices reveal a subset of eligible draw-pile cards without
+        // exposing a stable order; fail closed for the exact-order sampler.
+        markDrawKnowledgeUnsupported();
     }
 }
 

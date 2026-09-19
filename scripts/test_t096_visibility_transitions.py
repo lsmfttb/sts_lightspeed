@@ -22,11 +22,16 @@ def main() -> int:
         "sampler_private_remainder_diverse",
         "havoc_consumes_top_preserves_suffix",
         "rebound_establishes_known_top",
+        "forethought_known_position_preserved",
+        "subset_reveal_fails_closed",
         "frozen_eye_full_order",
         "frozen_eye_sampler_preserves_order",
         "runic_dome_hides_current_intent",
         "runic_dome_preserves_previous_move",
         "runic_dome_sanitizes_roll_misc",
+        "runic_dome_hides_louse_misc",
+        "runic_dome_retains_visible_power",
+        "runic_dome_direct_misc_fail_closed",
     )
     if report.get("schema_id") != "native-battle-visibility-audit-v1":
         raise AssertionError("unexpected visibility audit schema")

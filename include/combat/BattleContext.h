@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <array>
+#include <map>
 
 #include "sts_common.h"
 
@@ -89,12 +90,15 @@ namespace sts {
         MonsterGroup monsters;
         CardManager cards;
 
-        // Epistemic state only.  This records cards that a normal player knows
-        // are next to be drawn, ordered from the top of the draw pile down.
-        // It deliberately has no effect on mechanics, RNG, or legal actions.
-        // Keeping it on BattleContext makes ordinary checkpoint copies retain
-        // the same current player knowledge without reconstructing history.
+        // Epistemic state only.  The vector records a known top prefix,
+        // ordered from the top of the draw pile down.  The map records exact
+        // known positions from the top that are not part of that prefix (for
+        // example Forethought's known bottom placement).  Neither affects
+        // mechanics, RNG, or legal actions, and ordinary checkpoint copies
+        // retain the same current player knowledge.
         std::vector<std::int16_t> knownDrawTopUniqueIds;
+        std::map<std::int32_t, std::int16_t> knownDrawPositionUniqueIds;
+        bool knownDrawKnowledgeUnsupported = false;
 
         CardQueueItem curCardQueueItem;
 
@@ -196,7 +200,10 @@ namespace sts {
         void onShuffle();
         void clearKnownDrawOrder();
         void noteKnownDrawTop(const CardInstance &c);
+        void noteKnownDrawBottom(const CardInstance &c);
         void consumeKnownDrawTop(const CardInstance &c);
+        void consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c);
+        void markDrawKnowledgeUnsupported();
         void triggerAndMoveToExhaustPile(CardInstance c);
         void mummifiedHandOnUsePower();
 

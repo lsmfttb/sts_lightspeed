@@ -66,10 +66,6 @@ namespace sts {
         int uniquePower0 = 0; // unique powers, hexaghost orbCount
         std::int16_t uniquePower1 = 0; // Corrupt Heart invincible,
 
-        // Epistemic snapshot of miscInfo from before the most recent hidden
-        // move roll. This metadata never feeds mechanics or RNG.
-        int publicMiscInfo = 0;
-
         // Shield Gremlin target
         // GreenLouse / RedLouse D
         // Red Slaver entangled turn
