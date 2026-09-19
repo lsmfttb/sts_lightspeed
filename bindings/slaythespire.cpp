@@ -12,6 +12,8 @@
 #include <cmath>
 #include <stdexcept>
 #include <iomanip>
+#include <map>
+#include <numeric>
 
 #include "sim/ConsoleSimulator.h"
 #include "sim/search/ScumSearchAgent2.h"
@@ -547,7 +549,98 @@ pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
     ret["idx1"] = action.idx1;
     ret["idx2"] = action.idx2;
     ret["idx3"] = action.idx3;
-    ret["label"] = action.label;
+    const auto bitsMarker = action.label.find("bits=");
+    if (bitsMarker == std::string::npos) {
+        ret["label"] = action.label;
+    } else {
+        std::ostringstream publicLabel;
+        publicLabel << "battle." << action.kind
+                    << " idx1=" << action.idx1
+                    << " idx2=" << action.idx2
+                    << " idx3=" << action.idx3;
+        ret["label"] = publicLabel.str();
+    }
+    return ret;
+}
+
+pybind11::dict makeT096AnchorDistributionMetadata(
+        const GameContext &gc,
+        const BattleContext &bc) {
+    pybind11::dict ret;
+    const bool firstOrdinaryPlayerDecision =
+            bc.turn == 0 && bc.inputState == InputState::PLAYER_NORMAL
+            && bc.outcome == Outcome::UNDECIDED;
+    const bool discardEmpty = bc.cards.discardPile.empty();
+    const bool exhaustEmpty = bc.cards.exhaustPile.empty();
+    ret["schema_id"] = "native-battle-anchor-distribution-audit-v1";
+    ret["first_ordinary_player_decision"] = firstOrdinaryPlayerDecision;
+    ret["draw_order_visibility"] = "hidden";
+    ret["stronger_draw_constraint"] = false;
+    ret["draw_knowledge_fidelity"] = "ordinary-hidden-draw-only";
+    ret["discard_empty"] = discardEmpty;
+    ret["exhaust_empty"] = exhaustEmpty;
+    ret["deck_size"] = gc.deck.size();
+    ret["hand_size"] = bc.cards.cardsInHand;
+    ret["draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
+
+    std::vector<int> seen(gc.deck.size(), 0);
+    std::map<int, int> unseenCountMap;
+    bool allPersistentInstances = true;
+    bool noTemporaryGeneratedInserted = true;
+    bool unionMultisetExact = true;
+    const auto inspectCard = [&](const CardInstance &card, bool unseen) {
+        const auto uniqueId = static_cast<int>(card.getUniqueId());
+        const bool persistent = uniqueId >= 0
+                && uniqueId < gc.deck.size()
+                && card.getId() == gc.deck.cards[uniqueId].getId();
+        allPersistentInstances = allPersistentInstances && persistent;
+        noTemporaryGeneratedInserted = noTemporaryGeneratedInserted && persistent;
+        if (!persistent) {
+            return;
+        }
+        ++seen[uniqueId];
+        if (unseen) {
+            const auto id = static_cast<int>(card.getId());
+            ++unseenCountMap[id];
+        }
+    };
+    for (int idx = 0; idx < bc.cards.cardsInHand; ++idx) {
+        inspectCard(bc.cards.hand[idx], false);
+    }
+    for (const auto &card : bc.cards.drawPile) {
+        inspectCard(card, true);
+    }
+    if (!bc.cards.discardPile.empty() || !bc.cards.exhaustPile.empty()) {
+        unionMultisetExact = false;
+    }
+    for (const auto count : seen) {
+        if (count != 1) {
+            unionMultisetExact = false;
+            break;
+        }
+    }
+    const auto seenCardCount = std::accumulate(seen.begin(), seen.end(), 0);
+    unionMultisetExact = unionMultisetExact && seenCardCount == gc.deck.size();
+    ret["all_cards_persistent_deck_instances"] = allPersistentInstances;
+    ret["no_temporary_generated_inserted_cards"] = noTemporaryGeneratedInserted;
+    ret["multiset_union_exact"] = unionMultisetExact;
+    pybind11::dict unseenCounts;
+    for (const auto &[id, count] : unseenCountMap) {
+        unseenCounts[pybind11::int_(id)] = count;
+    }
+    ret["remaining_unseen_card_counts"] = unseenCounts;
+    ret["remaining_unseen_card_identity_count"] =
+            static_cast<int>(unseenCounts.size());
+    ret["remaining_unseen_nonempty"] = !unseenCounts.empty();
+    ret["eligible"] = firstOrdinaryPlayerDecision
+            && discardEmpty
+            && exhaustEmpty
+            && allPersistentInstances
+            && noTemporaryGeneratedInserted
+            && unionMultisetExact
+            && !unseenCounts.empty()
+            && unseenCounts.size() >= 2
+            && unseenCounts.size() <= 32;
     return ret;
 }
 
@@ -910,13 +1003,27 @@ struct StepSimulator {
         return makeT096PublicInformationProjection(gc, bc, actions);
     }
 
+    pybind11::dict t096AnchorDistributionMetadata() {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error(
+                    "T096 anchor distribution metadata requested outside battle");
+        }
+        return makeT096AnchorDistributionMetadata(gc, bc);
+    }
+
     pybind11::list sampleHiddenFutureParticles(
             std::uint64_t samplerSeed,
+            int particleStart,
             int particleCount) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error(
                     "T096 hidden-future sampling requested outside battle");
+        }
+        if (particleStart < 0) {
+            throw std::invalid_argument(
+                    "T096 particle_start must be non-negative");
         }
         if (particleCount <= 0 || particleCount > 65536) {
             throw std::invalid_argument(
@@ -925,11 +1032,13 @@ struct StepSimulator {
 
         pybind11::list particles;
         for (int index = 0; index < particleCount; ++index) {
+            const int particleIndex = particleStart + index;
             // SplitMix-style domain separation gives every accepted particle a
             // reproducible native sampler seed without exposing native RNG
             // state to the public projection.
             std::uint64_t particleSeed = samplerSeed +
-                    0x9E3779B97F4A7C15ULL * static_cast<std::uint64_t>(index + 1);
+                    0x9E3779B97F4A7C15ULL *
+                            static_cast<std::uint64_t>(particleIndex + 1);
             particleSeed ^= particleSeed >> 30;
             particleSeed *= 0xBF58476D1CE4E5B9ULL;
             particleSeed ^= particleSeed >> 27;
@@ -948,7 +1057,7 @@ struct StepSimulator {
                 actions.push_back(makeBattleAction(particle, action));
             }
             pybind11::dict row;
-            row["particle_index"] = index;
+            row["particle_index"] = particleIndex;
             row["sampler_seed"] = particleSeed;
             row["public_information_projection"] =
                     makeT096PublicInformationProjection(gc, particle, actions);
@@ -1866,10 +1975,12 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("legal_actions", &StepSimulator::legalActions)
         .def("public_projection", &StepSimulator::publicProjection)
         .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
+        .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
         .def(
             "sample_hidden_future_particles",
             &StepSimulator::sampleHiddenFutureParticles,
             pybind11::arg("sampler_seed"),
+            pybind11::arg("particle_start"),
             pybind11::arg("particle_count"))
         .def(
             "battle_search",

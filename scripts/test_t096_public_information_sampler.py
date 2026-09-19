@@ -25,7 +25,10 @@ def main() -> int:
             and snapshot.get("battle_input_state") == "PLAYER_NORMAL"
         ):
             projection = sim.t096_public_information_projection()
-            particles = sim.sample_hidden_future_particles(17, args.particles)
+            metadata = sim.t096_anchor_distribution_metadata()
+            if metadata.get("schema_id") != "native-battle-anchor-distribution-audit-v1":
+                raise AssertionError("T096 native smoke missing anchor metadata schema")
+            particles = sim.sample_hidden_future_particles(17, 0, args.particles)
             if any(
                 row["public_information_projection"] != projection
                 for row in particles
@@ -39,6 +42,11 @@ def main() -> int:
                 for row in particles
             ):
                 raise AssertionError("T096 native smoke found hidden leakage")
+            if any(
+                "bits=" in action["label"]
+                for action in projection["ordered_public_legal_actions"]
+            ):
+                raise AssertionError("T096 native smoke found replay bits in public labels")
             print(
                 "T096_NATIVE_SMOKE_PASS "
                 f"step={step_index} particles={len(particles)} "
