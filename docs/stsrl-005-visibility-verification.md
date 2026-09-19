@@ -37,6 +37,14 @@ monster storage is classified as private-only, public-semantic, or
 mixed/unseparated; private-only random parameters remain hidden without
 degrading the otherwise complete public state, public counters use semantic
 names, and only mixed/unseparated state is marked `unsupported_fidelity`.
+Under Runic Dome, a counter that shares `miscInfo` with hidden roll-time intent
+selection is treated as mixed until a separate epistemic provenance field is
+available: its semantic alias is omitted, the projection is unsupported, and
+the particle sampler fails closed.  The observed Looter/Mugger stolen-gold
+counter is the explicit exception because it is a public resource change and
+does not depend on the hidden intent roll.  The visibility audit also compares
+two native states that differ only in a hidden counter to ensure their Dome
+projections are identical.
 
 Known draw facts use a common position constraint: Headbutt, Warcry, and
 Rebound establish a top prefix, while Forethought establishes a known bottom

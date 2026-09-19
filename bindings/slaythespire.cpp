@@ -398,6 +398,32 @@ MonsterMiscKnowledgeClass classifyMonsterMiscKnowledge(const MonsterId id) {
     }
 }
 
+MonsterMiscKnowledgeClass classifyMonsterMiscKnowledge(
+        const BattleContext &bc,
+        const Monster &monster) {
+    const auto classification = classifyMonsterMiscKnowledge(monster.id);
+    if (!bc.player.hasRelic<R::RUNIC_DOME>()
+            || classification != MonsterMiscKnowledgeClass::PUBLIC_SEMANTIC) {
+        return classification;
+    }
+
+    // Runic Dome hides the current intent.  These monsters use miscInfo both
+    // for a semantic counter and while selecting the next hidden intent:
+    // Monster::rollMove() passes the slot by reference to getMoveForRoll(),
+    // which can mutate it before moveHistory[0] is updated.  Reading the
+    // native slot here would therefore alias hidden roll-time state into a
+    // public semantic field.  Other semantic counters are updated by an
+    // already-observed action and remain separable from the hidden roll.
+    switch (monster.id) {
+        case MonsterId::BOOK_OF_STABBING:
+        case MonsterId::GREMLIN_WIZARD:
+        case MonsterId::THE_CHAMP:
+            return MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED;
+        default:
+            return classification;
+    }
+}
+
 pybind11::list publicMonsterStatuses(const Monster &monster) {
     pybind11::list statuses;
     for (int statusIdx = 0;
@@ -541,8 +567,11 @@ pybind11::dict publicInformationMonsterSnapshot(
     ret["regen"] = monster.regen;
     ret["half_dead"] = monster.halfDead;
     ret["public_statuses"] = publicMonsterStatuses(monster);
-    appendPublicMonsterSemanticFields(monster, ret);
-    ret["information_fidelity"] = classifyMonsterMiscKnowledge(monster.id)
+    const auto knowledgeClass = classifyMonsterMiscKnowledge(bc, monster);
+    if (knowledgeClass != MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED) {
+        appendPublicMonsterSemanticFields(monster, ret);
+    }
+    ret["information_fidelity"] = knowledgeClass
             == MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED
             ? "unsupported_fidelity" : "supported";
     return ret;
@@ -957,7 +986,7 @@ bool publicInformationUnsupported(const BattleContext &bc) {
         return true;
     }
     for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
-        if (classifyMonsterMiscKnowledge(bc.monsters.arr[idx].id)
+        if (classifyMonsterMiscKnowledge(bc, bc.monsters.arr[idx])
                 == MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED) {
             return true;
         }
@@ -1631,10 +1660,26 @@ struct StepSimulator {
                 && !domeMonster.contains("misc_info")
                 && !domeMonster.contains("unique_power_0")
                 && !domeMonster.contains("unique_power_1")
-                && domeMonster.contains("stabs_used")
-                && domeMonster["stabs_used"].cast<int>() == book.miscInfo
+                && !domeMonster.contains("stabs_used")
                 && domeMonster["information_fidelity"].cast<std::string>()
-                        == "supported";
+                        == "unsupported_fidelity"
+                && domeProjection["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity";
+
+        Monster bookWithDifferentHiddenCounter = book;
+        bookWithDifferentHiddenCounter.miscInfo = book.miscInfo + 3;
+        bc = checkpoint;
+        bc.monsters.arr[0] = bookWithDifferentHiddenCounter;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto domeCounterVariantProjection = t096PublicInformationProjection();
+        const bool hiddenCounterTimingInvariant = domeProjection.equal(
+                domeCounterVariantProjection);
+        bool mixedDomeSamplerFailsClosed = false;
+        try {
+            (void) sampleHiddenFutureParticles(0x31415926ULL, 0, 1);
+        } catch (const std::runtime_error &) {
+            mixedDomeSamplerFailsClosed = true;
+        }
 
         Monster louse;
         louse.id = MonsterId::GREEN_LOUSE;
@@ -1682,7 +1727,7 @@ struct StepSimulator {
         const auto looterProjection = t096PublicInformationProjection();
         const auto looterMonster = looterProjection["monsters"].cast<pybind11::list>()[0]
                 .cast<pybind11::dict>();
-        const bool looterMiscFailsClosed = !looterMonster.contains("misc_info")
+        const bool looterPublicCounterPreserved = !looterMonster.contains("misc_info")
                 && !looterMonster.contains("unique_power_0")
                 && !looterMonster.contains("unique_power_1")
                 && looterMonster.contains("stolen_gold")
@@ -1727,10 +1772,11 @@ struct StepSimulator {
         const auto wizardMonster = wizardProjection["monsters"].cast<pybind11::list>()[0]
                 .cast<pybind11::dict>();
         const bool directSetMiscFailClosed = !wizardMonster.contains("misc_info")
-                && wizardMonster.contains("charge_count")
-                && wizardMonster["charge_count"].cast<int>() == wizard.miscInfo
+                && !wizardMonster.contains("charge_count")
                 && wizardMonster["information_fidelity"].cast<std::string>()
-                        == "supported"
+                        == "unsupported_fidelity"
+                && wizardProjection["information_fidelity"].cast<std::string>()
+                        == "unsupported_fidelity"
                 && !wizardMonster.contains("current_move");
 
         pybind11::dict report;
@@ -1755,10 +1801,18 @@ struct StepSimulator {
         report["runic_dome_hides_current_intent"] = domeHidesCurrentIntent;
         report["runic_dome_preserves_previous_move"] = domePreservesPreviousMove;
         report["runic_dome_sanitizes_roll_misc"] = domeSanitizesRollMisc;
+        report["runic_dome_hidden_counter_timing_invariant"] =
+                hiddenCounterTimingInvariant;
+        report["runic_dome_mixed_counter_sampler_fails_closed"] =
+                mixedDomeSamplerFailsClosed;
         report["runic_dome_hides_louse_misc"] = hiddenMiscNotProjected;
         report["private_hidden_state_projection_invariant"] =
                 privateHiddenStateProjectionInvariant;
-        report["runic_dome_looter_misc_fails_closed"] = looterMiscFailsClosed;
+        report["runic_dome_looter_public_counter_preserved"] =
+                looterPublicCounterPreserved;
+        // Keep the historical audit key for downstream consumers while the
+        // value now asserts the supported semantic counter contract.
+        report["runic_dome_looter_misc_fails_closed"] = looterPublicCounterPreserved;
         report["private_hidden_misc_sampler_supported"] = privateHiddenMiscSamplerSupported;
         report["runic_dome_retains_visible_power"] = visiblePowerRetained;
         report["runic_dome_direct_misc_fail_closed"] = directSetMiscFailClosed;
