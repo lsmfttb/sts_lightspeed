@@ -146,6 +146,11 @@ def assert_active_monster_shape(snapshot: Mapping[str, Any]) -> None:
             isinstance(monster.get("name"), str) and monster["name"],
             f"active monster name is not a string identity: {snapshot}",
         )
+        for field_name in ("misc_info", "unique_power_0", "unique_power_1"):
+            require(
+                field_name in monster,
+                f"active native monster snapshot lost field {field_name}: {snapshot}",
+            )
 
 
 def assert_terminal_monster_telemetry(
@@ -189,6 +194,11 @@ def assert_terminal_monster_telemetry(
             isinstance(monster.get("name"), str) and monster["name"],
             f"terminal copied monster name is not a string: {transition}",
         )
+        for field_name in ("misc_info", "unique_power_0", "unique_power_1"):
+            require(
+                field_name in monster,
+                f"terminal native monster snapshot lost field {field_name}: {transition}",
+            )
         require(
             isinstance(monster.get("current_hp"), int)
             and not isinstance(monster.get("current_hp"), bool),

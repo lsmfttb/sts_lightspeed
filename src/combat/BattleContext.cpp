@@ -2834,14 +2834,14 @@ void BattleContext::consumeKnownDrawTop(const CardInstance &c) {
         // A transition we did not model as a deterministic public draw has
         // occurred.  Conservatively retain no exact-order claim.
         clearKnownDrawOrder();
-        markDrawKnowledgeUnsupported();
+        markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
         return;
     }
     const auto positionZero = knownDrawPositionUniqueIds.find(0);
     if (positionZero != knownDrawPositionUniqueIds.end()) {
         if (positionZero->second != c.getUniqueId()) {
             clearKnownDrawOrder();
-            markDrawKnowledgeUnsupported();
+            markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
             return;
         }
         knownDrawPositionUniqueIds.erase(positionZero);
@@ -2869,14 +2869,14 @@ void BattleContext::consumeKnownDrawTop(const CardInstance &c) {
 void BattleContext::consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c) {
     const auto pileSize = static_cast<int>(cards.drawPile.size());
     if (drawPileIdx < 0 || drawPileIdx >= pileSize) {
-        markDrawKnowledgeUnsupported();
+        markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
         return;
     }
     const auto position = pileSize - 1 - drawPileIdx;
     if (position < static_cast<int>(knownDrawTopUniqueIds.size())) {
         if (knownDrawTopUniqueIds[position] != c.getUniqueId()) {
             clearKnownDrawOrder();
-            markDrawKnowledgeUnsupported();
+            markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
             return;
         }
         knownDrawTopUniqueIds.erase(knownDrawTopUniqueIds.begin() + position);
@@ -2885,7 +2885,7 @@ void BattleContext::consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance 
         if (it != knownDrawPositionUniqueIds.end()) {
             if (it->second != c.getUniqueId()) {
                 clearKnownDrawOrder();
-                markDrawKnowledgeUnsupported();
+                markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
                 return;
             }
             knownDrawPositionUniqueIds.erase(it);
@@ -2901,8 +2901,9 @@ void BattleContext::consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance 
     }
 }
 
-void BattleContext::markDrawKnowledgeUnsupported() {
-    knownDrawKnowledgeUnsupported = true;
+void BattleContext::markDrawKnowledgeUnsupported(
+        const DrawKnowledgeUnsupportedReason reason) {
+    knownDrawUnsupportedReasons |= static_cast<std::uint8_t>(reason);
 }
 
 void BattleContext::invalidateAfterUnknownDrawInsertion() {
@@ -2913,7 +2914,7 @@ void BattleContext::invalidateAfterUnknownDrawInsertion() {
         knownDrawTopUniqueIds.resize(1);
     }
     knownDrawPositionUniqueIds.clear();
-    markDrawKnowledgeUnsupported();
+    markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION);
 }
 
 void BattleContext::onShuffle() {
@@ -3199,7 +3200,7 @@ void BattleContext::chooseDrawToHandCards(const int *idxs, int cardCount) {
     if (subsetReveal) {
         // These choices reveal a subset of eligible draw-pile cards without
         // exposing a stable order; fail closed for the exact-order sampler.
-        markDrawKnowledgeUnsupported();
+        markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::SUBSET_MEMBERSHIP);
     }
 }
 

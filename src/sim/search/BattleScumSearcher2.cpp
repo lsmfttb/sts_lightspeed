@@ -136,7 +136,9 @@ std::string canonicalBattleState(const sts::BattleContext &state, bool &complete
         << state.isBattleOver << ',' << state.endTurnQueued << ',' << state.turnHasEnded
         << ',' << state.skipMonsterTurn << ',' << state.potionCount << ',' << state.potionCapacity
         << ',' << state.turn << ',' << state.miscBits << '|';
-    out << "draw-knowledge|" << state.knownDrawKnowledgeUnsupported << "|top|";
+    out << "draw-knowledge-reasons|"
+        << static_cast<unsigned int>(state.knownDrawUnsupportedReasons)
+        << "|top|";
     for (const auto uniqueId : state.knownDrawTopUniqueIds) {
         out << uniqueId << ',';
     }

@@ -35,6 +35,17 @@ namespace sts {
         PLAYER_LOSS,
     };
 
+    // Exact draw facts and unrepresented player knowledge have different
+    // lifetimes.  Keep the latter typed so a transition can clear only the
+    // reason it actually resolves (for example, shuffling exact order does
+    // not resolve subset-membership knowledge).
+    enum class DrawKnowledgeUnsupportedReason : std::uint8_t {
+        NONE = 0,
+        SUBSET_MEMBERSHIP = 1 << 0,
+        UNKNOWN_INSERTION = 1 << 1,
+        INCONSISTENT_EXACT_FACT = 1 << 2,
+    };
+
     static constexpr const char * battleOutcomeStrings[] {
             "UNDECIDED",
             "PLAYER_VICTORY",
@@ -98,7 +109,7 @@ namespace sts {
         // retain the same current player knowledge.
         std::vector<std::int16_t> knownDrawTopUniqueIds;
         std::map<std::int32_t, std::int16_t> knownDrawPositionUniqueIds;
-        bool knownDrawKnowledgeUnsupported = false;
+        std::uint8_t knownDrawUnsupportedReasons = 0;
 
         CardQueueItem curCardQueueItem;
 
@@ -203,7 +214,9 @@ namespace sts {
         void noteKnownDrawBottom(const CardInstance &c);
         void consumeKnownDrawTop(const CardInstance &c);
         void consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c);
-        void markDrawKnowledgeUnsupported();
+        void markDrawKnowledgeUnsupported(
+                DrawKnowledgeUnsupportedReason reason =
+                        DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
         void invalidateAfterUnknownDrawInsertion();
         void triggerAndMoveToExhaustPile(CardInstance c);
         void mummifiedHandOnUsePower();

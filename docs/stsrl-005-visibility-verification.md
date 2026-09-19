@@ -4,12 +4,15 @@ The T096 public-information projection is versioned as
 `native-battle-public-information-v2`.  It represents current player knowledge
 as state, rather than inferring it from an action-history replay.
 
-`BattleContext::knownDrawTopUniqueIds` is epistemic metadata.  It is copied by
-the ordinary `BattleContext` copy constructor (and therefore simulator
+`BattleContext::knownDrawTopUniqueIds` and
+`knownDrawPositionUniqueIds` are exact epistemic facts.  They are copied by the
+ordinary `BattleContext` copy constructor (and therefore simulator
 checkpoints), and cannot affect card order, RNG, game mechanics, or legal
-actions.  Headbutt and Warcry add a deterministically public top-card fact;
-drawing that card consumes it.  Shuffles clear exact-order constraints, but do
-not resolve an already-unsupported information transition.
+actions.  Typed `knownDrawUnsupportedReasons` records unrepresented current
+knowledge separately from those exact facts.  Headbutt and Warcry add a
+deterministically public top-card fact; drawing that card consumes it.  Shuffles
+clear exact-order constraints, but do not resolve an already-unsupported
+information transition.
 
 The public projection reports one of:
 
@@ -29,10 +32,11 @@ the public projection.
 With Runic Dome, public monster rows omit the current move, attack category,
 and the current move's damage/hit structure, while retaining the preceding
 observed move and semantic public status values.  Raw native `miscInfo` and
-packed `uniquePower0/1` storage are never part of the public schema.  A
-monster whose overloaded internal counter cannot yet be separated into public
-semantics is marked `unsupported_fidelity`, rather than silently exposing or
-discarding that state.
+packed `uniquePower0/1` storage are never part of the public schema.  Native
+monster storage is classified as private-only, public-semantic, or
+mixed/unseparated; private-only random parameters remain hidden without
+degrading the otherwise complete public state, public counters use semantic
+names, and only mixed/unseparated state is marked `unsupported_fidelity`.
 
 Known draw facts use a common position constraint: Headbutt, Warcry, and
 Rebound establish a top prefix, while Forethought establishes a known bottom
