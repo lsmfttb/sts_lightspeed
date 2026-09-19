@@ -25,14 +25,22 @@ Frozen Eye.  The particle API keeps its private fingerprint strictly outside
 the public projection.
 
 With Runic Dome, public monster rows omit the current move, attack category,
-move IDs, and current damage/hit structure.  No mechanics or legal action
-enumeration changes; the omission is solely a normal-information projection
-boundary.
+the current move's damage/hit structure, and other current-intent-only fields.
+The preceding observed move remains public because monster move history is
+part of the player's current knowledge and can affect future move selection.
+No mechanics or legal action enumeration changes; the omission is solely a
+normal-information projection boundary.
 
 The bounded native smoke remains:
 
 ```bash
 python scripts/test_t096_public_information_sampler.py
+```
+
+The deterministic high-risk transition audit is:
+
+```bash
+python scripts/test_t096_visibility_transitions.py
 ```
 
 The full STSRL acceptance boundary remains external: it must pin the exact

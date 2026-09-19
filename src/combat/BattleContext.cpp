@@ -2521,7 +2521,9 @@ void BattleContext::playTopCardInDrawPile(int monsterTargetIdx, bool exhausts) {
         return;
     }
 
-    CardQueueItem item(cards.popFromDrawPile(), monsterTargetIdx, player.energy);
+    const auto card = cards.popFromDrawPile();
+    consumeKnownDrawTop(card);
+    CardQueueItem item(card, monsterTargetIdx, player.energy);
     item.exhaustOnUse = exhausts;
     item.autoplay = true;
     item.freeToPlay = true; // todo remove the autoplay boolean? added this instead

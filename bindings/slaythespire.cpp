@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <map>
 #include <numeric>
+#include <set>
 
 #include "sim/ConsoleSimulator.h"
 #include "sim/search/ScumSearchAgent2.h"
@@ -466,7 +467,7 @@ pybind11::list publicInformationMonsterGroupSnapshot(const BattleContext &bc) {
             // them for an available model feature.
             for (const char *field : {
                     "attacking", "intent_category", "current_move", "move_id",
-                    "last_move_id", "move_base_damage", "move_hits"}) {
+                    "move_base_damage", "move_hits"}) {
                 monster.attr("pop")(field, pybind11::none());
             }
         }
@@ -1078,6 +1079,136 @@ struct StepSimulator {
                     "T096 anchor distribution metadata requested outside battle");
         }
         return makeT096AnchorDistributionMetadata(gc, bc);
+    }
+
+    pybind11::dict t096VisibilityAudit() {
+        const auto savedBattleContext = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedScreenState = gc.screenState;
+        const auto savedGameOutcome = gc.outcome;
+
+        gc.screenState = ScreenState::BATTLE;
+        gc.outcome = GameOutcome::UNDECIDED;
+        bc = BattleContext();
+        bc.inputState = InputState::PLAYER_NORMAL;
+        bc.turn = 1;
+        bc.monsters.monsterCount = 1;
+        bc.monsters.monstersAlive = 1;
+        auto &monster = bc.monsters.arr[0];
+        monster.idx = 0;
+        monster.id = MonsterId::JAW_WORM;
+        monster.curHp = 30;
+        monster.maxHp = 30;
+        monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+        monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+
+        CardInstance privateCardA(CardId::STRIKE_RED);
+        privateCardA.setUniqueId(100);
+        CardInstance privateCardB(CardId::DEFEND_RED);
+        privateCardB.setUniqueId(101);
+        CardInstance knownCardA(CardId::BASH);
+        knownCardA.setUniqueId(102);
+        CardInstance knownCardB(CardId::HEADBUTT);
+        knownCardB.setUniqueId(103);
+        bc.cards.drawPile.push_back(privateCardA);
+        bc.cards.drawPile.push_back(privateCardB);
+        bc.cards.discardPile.push_back(knownCardA);
+        bc.cards.discardPile.push_back(knownCardB);
+
+        // Headbutt is the native deterministic public placement used by the
+        // issue contract.  Two placements establish a top-first known prefix.
+        bc.chooseHeadbuttCard(0);
+        bc.chooseHeadbuttCard(0);
+        battleActive = true;
+
+        const auto projection = t096PublicInformationProjection();
+        const auto projectionVisibility = projection["visibility"].cast<pybind11::dict>();
+        const auto projectionDrawOrder = projectionVisibility["draw_order"].cast<pybind11::dict>();
+        const bool projectionKnownPrefix = projectionDrawOrder["classification"]
+                .cast<std::string>() == "known_prefix"
+                && projectionDrawOrder["known_top_prefix"].cast<pybind11::list>().size() == 2;
+        const auto checkpoint = bc;
+        const bool checkpointPreserves = checkpoint.knownDrawTopUniqueIds
+                == bc.knownDrawTopUniqueIds;
+        const auto knownTopCount = knownDrawTopCount(bc);
+
+        const auto particles = sampleHiddenFutureParticles(0x12345678ULL, 0, 8);
+        bool particlePrefixPreserved = true;
+        std::set<std::string> particleFingerprints;
+        for (const auto &particleHandle : particles) {
+            const auto particle = particleHandle.cast<pybind11::dict>();
+            particleFingerprints.insert(
+                    particle["hidden_future_fingerprint"].cast<std::string>());
+            const auto particleProjection = particle["public_information_projection"]
+                    .cast<pybind11::dict>();
+            const auto visibility = particleProjection["visibility"].cast<pybind11::dict>();
+            const auto drawOrder = visibility["draw_order"].cast<pybind11::dict>();
+            const auto prefix = drawOrder["known_top_prefix"].cast<pybind11::list>();
+            particlePrefixPreserved = particlePrefixPreserved && prefix.size() == 2;
+            if (prefix.size() == 2) {
+                particlePrefixPreserved = particlePrefixPreserved
+                        && prefix[0].cast<pybind11::dict>()["id"].cast<int>()
+                                == static_cast<int>(CardId::HEADBUTT)
+                        && prefix[1].cast<pybind11::dict>()["id"].cast<int>()
+                                == static_cast<int>(CardId::BASH);
+            }
+        }
+
+        bc = checkpoint;
+        bc.playTopCardInDrawPile(0, false); // Havoc consumes knownCardB.
+        const bool havocConsumesTopPreservesSuffix = knownDrawTopCount(bc) == 1
+                && bc.knownDrawTopUniqueIds.size() == 1
+                && bc.knownDrawTopUniqueIds.front() == knownCardA.getUniqueId();
+
+        bc = checkpoint;
+        bc.player.setHasRelic<R::FROZEN_EYE>(true);
+        const auto frozenProjection = t096PublicInformationProjection();
+        const auto frozenVisibility = frozenProjection["visibility"].cast<pybind11::dict>();
+        const auto frozenDrawOrder = frozenVisibility["draw_order"].cast<pybind11::dict>();
+        const auto frozenVisibleOrder = frozenDrawOrder["visible_order_from_top"].cast<pybind11::list>();
+        const auto frozenParticles = sampleHiddenFutureParticles(0x87654321ULL, 0, 4);
+        bool frozenParticlesPreserved = true;
+        for (const auto &particleHandle : frozenParticles) {
+            const auto particle = particleHandle.cast<pybind11::dict>();
+            frozenParticlesPreserved = frozenParticlesPreserved
+                    && particle["public_information_projection"].cast<pybind11::dict>()
+                            .equal(frozenProjection);
+        }
+
+        bc = checkpoint;
+        bc.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto domeProjection = t096PublicInformationProjection();
+        const auto domeMonsters = domeProjection["monsters"].cast<pybind11::list>();
+        const auto domeMonster = domeMonsters[0].cast<pybind11::dict>();
+        const bool domeHidesCurrentIntent = !domeMonster.contains("attacking")
+                && !domeMonster.contains("intent_category")
+                && !domeMonster.contains("current_move")
+                && !domeMonster.contains("move_id")
+                && !domeMonster.contains("move_base_damage")
+                && !domeMonster.contains("move_hits");
+        const bool domePreservesPreviousMove = domeMonster.contains("last_move_id")
+                && domeMonster["last_move_id"].cast<int>()
+                        == static_cast<int>(MMID::JAW_WORM_CHOMP);
+
+        pybind11::dict report;
+        report["schema_id"] = "native-battle-visibility-audit-v1";
+        report["headbutt_known_prefix"] = knownTopCount == 2 && projectionKnownPrefix;
+        report["checkpoint_preserves_known_prefix"] = checkpointPreserves;
+        report["sampler_preserves_known_prefix"] = particlePrefixPreserved;
+        report["sampler_private_remainder_diverse"] = particleFingerprints.size() > 1;
+        report["havoc_consumes_top_preserves_suffix"] = havocConsumesTopPreservesSuffix;
+        report["frozen_eye_full_order"] = frozenDrawOrder["classification"]
+                .cast<std::string>() == "full_public_exact"
+                && frozenVisibleOrder.size() == bc.cards.drawPile.size();
+        report["frozen_eye_sampler_preserves_order"] = frozenParticlesPreserved;
+        report["runic_dome_hides_current_intent"] = domeHidesCurrentIntent;
+        report["runic_dome_preserves_previous_move"] = domePreservesPreviousMove;
+
+        bc = savedBattleContext;
+        battleActive = savedBattleActive;
+        gc.screenState = savedScreenState;
+        gc.outcome = savedGameOutcome;
+        return report;
     }
 
     pybind11::list sampleHiddenFutureParticles(
@@ -2051,6 +2182,7 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("public_projection", &StepSimulator::publicProjection)
         .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
         .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
+        .def("t096_visibility_audit", &StepSimulator::t096VisibilityAudit)
         .def(
             "sample_hidden_future_particles",
             &StepSimulator::sampleHiddenFutureParticles,
