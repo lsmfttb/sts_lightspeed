@@ -29,6 +29,7 @@ REQUIRED_STEP_SIMULATOR_METHODS = (
     "legal_battle_start_encounters",
     "rebuild_battle_start",
     "t096_public_information_projection",
+    "sample_hidden_future_particles_search",
 )
 
 REQUIRED_SNAPSHOT_FIELDS = (
