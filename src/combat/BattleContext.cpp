@@ -1997,6 +1997,7 @@ void BattleContext::onAfterUseCard() {
 
         if (rebound) { // these methods all call resetCardBeforeMoving but it looks unnecessary
             cards.moveToDrawPileTop(c);
+            noteKnownDrawTop(c);
 
         } else if (c.id == CardId::TANTRUM) {
             cards.shuffleIntoDrawPile(cardRandomRng, c);

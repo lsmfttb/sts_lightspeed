@@ -467,9 +467,15 @@ pybind11::list publicInformationMonsterGroupSnapshot(const BattleContext &bc) {
             // them for an available model feature.
             for (const char *field : {
                     "attacking", "intent_category", "current_move", "move_id",
-                    "move_base_damage", "move_hits"}) {
+                    "move_base_damage", "move_hits", "unique_power_0",
+                    "unique_power_1"}) {
                 monster.attr("pop")(field, pybind11::none());
             }
+            // miscInfo is also used as a counter/state scratch space by
+            // several monsters.  A roll can mutate it while selecting the
+            // hidden current intent, so expose only its pre-roll epistemic
+            // snapshot under Runic Dome.
+            monster["misc_info"] = bc.monsters.arr[idx].publicMiscInfo;
         }
         ret.append(monster);
     }
@@ -1161,6 +1167,66 @@ struct StepSimulator {
                 && bc.knownDrawTopUniqueIds.front() == knownCardA.getUniqueId();
 
         bc = checkpoint;
+        bc.knownDrawTopUniqueIds.clear();
+        CardInstance reboundCard(CardId::STRIKE_RED);
+        reboundCard.setUniqueId(104);
+        bc.curCardQueueItem = CardQueueItem(reboundCard, 0, 0);
+        bc.curCardQueueItem.triggerOnUse = false;
+        bc.player.setHasStatus<PS::REBOUND>(true);
+        bc.player.setStatusValueNoChecks<PS::REBOUND>(1);
+        bc.onAfterUseCard();
+        const auto reboundProjection = t096PublicInformationProjection();
+        const auto reboundVisibility = reboundProjection["visibility"].cast<pybind11::dict>();
+        const auto reboundDrawOrder = reboundVisibility["draw_order"].cast<pybind11::dict>();
+        bool reboundParticlesPreserved = reboundDrawOrder.contains("known_top_prefix");
+        if (reboundParticlesPreserved) {
+            const auto reboundPrefix = reboundDrawOrder["known_top_prefix"].cast<pybind11::list>();
+            reboundParticlesPreserved = reboundPrefix.size() == 1
+                    && reboundPrefix[0].cast<pybind11::dict>()["id"].cast<int>()
+                            == static_cast<int>(CardId::STRIKE_RED);
+        }
+        const auto reboundParticles = sampleHiddenFutureParticles(0x13579BDFULL, 0, 4);
+        for (const auto &particleHandle : reboundParticles) {
+            const auto particle = particleHandle.cast<pybind11::dict>();
+            const auto particleProjection = particle["public_information_projection"]
+                    .cast<pybind11::dict>();
+            const auto particleVisibility = particleProjection["visibility"]
+                    .cast<pybind11::dict>();
+            const auto particleDrawOrder = particleVisibility["draw_order"]
+                    .cast<pybind11::dict>();
+            if (!particleDrawOrder.contains("known_top_prefix")) {
+                reboundParticlesPreserved = false;
+            } else {
+                const auto particlePrefix = particleDrawOrder["known_top_prefix"]
+                        .cast<pybind11::list>();
+                reboundParticlesPreserved = reboundParticlesPreserved
+                        && particlePrefix.size() == 1
+                        && particlePrefix[0].cast<pybind11::dict>()["id"].cast<int>()
+                                == static_cast<int>(CardId::STRIKE_RED);
+            }
+        }
+
+        Monster book;
+        book.id = MonsterId::BOOK_OF_STABBING;
+        book.idx = 0;
+        book.curHp = 100;
+        book.maxHp = 100;
+        book.miscInfo = 1;
+        book.publicMiscInfo = 1;
+        book.moveHistory[0] = MMID::BOOK_OF_STABBING_SINGLE_STAB;
+        bool bookRollMutatesMisc = false;
+        for (std::uint64_t seed = 1; seed <= 10000 && !bookRollMutatesMisc; ++seed) {
+            Monster candidate = book;
+            BattleContext rollContext = checkpoint;
+            rollContext.aiRng = Random(seed);
+            candidate.rollMove(rollContext);
+            if (candidate.miscInfo != book.miscInfo) {
+                book = candidate;
+                bookRollMutatesMisc = true;
+            }
+        }
+
+        bc = checkpoint;
         bc.player.setHasRelic<R::FROZEN_EYE>(true);
         const auto frozenProjection = t096PublicInformationProjection();
         const auto frozenVisibility = frozenProjection["visibility"].cast<pybind11::dict>();
@@ -1176,6 +1242,7 @@ struct StepSimulator {
         }
 
         bc = checkpoint;
+        bc.monsters.arr[0] = book;
         bc.player.setHasRelic<R::RUNIC_DOME>(true);
         const auto domeProjection = t096PublicInformationProjection();
         const auto domeMonsters = domeProjection["monsters"].cast<pybind11::list>();
@@ -1185,10 +1252,16 @@ struct StepSimulator {
                 && !domeMonster.contains("current_move")
                 && !domeMonster.contains("move_id")
                 && !domeMonster.contains("move_base_damage")
-                && !domeMonster.contains("move_hits");
+                && !domeMonster.contains("move_hits")
+                && !domeMonster.contains("unique_power_0")
+                && !domeMonster.contains("unique_power_1");
         const bool domePreservesPreviousMove = domeMonster.contains("last_move_id")
                 && domeMonster["last_move_id"].cast<int>()
-                        == static_cast<int>(MMID::JAW_WORM_CHOMP);
+                        == static_cast<int>(MMID::BOOK_OF_STABBING_SINGLE_STAB);
+        const bool domeSanitizesRollMisc = bookRollMutatesMisc
+                && domeMonster.contains("misc_info")
+                && domeMonster["misc_info"].cast<int>() == book.publicMiscInfo
+                && domeMonster["misc_info"].cast<int>() != book.miscInfo;
 
         pybind11::dict report;
         report["schema_id"] = "native-battle-visibility-audit-v1";
@@ -1197,12 +1270,14 @@ struct StepSimulator {
         report["sampler_preserves_known_prefix"] = particlePrefixPreserved;
         report["sampler_private_remainder_diverse"] = particleFingerprints.size() > 1;
         report["havoc_consumes_top_preserves_suffix"] = havocConsumesTopPreservesSuffix;
+        report["rebound_establishes_known_top"] = reboundParticlesPreserved;
         report["frozen_eye_full_order"] = frozenDrawOrder["classification"]
                 .cast<std::string>() == "full_public_exact"
                 && frozenVisibleOrder.size() == bc.cards.drawPile.size();
         report["frozen_eye_sampler_preserves_order"] = frozenParticlesPreserved;
         report["runic_dome_hides_current_intent"] = domeHidesCurrentIntent;
         report["runic_dome_preserves_previous_move"] = domePreservesPreviousMove;
+        report["runic_dome_sanitizes_roll_misc"] = domeSanitizesRollMisc;
 
         bc = savedBattleContext;
         battleActive = savedBattleActive;

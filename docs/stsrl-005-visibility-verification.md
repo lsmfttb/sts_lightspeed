@@ -25,7 +25,11 @@ Frozen Eye.  The particle API keeps its private fingerprint strictly outside
 the public projection.
 
 With Runic Dome, public monster rows omit the current move, attack category,
-the current move's damage/hit structure, and other current-intent-only fields.
+the current move's damage/hit structure, internal status counters, and other
+current-intent-only fields.  A monster's roll-time scratch mutation is kept
+in a pre-roll epistemic snapshot for `misc_info`, so the projection cannot
+leak the hidden current choice while preserving the last publicly observed
+value.
 The preceding observed move remains public because monster move history is
 part of the player's current knowledge and can affect future move selection.
 No mechanics or legal action enumeration changes; the omission is solely a

@@ -3327,6 +3327,7 @@ void Monster::initSpawnedMonster(BattleContext &bc, const MonsterId monsterId, c
     id = monsterId;
     curHp = hp;
     maxHp = hp;
+    publicMiscInfo = miscInfo;
     rollMove(bc);
 }
 

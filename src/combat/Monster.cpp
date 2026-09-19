@@ -132,6 +132,7 @@ void Monster::construct(BattleContext &bc, MonsterId monsterId, int monsterIdx) 
         default:
             break;
     }
+    publicMiscInfo = miscInfo;
 }
 
 const char *Monster::getName() const {
@@ -627,11 +628,15 @@ bool Monster::eitherLastTwo(MonsterMoveId moveId) const {
 }
 
 void Monster::rollMove(BattleContext &bc) {
+    const auto publicMiscInfoBeforeRoll = miscInfo;
     auto miscInfoCopy = miscInfo;
 
     const auto move = getMoveForRoll(bc, miscInfoCopy, bc.aiRng.random(99));
 
     miscInfo = miscInfoCopy;
+    // The roll may mutate miscInfo while selecting the hidden current move.
+    // Retain the pre-roll value for normal-information projections.
+    publicMiscInfo = publicMiscInfoBeforeRoll;
     setMove(move);
 }
 
