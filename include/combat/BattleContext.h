@@ -204,6 +204,7 @@ namespace sts {
         void consumeKnownDrawTop(const CardInstance &c);
         void consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c);
         void markDrawKnowledgeUnsupported();
+        void invalidateAfterUnknownDrawInsertion();
         void triggerAndMoveToExhaustPile(CardInstance c);
         void mummifiedHandOnUsePower();
 

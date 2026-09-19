@@ -2001,7 +2001,7 @@ void BattleContext::onAfterUseCard() {
 
         } else if (c.id == CardId::TANTRUM) {
             cards.shuffleIntoDrawPile(cardRandomRng, c);
-            markDrawKnowledgeUnsupported();
+            invalidateAfterUnknownDrawInsertion();
 
         } else {
             // The game calls OnCardDrawOrDiscard here which only does two things:
@@ -2902,6 +2902,17 @@ void BattleContext::markDrawKnowledgeUnsupported() {
     knownDrawKnowledgeUnsupported = true;
 }
 
+void BattleContext::invalidateAfterUnknownDrawInsertion() {
+    // Random insertion is guaranteed not to append after the current top,
+    // so the first known top card remains valid.  Deeper prefix/position facts
+    // may have been crossed by the insertion and are dropped explicitly.
+    if (knownDrawTopUniqueIds.size() > 1) {
+        knownDrawTopUniqueIds.resize(1);
+    }
+    knownDrawPositionUniqueIds.clear();
+    markDrawKnowledgeUnsupported();
+}
+
 void BattleContext::onShuffle() {
     clearKnownDrawOrder();
     if (player.hasRelic<R::THE_ABACUS>()) {
@@ -3042,7 +3053,7 @@ void BattleContext::chooseCodexCard(CardId id) {
     c.uniqueId = static_cast<std::int16_t>(cards.nextUniqueCardId++);
     cards.notifyAddCardToCombat(c);
     cards.shuffleIntoDrawPile(cardRandomRng, c);
-    markDrawKnowledgeUnsupported();
+    invalidateAfterUnknownDrawInsertion();
 }
 
 void BattleContext::chooseDualWieldCard(int handIdx) {
