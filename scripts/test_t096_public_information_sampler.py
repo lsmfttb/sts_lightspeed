@@ -25,6 +25,12 @@ def main() -> int:
             and snapshot.get("battle_input_state") == "PLAYER_NORMAL"
         ):
             projection = sim.t096_public_information_projection()
+            if projection.get("schema_id") != "native-battle-public-information-v2":
+                raise AssertionError("T096 native smoke missing visibility-aware schema")
+            if projection["visibility"]["draw_order"]["classification"] != "hidden":
+                raise AssertionError("ordinary T096 smoke unexpectedly has draw-order knowledge")
+            if projection["visibility"]["enemy_intent"]["classification"] != "public_exact":
+                raise AssertionError("ordinary T096 smoke unexpectedly hides intent")
             metadata = sim.t096_anchor_distribution_metadata()
             if metadata.get("schema_id") != "native-battle-anchor-distribution-audit-v1":
                 raise AssertionError("T096 native smoke missing anchor metadata schema")

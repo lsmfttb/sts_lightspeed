@@ -89,6 +89,13 @@ namespace sts {
         MonsterGroup monsters;
         CardManager cards;
 
+        // Epistemic state only.  This records cards that a normal player knows
+        // are next to be drawn, ordered from the top of the draw pile down.
+        // It deliberately has no effect on mechanics, RNG, or legal actions.
+        // Keeping it on BattleContext makes ordinary checkpoint copies retain
+        // the same current player knowledge without reconstructing history.
+        std::vector<std::int16_t> knownDrawTopUniqueIds;
+
         CardQueueItem curCardQueueItem;
 
         std::bitset<32> miscBits; // 0 stolen gold check,
@@ -187,6 +194,9 @@ namespace sts {
 
         void onManualDiscard(const CardInstance &c);
         void onShuffle();
+        void clearKnownDrawOrder();
+        void noteKnownDrawTop(const CardInstance &c);
+        void consumeKnownDrawTop(const CardInstance &c);
         void triggerAndMoveToExhaustPile(CardInstance c);
         void mummifiedHandOnUsePower();
 

@@ -454,6 +454,27 @@ pybind11::list monsterGroupSnapshot(const BattleContext &bc) {
     return ret;
 }
 
+pybind11::list publicInformationMonsterGroupSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    const bool hideIntent = bc.player.hasRelic<R::RUNIC_DOME>();
+    for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
+        auto monster = monsterSnapshot(bc, idx);
+        if (hideIntent) {
+            // These fields either state the current intent directly or derive
+            // only from it.  They are deliberately absent, not redacted with
+            // a hidden value, so normal-information consumers cannot mistake
+            // them for an available model feature.
+            for (const char *field : {
+                    "attacking", "intent_category", "current_move", "move_id",
+                    "last_move_id", "move_base_damage", "move_hits"}) {
+                monster.attr("pop")(field, pybind11::none());
+            }
+        }
+        ret.append(monster);
+    }
+    return ret;
+}
+
 pybind11::list potionListSnapshot(const BattleContext &bc) {
     pybind11::list ret;
     for (int idx = 0; idx < bc.potionCapacity; ++idx) {
@@ -563,6 +584,8 @@ pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
     return ret;
 }
 
+std::size_t knownDrawTopCount(const BattleContext &bc);
+
 pybind11::dict makeT096AnchorDistributionMetadata(
         const GameContext &gc,
         const BattleContext &bc) {
@@ -574,9 +597,12 @@ pybind11::dict makeT096AnchorDistributionMetadata(
     const bool exhaustEmpty = bc.cards.exhaustPile.empty();
     ret["schema_id"] = "native-battle-anchor-distribution-audit-v1";
     ret["first_ordinary_player_decision"] = firstOrdinaryPlayerDecision;
-    ret["draw_order_visibility"] = "hidden";
-    ret["stronger_draw_constraint"] = false;
-    ret["draw_knowledge_fidelity"] = "ordinary-hidden-draw-only";
+    const bool frozenEye = bc.player.hasRelic<R::FROZEN_EYE>();
+    const auto knownTopCount = frozenEye ? bc.cards.drawPile.size() : knownDrawTopCount(bc);
+    ret["draw_order_visibility"] = frozenEye ? "full_public_exact"
+            : knownTopCount > 0 ? "known_prefix" : "hidden";
+    ret["stronger_draw_constraint"] = frozenEye || knownTopCount > 0;
+    ret["draw_knowledge_fidelity"] = "native-current-information-v2";
     ret["discard_empty"] = discardEmpty;
     ret["exhaust_empty"] = exhaustEmpty;
     ret["deck_size"] = gc.deck.size();
@@ -688,12 +714,38 @@ std::string hiddenFutureFingerprint(const BattleContext &bc) {
     return digest.str();
 }
 
+std::size_t knownDrawTopCount(const BattleContext &bc) {
+    const auto &known = bc.knownDrawTopUniqueIds;
+    if (known.size() > bc.cards.drawPile.size()) {
+        return 0;
+    }
+    for (std::size_t idx = 0; idx < known.size(); ++idx) {
+        const auto drawIdx = bc.cards.drawPile.size() - 1 - idx;
+        if (bc.cards.drawPile[drawIdx].getUniqueId() != known[idx]) {
+            // Never publish a remembered ordering unless it still agrees with
+            // the native state.  This is a conservative fallback for any
+            // uninstrumented random/reordering mechanic.
+            return 0;
+        }
+    }
+    return known.size();
+}
+
+pybind11::list knownDrawTopSnapshot(const BattleContext &bc, std::size_t count) {
+    pybind11::list ret;
+    for (std::size_t idx = 0; idx < count; ++idx) {
+        const auto drawIdx = static_cast<int>(bc.cards.drawPile.size() - 1 - idx);
+        ret.append(cardSnapshot(bc, bc.cards.drawPile[drawIdx], drawIdx, false));
+    }
+    return ret;
+}
+
 pybind11::dict makeT096PublicInformationProjection(
         const GameContext &gc,
         const BattleContext &bc,
         const std::vector<LightSpeedAction> &actions) {
     pybind11::dict ret;
-    ret["schema_id"] = "native-battle-public-information-v1";
+    ret["schema_id"] = "native-battle-public-information-v2";
     ret["information_regime"] = "normal_information";
     ret["screen_identity"] = "BATTLE";
     ret["act"] = gc.act;
@@ -707,7 +759,7 @@ pybind11::dict makeT096PublicInformationProjection(
     ret["discard_pile"] = pileSnapshot(bc, bc.cards.discardPile);
     ret["exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);
     ret["draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
-    ret["monsters"] = monsterGroupSnapshot(bc);
+    ret["monsters"] = publicInformationMonsterGroupSnapshot(bc);
     pybind11::dict resources;
     resources["deck"] = deckSnapshot(gc);
     resources["relics"] = relicListSnapshot(gc);
@@ -720,23 +772,35 @@ pybind11::dict makeT096PublicInformationProjection(
 
     pybind11::dict visibility;
     pybind11::dict drawOrder;
-    drawOrder["classification"] = "hidden";
-    drawOrder["constraint"] = "ordinary draw order is not exposed";
-    drawOrder["fidelity"] = "native-ordinary-hidden-draw-v1";
+    const bool frozenEye = bc.player.hasRelic<R::FROZEN_EYE>();
+    const auto knownTopCount = frozenEye ? bc.cards.drawPile.size() : knownDrawTopCount(bc);
+    if (frozenEye) {
+        drawOrder["classification"] = "full_public_exact";
+        drawOrder["constraint"] = "Frozen Eye makes the current draw order visible";
+        drawOrder["fidelity"] = "native-current-information-v2";
+        drawOrder["visible_order_from_top"] =
+                knownDrawTopSnapshot(bc, knownTopCount);
+    } else if (knownTopCount > 0) {
+        drawOrder["classification"] = "known_prefix";
+        drawOrder["constraint"] = "public deterministic top-of-draw-pile placement";
+        drawOrder["fidelity"] = "native-current-information-v2";
+        drawOrder["known_top_prefix"] = knownDrawTopSnapshot(bc, knownTopCount);
+    } else {
+        drawOrder["classification"] = "hidden";
+        drawOrder["constraint"] = "ordinary draw order is not exposed";
+        drawOrder["fidelity"] = "native-current-information-v2";
+    }
     visibility["draw_order"] = drawOrder;
     pybind11::dict enemyIntent;
-    enemyIntent["classification"] = "public_exact";
-    enemyIntent["source"] = "native Monster move state";
-    enemyIntent["fidelity"] = "native-ordinary-visible-intent-v1";
+    if (bc.player.hasRelic<R::RUNIC_DOME>()) {
+        enemyIntent["classification"] = "hidden";
+        enemyIntent["fidelity"] = "native-current-information-v2";
+    } else {
+        enemyIntent["classification"] = "public_exact";
+        enemyIntent["source"] = "native Monster move state";
+        enemyIntent["fidelity"] = "native-current-information-v2";
+    }
     visibility["enemy_intent"] = enemyIntent;
-    pybind11::dict drawKnowledge;
-    drawKnowledge["classification"] = "unsupported_fidelity";
-    drawKnowledge["reason"] = "Headbutt/Frozen Eye knowledge tracking is not exposed by this native build";
-    visibility["draw_knowledge"] = drawKnowledge;
-    pybind11::dict hiddenIntent;
-    hiddenIntent["classification"] = "unsupported_fidelity";
-    hiddenIntent["reason"] = "Runic Dome visibility semantics are not exposed by this native build";
-    visibility["intent_hidden_mechanics"] = hiddenIntent;
     ret["visibility"] = visibility;
 
     pybind11::list publicActions;
@@ -745,8 +809,12 @@ pybind11::dict makeT096PublicInformationProjection(
     }
     ret["ordered_public_legal_actions"] = publicActions;
     pybind11::dict membership;
-    membership["classification"] = "public_constraint";
-    membership["value"] = "membership not ordered; exact membership is not exposed";
+    membership["classification"] = frozenEye ? "full_public_exact" : "public_constraint";
+    if (frozenEye) {
+        membership["visible_order_from_top"] = knownDrawTopSnapshot(bc, knownTopCount);
+    } else {
+        membership["value"] = "membership not ordered; exact membership is not exposed";
+    }
     ret["draw_pile_membership"] = membership;
     return ret;
 }
@@ -1046,11 +1114,18 @@ struct StepSimulator {
             particleSeed ^= particleSeed >> 31;
 
             BattleContext particle = bc;
-            java::Random randomizer(particleSeed);
-            java::Collections::shuffle(
-                    particle.cards.drawPile.begin(),
-                    particle.cards.drawPile.end(),
-                    randomizer);
+            const bool frozenEye = particle.player.hasRelic<R::FROZEN_EYE>();
+            const auto knownTop = frozenEye ? particle.cards.drawPile.size()
+                    : knownDrawTopCount(particle);
+            if (!frozenEye) {
+                java::Random randomizer(particleSeed);
+                // Draw-pile top is the vector back.  Shuffle only the private
+                // prefix, retaining every player-known top position exactly.
+                java::Collections::shuffle(
+                        particle.cards.drawPile.begin(),
+                        particle.cards.drawPile.end() - knownTop,
+                        randomizer);
+            }
 
             std::vector<LightSpeedAction> actions;
             for (const auto &action : enumerateBattleActions(particle)) {

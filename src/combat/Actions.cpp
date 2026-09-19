@@ -197,6 +197,7 @@ Action Actions::ShuffleDrawPile() {
                 bc.cards.drawPile.end(),
                 java::Random(bc.shuffleRng.randomLong())
         );
+        bc.clearKnownDrawOrder();
     }};
 }
 

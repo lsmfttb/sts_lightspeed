@@ -2792,7 +2792,29 @@ void BattleContext::onManualDiscard(const CardInstance &c) {
     }
 }
 
+void BattleContext::clearKnownDrawOrder() {
+    knownDrawTopUniqueIds.clear();
+}
+
+void BattleContext::noteKnownDrawTop(const CardInstance &c) {
+    // A visible deterministic placement (for example Headbutt) establishes a
+    // new known top card and leaves the formerly known suffix intact.
+    knownDrawTopUniqueIds.insert(knownDrawTopUniqueIds.begin(), c.getUniqueId());
+}
+
+void BattleContext::consumeKnownDrawTop(const CardInstance &c) {
+    if (!knownDrawTopUniqueIds.empty()
+            && knownDrawTopUniqueIds.front() == c.getUniqueId()) {
+        knownDrawTopUniqueIds.erase(knownDrawTopUniqueIds.begin());
+    } else if (!knownDrawTopUniqueIds.empty()) {
+        // A transition we did not model as a deterministic public draw has
+        // occurred.  Conservatively retain no exact-order claim.
+        clearKnownDrawOrder();
+    }
+}
+
 void BattleContext::onShuffle() {
+    clearKnownDrawOrder();
     if (player.hasRelic<R::THE_ABACUS>()) {
         addToBot( Actions::GainBlock(6) );
     }
@@ -3039,8 +3061,10 @@ void BattleContext::chooseHeadbuttCard(int discardIdx) {
 #ifdef sts_asserts
     assert(discardIdx >= 0 && discardIdx < cards.discardPile.size());
 #endif
-    cards.moveToDrawPileTop(cards.discardPile[discardIdx]);
+    const auto selected = cards.discardPile[discardIdx];
+    cards.moveToDrawPileTop(selected);
     cards.removeFromDiscard(discardIdx);
+    noteKnownDrawTop(selected);
 }
 
 void BattleContext::chooseRecycleCard(int handIdx) {
@@ -3051,8 +3075,10 @@ void BattleContext::chooseWarcryCard(int handIdx) {
 #ifdef sts_asserts
     assert(handIdx >= 0 && handIdx < cards.cardsInHand);
 #endif
-    cards.moveToDrawPileTop(cards.hand[handIdx]);
+    const auto selected = cards.hand[handIdx];
+    cards.moveToDrawPileTop(selected);
     cards.removeFromHandAtIdx(handIdx);
+    noteKnownDrawTop(selected);
 }
 
 void BattleContext::chooseDrawToHandCards(const int *idxs, int cardCount) {
