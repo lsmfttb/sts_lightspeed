@@ -23,10 +23,14 @@ root evaluation telemetry, and explicit parity/mapping flags.  Raw native
 action bits are not returned in bridge rows.
 
 The bridge checks anchor and particle public-projection equality, ordered legal
-action equality, and one-to-one occurrence-safe root mapping.  Duplicate or
-otherwise ambiguous public action identities, incomplete Search roots,
-unsupported-fidelity anchors, and particle parity drift fail closed before an
-accepted batch is returned.
+action equality, and occurrence-safe root mapping.  Search-v2's existing
+mechanical deduplication is unchanged: a public card occurrence either maps by
+its exact action bits or, for an adjacent mechanically equivalent duplicate,
+maps to the single Search edge for that equivalence class.  Each row and the
+root report include the source edge, mapping mode, source action identity, and
+the number of public occurrences sharing that edge.  Missing or multiply
+ambiguous sources, incomplete Search roots, unsupported-fidelity anchors, and
+particle parity drift fail closed before an accepted batch is returned.
 
 The returned values have deliberately mixed semantics: the outer particle
 distribution follows the normal public-information state, while each
@@ -37,6 +41,6 @@ or an exact posterior expectation.  The bridge does no cross-particle
 aggregation or action selection.
 
 The focused audit covers direct sampler parity, hidden-particle diversity,
-Frozen Eye/direct Search compatibility, known draw constraints, and unsupported
-anchor fail-closed behavior.  It is a capability check only and makes no
-particle-convergence claim.
+duplicate-card occurrence mapping, Frozen Eye/direct Search compatibility,
+known draw constraints, and unsupported-anchor fail-closed behavior.  It is a
+capability check only and makes no particle-convergence claim.

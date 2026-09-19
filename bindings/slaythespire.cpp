@@ -1127,6 +1127,12 @@ pybind11::dict makeT096PublicInformationProjection(
 }
 
 struct StepSimulator {
+    struct SearchRootMapping {
+        std::vector<int> publicToEdge;
+        std::vector<std::string> mappingModes;
+        std::vector<std::vector<int>> edgeToPublic;
+    };
+
     GameContext gc;
     BattleContext bc;
     bool battleActive = false;
@@ -1981,7 +1987,22 @@ struct StepSimulator {
         }
     }
 
-    void validateSearchRootMapping(
+    bool mechanicallyEquivalentCards(
+            const CardInstance &publicCard,
+            const CardInstance &searchCard) const {
+        // This is deliberately the same mechanical equivalence predicate used
+        // by BattleScumSearcher2::enumerateCardActions for adjacent duplicate
+        // cards.  Unique ids are excluded because they are occurrence identity,
+        // not a gameplay distinction for Search-v2's deduplicated edge.
+        return publicCard.id == searchCard.id
+                && publicCard.getUpgradeCount() == searchCard.getUpgradeCount()
+                && publicCard.costForTurn == searchCard.costForTurn
+                && publicCard.cost == searchCard.cost
+                && publicCard.freeToPlayOnce == searchCard.freeToPlayOnce
+                && publicCard.specialData == searchCard.specialData;
+    }
+
+    SearchRootMapping validateSearchRootMapping(
             const BattleContext &searchState,
             const search::BattleScumSearcher2 &searcher) const {
         const auto legalActions = enumerateBattleActions(searchState);
@@ -1989,34 +2010,76 @@ struct StepSimulator {
             throw std::runtime_error(
                     "STSRL-006 particle has no public legal actions for Search-v2");
         }
-        for (const auto &legalAction : legalActions) {
-            int matchingEdges = 0;
-            for (const auto &edge : searcher.root.edges) {
-                if (edge.action.bits == legalAction.bits) {
-                    ++matchingEdges;
+        SearchRootMapping mapping;
+        mapping.publicToEdge.resize(legalActions.size(), -1);
+        mapping.mappingModes.resize(legalActions.size());
+        mapping.edgeToPublic.resize(searcher.root.edges.size());
+        for (std::size_t legalIdx = 0; legalIdx < legalActions.size(); ++legalIdx) {
+            const auto &legalAction = legalActions[legalIdx];
+            std::vector<int> directMatches;
+            for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size());
+                    ++edgeIdx) {
+                if (searcher.root.edges[edgeIdx].action.bits == legalAction.bits) {
+                    directMatches.push_back(edgeIdx);
                 }
             }
-            if (matchingEdges != 1) {
+            if (directMatches.size() > 1) {
                 throw std::runtime_error(
-                        "STSRL-006 incomplete or ambiguous Search-v2 root mapping");
+                        "STSRL-006 ambiguous direct Search-v2 root mapping");
             }
-        }
-        for (const auto &edge : searcher.root.edges) {
-            int matchingActions = 0;
-            for (const auto &legalAction : legalActions) {
-                if (edge.action.bits == legalAction.bits) {
-                    ++matchingActions;
+            if (directMatches.size() == 1) {
+                mapping.publicToEdge[legalIdx] = directMatches[0];
+                mapping.mappingModes[legalIdx] = "direct_action_bits";
+            } else {
+                if (legalAction.getActionType() != search::ActionType::CARD) {
+                    throw std::runtime_error(
+                            "STSRL-006 incomplete or ambiguous Search-v2 occurrence mapping");
                 }
+                const int publicSource = legalAction.getSourceIdx();
+                if (publicSource <= 0
+                        || publicSource >= searchState.cards.cardsInHand
+                        || !mechanicallyEquivalentCards(
+                                searchState.cards.hand[publicSource - 1],
+                                searchState.cards.hand[publicSource])) {
+                    throw std::runtime_error(
+                            "STSRL-006 incomplete or ambiguous Search-v2 occurrence mapping");
+                }
+                int representativeSource = publicSource - 1;
+                while (representativeSource > 0
+                        && mechanicallyEquivalentCards(
+                                searchState.cards.hand[representativeSource - 1],
+                                searchState.cards.hand[representativeSource])) {
+                    --representativeSource;
+                }
+                const search::Action representative(
+                        search::ActionType::CARD,
+                        representativeSource,
+                        legalAction.getTargetIdx());
+                std::vector<int> equivalentMatches;
+                for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size());
+                        ++edgeIdx) {
+                    if (searcher.root.edges[edgeIdx].action.bits == representative.bits) {
+                        equivalentMatches.push_back(edgeIdx);
+                    }
+                }
+                if (equivalentMatches.size() != 1) {
+                    throw std::runtime_error(
+                            "STSRL-006 incomplete or ambiguous Search-v2 occurrence mapping");
+                }
+                mapping.publicToEdge[legalIdx] = equivalentMatches[0];
+                mapping.mappingModes[legalIdx] =
+                        "mechanical_duplicate_card_occurrence";
             }
-            if (matchingActions != 1) {
+            mapping.edgeToPublic[mapping.publicToEdge[legalIdx]].push_back(
+                    static_cast<int>(legalIdx));
+        }
+        for (std::size_t edgeIdx = 0; edgeIdx < mapping.edgeToPublic.size(); ++edgeIdx) {
+            if (mapping.edgeToPublic[edgeIdx].empty()) {
                 throw std::runtime_error(
-                        "STSRL-006 Search-v2 root edge has no unique public action");
+                        "STSRL-006 Search-v2 root edge has no public occurrence mapping");
             }
         }
-        if (searcher.root.edges.size() != legalActions.size()) {
-            throw std::runtime_error(
-                    "STSRL-006 Search-v2 root/action cardinality drift");
-        }
+        return mapping;
     }
 
     pybind11::dict sampleHiddenFutureParticlesSearch(
@@ -2109,7 +2172,7 @@ struct StepSimulator {
             search::BattleScumSearcher2 searcher(item.state);
             searcher.includePotions = includePotions;
             searcher.search(searchSimulations);
-            validateSearchRootMapping(item.state, searcher);
+            const auto rootMapping = validateSearchRootMapping(item.state, searcher);
             const auto rootReport = buildBattleSearchReport(
                     item.state,
                     searcher,
@@ -2119,7 +2182,8 @@ struct StepSimulator {
                     "sts_lightspeed_native_particle_search_bridge_v1",
                     nullptr,
                     nullptr,
-                    pybind11::none());
+                    pybind11::none(),
+                    &rootMapping.publicToEdge);
             if (rootReport["unsearched_legal_action_count"].cast<int>() != 0
                     || rootReport["unmapped_search_edge_count"].cast<int>() != 0) {
                 throw std::runtime_error(
@@ -2132,6 +2196,7 @@ struct StepSimulator {
                         "STSRL-006 Search-v2 root row/action cardinality drift");
             }
             pybind11::list publicRootRows;
+            pybind11::list rootMappingAudit;
             for (std::size_t actionIdx = 0; actionIdx < item.actions.size(); ++actionIdx) {
                 const auto rawRow = rawRootRows[actionIdx].cast<pybind11::dict>();
                 pybind11::dict publicRow = publicInformationActionIdentity(
@@ -2142,7 +2207,25 @@ struct StepSimulator {
                     publicRow[field] = rawRow[field];
                 }
                 publicRow["public_action_ordinal"] = static_cast<int>(actionIdx);
+                publicRow["search_equivalence_source_edge_index"] =
+                        rootMapping.publicToEdge[actionIdx];
+                publicRow["search_equivalence_mapping_mode"] =
+                        rootMapping.mappingModes[actionIdx];
                 publicRootRows.append(publicRow);
+
+                pybind11::dict mappingRow;
+                mappingRow["public_action_ordinal"] = static_cast<int>(actionIdx);
+                mappingRow["public_action"] =
+                        publicInformationActionIdentity(item.actions[actionIdx]);
+                mappingRow["search_edge_index"] = rootMapping.publicToEdge[actionIdx];
+                mappingRow["mapping_mode"] = rootMapping.mappingModes[actionIdx];
+                mappingRow["source_action"] = publicInformationActionIdentity(
+                        makeBattleAction(
+                                item.state,
+                                searcher.root.edges[rootMapping.publicToEdge[actionIdx]].action));
+                mappingRow["edge_public_occurrence_count"] = static_cast<int>(
+                        rootMapping.edgeToPublic[rootMapping.publicToEdge[actionIdx]].size());
+                rootMappingAudit.append(mappingRow);
             }
             pybind11::dict publicRootReport;
             for (const char *field : {
@@ -2178,6 +2261,9 @@ struct StepSimulator {
             searchConfiguration["progressive_bias_enabled"] = false;
             publicRootReport["search_v2_configuration"] = searchConfiguration;
             publicRootReport["root_rows"] = publicRootRows;
+            publicRootReport["root_action_mapping_schema"] =
+                    "native-search-root-occurrence-equivalence-v1";
+            publicRootReport["root_action_mapping"] = rootMappingAudit;
 
             pybind11::dict row;
             row["particle_index"] = item.particleIndex;
@@ -2305,6 +2391,45 @@ struct StepSimulator {
             }
             hiddenDiversity = directFingerprints.size() > 1;
 
+            // Search-v2 intentionally deduplicates adjacent mechanically
+            // equivalent cards.  The public contract must still retain both
+            // hand occurrences and expose the audited many-to-one mapping.
+            bc.cards.cardsInHand = 2;
+            for (const auto &[uniqueId, slot] : {
+                    std::pair<int, int>{300, 0},
+                    std::pair<int, int>{301, 1}}) {
+                CardInstance duplicate(CardId::STRIKE_RED);
+                duplicate.setUniqueId(uniqueId);
+                bc.cards.hand[slot] = duplicate;
+            }
+            const auto duplicateBridge = sampleHiddenFutureParticlesSearch(
+                    0x31415926ULL, 0, 1, 1, false);
+            const auto duplicateParticle = duplicateBridge["particles"].cast<pybind11::list>()[0]
+                    .cast<pybind11::dict>();
+            const auto duplicateRoot = duplicateParticle["root_evaluation"]
+                    .cast<pybind11::dict>();
+            const auto duplicateRows = duplicateParticle["root_rows"].cast<pybind11::list>();
+            const auto duplicateMapping = duplicateRoot["root_action_mapping"]
+                    .cast<pybind11::list>();
+            bool duplicateOccurrenceMapping = duplicateRows.size() == 3
+                    && duplicateMapping.size() == 3
+                    && duplicateRoot["search_edge_count"].cast<int>() == 2
+                    && duplicateRoot["unsearched_legal_action_count"].cast<int>() == 0
+                    && duplicateRoot["unmapped_search_edge_count"].cast<int>() == 0;
+            if (duplicateOccurrenceMapping) {
+                const auto firstCard = duplicateRows[1].cast<pybind11::dict>();
+                const auto secondCard = duplicateRows[2].cast<pybind11::dict>();
+                duplicateOccurrenceMapping = firstCard["idx1"].cast<int>() == 0
+                        && secondCard["idx1"].cast<int>() == 1
+                        && firstCard["search_equivalence_source_edge_index"].equal(
+                                secondCard["search_equivalence_source_edge_index"])
+                        && firstCard["search_equivalence_mapping_mode"].cast<std::string>()
+                                == "direct_action_bits"
+                        && secondCard["search_equivalence_mapping_mode"].cast<std::string>()
+                                == "mechanical_duplicate_card_occurrence";
+            }
+            bc.cards.cardsInHand = 0;
+
             bc.player.setHasRelic<R::FROZEN_EYE>(true);
             const auto directFrozenSearch = battleSearchV2(
                     1, false, pybind11::none(), pybind11::none());
@@ -2363,6 +2488,7 @@ struct StepSimulator {
             report["value_semantics_labeled"] = valueSemanticsLabeled;
             report["root_work_counters_complete"] = rootWorkCountersComplete;
             report["hidden_particle_diversity"] = hiddenDiversity;
+            report["duplicate_occurrence_mapping"] = duplicateOccurrenceMapping;
             report["frozen_eye_search_compatibility"] = frozenEyeCompatibility;
             report["known_draw_constraint_preserved"] = knownDrawConstraintPreserved;
             report["unsupported_anchor_fails_closed"] = unsupportedAnchorFailsClosed;
@@ -2403,7 +2529,8 @@ struct StepSimulator {
             const std::string &patchIdentity,
             const std::vector<double> *legalActionPriors,
             const std::vector<int> *edgeAllocations,
-            const pybind11::object &allocationMetadata) {
+            const pybind11::object &allocationMetadata,
+            const std::vector<int> *publicToEdgeMapping = nullptr) {
         const auto legalActions = enumerateBattleActions(searchState);
         std::vector<bool> matchedEdges(searcher.root.edges.size(), false);
         pybind11::list rootRows;
@@ -2412,12 +2539,25 @@ struct StepSimulator {
             const auto &legalAction = legalActions[legalIdx];
             const search::BattleScumSearcher2::Edge *matchedEdge = nullptr;
             int matchedEdgeIndex = -1;
-            for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size()); ++edgeIdx) {
-                if (searcher.root.edges[edgeIdx].action.bits == legalAction.bits) {
-                    matchedEdge = &searcher.root.edges[edgeIdx];
-                    matchedEdgeIndex = edgeIdx;
-                    matchedEdges[edgeIdx] = true;
-                    break;
+            if (publicToEdgeMapping != nullptr) {
+                if (publicToEdgeMapping->size() != legalActions.size()) {
+                    throw std::logic_error(
+                            "Search-v2 public occurrence mapping count disagrees with legal actions");
+                }
+                matchedEdgeIndex = (*publicToEdgeMapping)[legalIdx];
+                if (matchedEdgeIndex >= 0
+                        && matchedEdgeIndex < static_cast<int>(searcher.root.edges.size())) {
+                    matchedEdge = &searcher.root.edges[matchedEdgeIndex];
+                    matchedEdges[matchedEdgeIndex] = true;
+                }
+            } else {
+                for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size()); ++edgeIdx) {
+                    if (searcher.root.edges[edgeIdx].action.bits == legalAction.bits) {
+                        matchedEdge = &searcher.root.edges[edgeIdx];
+                        matchedEdgeIndex = edgeIdx;
+                        matchedEdges[edgeIdx] = true;
+                        break;
+                    }
                 }
             }
 

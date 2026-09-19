@@ -36,6 +36,7 @@ def main() -> int:
         "value_semantics_labeled",
         "root_work_counters_complete",
         "hidden_particle_diversity",
+        "duplicate_occurrence_mapping",
         "frozen_eye_search_compatibility",
         "known_draw_constraint_preserved",
         "unsupported_anchor_fails_closed",
@@ -46,10 +47,9 @@ def main() -> int:
     if failed:
         raise AssertionError(f"STSRL-006 audit failed: {', '.join(failed)}")
 
-    # The ordinary opening hand contains duplicate card occurrences.  The
-    # accepted Search-v2 root surface deduplicates those mechanics actions,
-    # while the public action contract keeps occurrence identity.  The bridge
-    # must reject that ambiguous mapping instead of silently copying a value.
+    # Exercise the ordinary path as well.  Depending on the opening hand,
+    # Search-v2 may have a mechanically deduplicated card edge; the native
+    # bridge now reports an explicit occurrence-equivalence mapping for it.
     for _ in range(64):
         snapshot = sim.snapshot()
         if (
@@ -57,11 +57,7 @@ def main() -> int:
             and snapshot.get("battle_active") is True
             and snapshot.get("battle_input_state") == "PLAYER_NORMAL"
         ):
-            try:
-                sim.sample_hidden_future_particles_search(17, 0, 1, 1, False)
-            except RuntimeError as exc:
-                if "mapping" not in str(exc) and "ambiguous" not in str(exc):
-                    raise
+            sim.sample_hidden_future_particles_search(17, 0, 1, 1, False)
             break
         actions = sim.legal_actions()
         if not actions:
