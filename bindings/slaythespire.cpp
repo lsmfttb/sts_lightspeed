@@ -1154,6 +1154,90 @@ struct StepSimulator {
         }
     }
 
+    static std::uint64_t hiddenParticleSeed(
+            const std::uint64_t samplerSeed,
+            const int particleIndex) {
+        // Keep this domain separation exactly aligned with the T096 sampler.
+        // The bridge must not introduce a second particle distribution.
+        std::uint64_t particleSeed = samplerSeed
+                + 0x9E3779B97F4A7C15ULL
+                        * static_cast<std::uint64_t>(particleIndex + 1);
+        particleSeed ^= particleSeed >> 30;
+        particleSeed *= 0xBF58476D1CE4E5B9ULL;
+        particleSeed ^= particleSeed >> 27;
+        particleSeed *= 0x94D049BB133111EBULL;
+        particleSeed ^= particleSeed >> 31;
+        return particleSeed;
+    }
+
+    BattleContext buildHiddenFutureParticle(
+            const std::uint64_t samplerSeed,
+            const int particleIndex,
+            std::uint64_t &particleSeed) const {
+        particleSeed = hiddenParticleSeed(samplerSeed, particleIndex);
+        BattleContext particle = bc;
+        const bool frozenEye = particle.player.hasRelic<R::FROZEN_EYE>();
+        const auto knownTop = frozenEye ? particle.cards.drawPile.size()
+                : knownDrawTopCount(particle);
+        if (!frozenEye && particle.knownDrawUnsupportedReasons == 0
+                && knownDrawStateConsistent(particle)) {
+            java::Random randomizer(particleSeed);
+            // Shuffle only unconstrained positions.  Draw-pile top is the
+            // vector back; exact position facts are measured from that top
+            // and therefore survive particle generation.
+            std::vector<bool> fixed(particle.cards.drawPile.size(), false);
+            for (std::size_t position = 0; position < knownTop; ++position) {
+                fixed[particle.cards.drawPile.size() - 1 - position] = true;
+            }
+            bool positionStateValid = true;
+            for (const auto &[position, uniqueId] : particle.knownDrawPositionUniqueIds) {
+                if (position < 0
+                        || static_cast<std::size_t>(position)
+                                >= particle.cards.drawPile.size()) {
+                    positionStateValid = false;
+                    break;
+                }
+                const auto drawIdx = particle.cards.drawPile.size() - 1
+                        - static_cast<std::size_t>(position);
+                if (particle.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
+                    positionStateValid = false;
+                    break;
+                }
+                fixed[drawIdx] = true;
+            }
+            if (!positionStateValid) {
+                particle.markDrawKnowledgeUnsupported();
+            } else {
+                std::vector<int> freeIndices;
+                std::vector<CardInstance> freeCards;
+                for (int drawIdx = 0;
+                        drawIdx < static_cast<int>(particle.cards.drawPile.size());
+                        ++drawIdx) {
+                    if (!fixed[drawIdx]) {
+                        freeIndices.push_back(drawIdx);
+                        freeCards.push_back(particle.cards.drawPile[drawIdx]);
+                    }
+                }
+                java::Collections::shuffle(freeCards.begin(), freeCards.end(), randomizer);
+                for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
+                    particle.cards.drawPile[freeIndices[idx]] = freeCards[idx];
+                }
+            }
+        } else if (!frozenEye && !knownDrawStateConsistent(particle)) {
+            particle.markDrawKnowledgeUnsupported();
+        }
+        return particle;
+    }
+
+    std::vector<LightSpeedAction> publicBattleActions(
+            const BattleContext &state) const {
+        std::vector<LightSpeedAction> actions;
+        for (const auto &action : enumerateBattleActions(state)) {
+            actions.push_back(makeBattleAction(state, action));
+        }
+        return actions;
+    }
+
     pybind11::dict snapshot() {
         ensureBattleContext();
         pybind11::dict ret;
@@ -1849,74 +1933,10 @@ struct StepSimulator {
         pybind11::list particles;
         for (int index = 0; index < particleCount; ++index) {
             const int particleIndex = particleStart + index;
-            // SplitMix-style domain separation gives every accepted particle a
-            // reproducible native sampler seed without exposing native RNG
-            // state to the public projection.
-            std::uint64_t particleSeed = samplerSeed +
-                    0x9E3779B97F4A7C15ULL *
-                            static_cast<std::uint64_t>(particleIndex + 1);
-            particleSeed ^= particleSeed >> 30;
-            particleSeed *= 0xBF58476D1CE4E5B9ULL;
-            particleSeed ^= particleSeed >> 27;
-            particleSeed *= 0x94D049BB133111EBULL;
-            particleSeed ^= particleSeed >> 31;
-
-            BattleContext particle = bc;
-            const bool frozenEye = particle.player.hasRelic<R::FROZEN_EYE>();
-            const auto knownTop = frozenEye ? particle.cards.drawPile.size()
-                    : knownDrawTopCount(particle);
-            if (!frozenEye && particle.knownDrawUnsupportedReasons == 0
-                    && knownDrawStateConsistent(particle)) {
-                java::Random randomizer(particleSeed);
-                // Shuffle only unconstrained positions.  Draw-pile top is
-                // the vector back; exact position facts are measured from
-                // that top and therefore survive particle generation.
-                std::vector<bool> fixed(particle.cards.drawPile.size(), false);
-                for (std::size_t position = 0; position < knownTop; ++position) {
-                    fixed[particle.cards.drawPile.size() - 1 - position] = true;
-                }
-                bool positionStateValid = true;
-                for (const auto &[position, uniqueId] : particle.knownDrawPositionUniqueIds) {
-                    if (position < 0
-                            || static_cast<std::size_t>(position)
-                                    >= particle.cards.drawPile.size()) {
-                        positionStateValid = false;
-                        break;
-                    }
-                    const auto drawIdx = particle.cards.drawPile.size() - 1
-                            - static_cast<std::size_t>(position);
-                    if (particle.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
-                        positionStateValid = false;
-                        break;
-                    }
-                    fixed[drawIdx] = true;
-                }
-                if (!positionStateValid) {
-                    particle.markDrawKnowledgeUnsupported();
-                } else {
-                    std::vector<int> freeIndices;
-                    std::vector<CardInstance> freeCards;
-                    for (int drawIdx = 0;
-                            drawIdx < static_cast<int>(particle.cards.drawPile.size());
-                            ++drawIdx) {
-                        if (!fixed[drawIdx]) {
-                            freeIndices.push_back(drawIdx);
-                            freeCards.push_back(particle.cards.drawPile[drawIdx]);
-                        }
-                    }
-                    java::Collections::shuffle(freeCards.begin(), freeCards.end(), randomizer);
-                    for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
-                        particle.cards.drawPile[freeIndices[idx]] = freeCards[idx];
-                    }
-                }
-            } else if (!frozenEye && !knownDrawStateConsistent(particle)) {
-                particle.markDrawKnowledgeUnsupported();
-            }
-
-            std::vector<LightSpeedAction> actions;
-            for (const auto &action : enumerateBattleActions(particle)) {
-                actions.push_back(makeBattleAction(particle, action));
-            }
+            std::uint64_t particleSeed = 0;
+            BattleContext particle = buildHiddenFutureParticle(
+                    samplerSeed, particleIndex, particleSeed);
+            const auto actions = publicBattleActions(particle);
             pybind11::dict row;
             row["particle_index"] = particleIndex;
             row["sampler_seed"] = particleSeed;
@@ -1935,6 +1955,423 @@ struct StepSimulator {
             particles.append(row);
         }
         return particles;
+    }
+
+    void validatePublicActionSurface(
+            const std::vector<LightSpeedAction> &anchorActions,
+            const std::vector<LightSpeedAction> &particleActions) const {
+        if (anchorActions.size() != particleActions.size()) {
+            throw std::runtime_error(
+                    "STSRL-006 particle public legal-action count drift");
+        }
+        for (std::size_t idx = 0; idx < anchorActions.size(); ++idx) {
+            const auto anchorIdentity = publicInformationActionIdentity(anchorActions[idx]);
+            const auto particleIdentity = publicInformationActionIdentity(particleActions[idx]);
+            if (!anchorIdentity.equal(particleIdentity)) {
+                throw std::runtime_error(
+                        "STSRL-006 particle public legal-action order drift");
+            }
+            for (std::size_t prior = 0; prior < idx; ++prior) {
+                const auto priorIdentity = publicInformationActionIdentity(anchorActions[prior]);
+                if (priorIdentity.equal(anchorIdentity)) {
+                    throw std::runtime_error(
+                            "STSRL-006 ambiguous duplicate public legal action identity");
+                }
+            }
+        }
+    }
+
+    void validateSearchRootMapping(
+            const BattleContext &searchState,
+            const search::BattleScumSearcher2 &searcher) const {
+        const auto legalActions = enumerateBattleActions(searchState);
+        if (legalActions.empty()) {
+            throw std::runtime_error(
+                    "STSRL-006 particle has no public legal actions for Search-v2");
+        }
+        for (const auto &legalAction : legalActions) {
+            int matchingEdges = 0;
+            for (const auto &edge : searcher.root.edges) {
+                if (edge.action.bits == legalAction.bits) {
+                    ++matchingEdges;
+                }
+            }
+            if (matchingEdges != 1) {
+                throw std::runtime_error(
+                        "STSRL-006 incomplete or ambiguous Search-v2 root mapping");
+            }
+        }
+        for (const auto &edge : searcher.root.edges) {
+            int matchingActions = 0;
+            for (const auto &legalAction : legalActions) {
+                if (edge.action.bits == legalAction.bits) {
+                    ++matchingActions;
+                }
+            }
+            if (matchingActions != 1) {
+                throw std::runtime_error(
+                        "STSRL-006 Search-v2 root edge has no unique public action");
+            }
+        }
+        if (searcher.root.edges.size() != legalActions.size()) {
+            throw std::runtime_error(
+                    "STSRL-006 Search-v2 root/action cardinality drift");
+        }
+    }
+
+    pybind11::dict sampleHiddenFutureParticlesSearch(
+            std::uint64_t samplerSeed,
+            int particleStart,
+            int particleCount,
+            std::int64_t searchSimulations,
+            bool includePotions) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error(
+                    "STSRL-006 particle Search requested outside battle");
+        }
+        if (publicInformationUnsupported(bc)) {
+            throw std::runtime_error(
+                    "STSRL-006 particle Search unavailable: anchor unsupported_fidelity");
+        }
+        if (particleStart < 0) {
+            throw std::invalid_argument(
+                    "STSRL-006 particle_start must be non-negative");
+        }
+        if (particleCount <= 0 || particleCount > 64) {
+            throw std::invalid_argument(
+                    "STSRL-006 particle_count must be in [1, 64]");
+        }
+        if (searchSimulations <= 0) {
+            throw std::invalid_argument(
+                    "STSRL-006 search_simulations must be positive");
+        }
+        if (particleStart > std::numeric_limits<int>::max() - particleCount) {
+            throw std::invalid_argument(
+                    "STSRL-006 particle range exceeds native index capacity");
+        }
+
+        const auto anchorActions = publicBattleActions(bc);
+        const auto anchorProjection = makeT096PublicInformationProjection(
+                gc, bc, anchorActions);
+        const auto anchorPublicActions = anchorProjection[
+                "ordered_public_legal_actions"].cast<pybind11::list>();
+        if (anchorProjection["information_fidelity"].cast<std::string>()
+                != "supported") {
+            throw std::runtime_error(
+                    "STSRL-006 particle Search unavailable: anchor unsupported_fidelity");
+        }
+
+        struct PreparedParticle {
+            int particleIndex = 0;
+            std::uint64_t particleSeed = 0;
+            BattleContext state;
+            std::vector<LightSpeedAction> actions;
+            pybind11::dict projection;
+            std::string hiddenFingerprint;
+        };
+        std::vector<PreparedParticle> prepared;
+        prepared.reserve(static_cast<std::size_t>(particleCount));
+        for (int index = 0; index < particleCount; ++index) {
+            const int particleIndex = particleStart + index;
+            std::uint64_t particleSeed = 0;
+            auto particle = buildHiddenFutureParticle(
+                    samplerSeed, particleIndex, particleSeed);
+            if (publicInformationUnsupported(particle)) {
+                throw std::runtime_error(
+                        "STSRL-006 sampled particle became unsupported_fidelity");
+            }
+            auto actions = publicBattleActions(particle);
+            const auto projection = makeT096PublicInformationProjection(
+                    gc, particle, actions);
+            const auto particlePublicActions = projection[
+                    "ordered_public_legal_actions"].cast<pybind11::list>();
+            if (!projection.equal(anchorProjection)
+                    || !particlePublicActions.equal(anchorPublicActions)) {
+                throw std::runtime_error(
+                        "STSRL-006 sampled particle public parity check failed");
+            }
+            validatePublicActionSurface(anchorActions, actions);
+            PreparedParticle item{
+                    particleIndex,
+                    particleSeed,
+                    std::move(particle),
+                    std::move(actions),
+                    projection,
+                    "",
+            };
+            item.hiddenFingerprint = hiddenFutureFingerprint(item.state);
+            prepared.push_back(std::move(item));
+        }
+
+        pybind11::list rows;
+        for (auto &item : prepared) {
+            search::BattleScumSearcher2 searcher(item.state);
+            searcher.includePotions = includePotions;
+            searcher.search(searchSimulations);
+            validateSearchRootMapping(item.state, searcher);
+            const auto rootReport = buildBattleSearchReport(
+                    item.state,
+                    searcher,
+                    searchSimulations,
+                    includePotions,
+                    "StepSimulator.sample_hidden_future_particles_search.v1",
+                    "sts_lightspeed_native_particle_search_bridge_v1",
+                    nullptr,
+                    nullptr,
+                    pybind11::none());
+            if (rootReport["unsearched_legal_action_count"].cast<int>() != 0
+                    || rootReport["unmapped_search_edge_count"].cast<int>() != 0) {
+                throw std::runtime_error(
+                        "STSRL-006 Search-v2 root/action mapping was incomplete");
+            }
+
+            const auto rawRootRows = rootReport["root_rows"].cast<pybind11::list>();
+            if (rawRootRows.size() != item.actions.size()) {
+                throw std::runtime_error(
+                        "STSRL-006 Search-v2 root row/action cardinality drift");
+            }
+            pybind11::list publicRootRows;
+            for (std::size_t actionIdx = 0; actionIdx < item.actions.size(); ++actionIdx) {
+                const auto rawRow = rawRootRows[actionIdx].cast<pybind11::dict>();
+                pybind11::dict publicRow = publicInformationActionIdentity(
+                        item.actions[actionIdx]);
+                for (const char *field : {
+                        "search_tree_present", "search_edge_index", "visits",
+                        "evaluation_sum", "mean_value"}) {
+                    publicRow[field] = rawRow[field];
+                }
+                publicRow["public_action_ordinal"] = static_cast<int>(actionIdx);
+                publicRootRows.append(publicRow);
+            }
+            pybind11::dict publicRootReport;
+            for (const char *field : {
+                    "schema_id", "native_api", "patch_identity",
+                    "information_regime", "simulations_requested", "root_visits",
+                    "include_potions", "native_simulator_steps", "model_calls",
+                    "best_action_value", "min_action_value", "outcome_player_hp",
+                    "root_row_count", "search_edge_count",
+                    "unsearched_legal_action_count", "unmapped_search_edge_count"}) {
+                publicRootReport[field] = rootReport[field];
+            }
+            pybind11::dict workCounters;
+            workCounters["schema_id"] = "native-battle-search-work-v1";
+            workCounters["action_execution_count"] = searcher.actionExecutionCount;
+            workCounters["successor_transition_count"] = searcher.actionExecutionCount;
+            workCounters["tree_and_rollout_action_execution_count"] =
+                    searcher.actionExecutionCount
+                    - searcher.heuristicSuccessorTransitionCount;
+            workCounters["heuristic_successor_transition_count"] =
+                    searcher.heuristicSuccessorTransitionCount;
+            workCounters["tree_node_expansion_count"] = searcher.expandedNodeCount;
+            workCounters["rollout_count"] = searcher.rolloutCount;
+            workCounters["terminal_utility_evaluation_count"] =
+                    searcher.terminalUtilityEvaluationCount;
+            workCounters["policy_prior_calls"] = searcher.policyPriorCallCount;
+            workCounters["leaf_value_calls"] = searcher.leafValueCallCount;
+            workCounters["model_calls"] = searcher.policyPriorCallCount
+                    + searcher.leafValueCallCount;
+            publicRootReport["work_counters"] = workCounters;
+            pybind11::dict searchConfiguration;
+            searchConfiguration["policy_prior_enabled"] = false;
+            searchConfiguration["learned_leaf_value_enabled"] = false;
+            searchConfiguration["progressive_bias_enabled"] = false;
+            publicRootReport["search_v2_configuration"] = searchConfiguration;
+            publicRootReport["root_rows"] = publicRootRows;
+
+            pybind11::dict row;
+            row["particle_index"] = item.particleIndex;
+            row["sampler_seed"] = item.particleSeed;
+            row["hidden_future_fingerprint"] = item.hiddenFingerprint;
+            row["public_information_projection"] = item.projection;
+            row["public_projection_equal"] = true;
+            row["ordered_public_legal_actions_equal"] = true;
+            row["ordered_public_legal_actions"] = item.projection[
+                    "ordered_public_legal_actions"];
+            row["root_action_mapping_complete"] = true;
+            row["root_action_mapping_ambiguous"] = false;
+            row["search_value_semantics"] =
+                    "full_state_continuation_strategy_fusion_proxy";
+            row["root_evaluation"] = publicRootReport;
+            row["root_rows"] = publicRootRows;
+            rows.append(row);
+        }
+
+        pybind11::dict semantics;
+        semantics["outer_particle_distribution"] =
+                "native_public_consistent_hidden_future_sampler";
+        semantics["continuation"] = "full_state_search_v2_per_particle";
+        semantics["aggregation"] = "not_performed";
+        semantics["q_public_claim"] = false;
+        semantics["executable_no_sl_continuation_claim"] = false;
+        semantics["information_set_optimal_claim"] = false;
+
+        pybind11::dict ret;
+        ret["schema_id"] = "native-battle-public-particle-search-v1";
+        ret["native_api"] =
+                "StepSimulator.sample_hidden_future_particles_search.v1";
+        ret["sampler_seed_input"] = samplerSeed;
+        ret["particle_start"] = particleStart;
+        ret["particle_count"] = particleCount;
+        ret["search_simulations"] = searchSimulations;
+        ret["include_potions"] = includePotions;
+        ret["information_regime"] =
+                "normal_belief_search_outer_full_simulator_state_oracle_like_continuation";
+        ret["anchor_public_information_projection"] = anchorProjection;
+        ret["anchor_ordered_public_legal_actions"] = anchorPublicActions;
+        ret["semantic_boundary"] = semantics;
+        ret["particles"] = rows;
+        return ret;
+    }
+
+    pybind11::dict stsr006ParticleSearchAudit() {
+        const auto savedBattleContext = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedScreenState = gc.screenState;
+        const auto savedGameOutcome = gc.outcome;
+        const auto restore = [&]() {
+            bc = savedBattleContext;
+            battleActive = savedBattleActive;
+            gc.screenState = savedScreenState;
+            gc.outcome = savedGameOutcome;
+        };
+
+        try {
+            gc.screenState = ScreenState::BATTLE;
+            gc.outcome = GameOutcome::UNDECIDED;
+            bc = BattleContext();
+            bc.inputState = InputState::PLAYER_NORMAL;
+            bc.turn = 0;
+            bc.player.curHp = 80;
+            bc.player.maxHp = 80;
+            bc.player.energy = 3;
+            bc.player.energyPerTurn = 3;
+            bc.monsters.monsterCount = 1;
+            bc.monsters.monstersAlive = 1;
+            auto &monster = bc.monsters.arr[0];
+            monster.idx = 0;
+            monster.id = MonsterId::JAW_WORM;
+            monster.curHp = 30;
+            monster.maxHp = 30;
+            monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+            monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+            for (const auto &[cardId, uniqueId] : {
+                    std::pair<CardId, int>{CardId::STRIKE_RED, 200},
+                    std::pair<CardId, int>{CardId::DEFEND_RED, 201},
+                    std::pair<CardId, int>{CardId::BASH, 202},
+                    std::pair<CardId, int>{CardId::HEADBUTT, 203}}) {
+                CardInstance card(cardId);
+                card.setUniqueId(uniqueId);
+                bc.cards.drawPile.push_back(card);
+            }
+            battleActive = true;
+
+            const auto directParticles = sampleHiddenFutureParticles(0x13579BDFULL, 0, 2);
+            const auto bridge = sampleHiddenFutureParticlesSearch(
+                    0x13579BDFULL, 0, 2, 1, false);
+            const auto bridgeParticles = bridge["particles"].cast<pybind11::list>();
+            bool directSamplerParity = bridgeParticles.size() == directParticles.size();
+            const auto semantics = bridge["semantic_boundary"].cast<pybind11::dict>();
+            const bool valueSemanticsLabeled =
+                    semantics["continuation"].cast<std::string>()
+                            == "full_state_search_v2_per_particle"
+                    && !semantics["q_public_claim"].cast<bool>()
+                    && semantics["aggregation"].cast<std::string>() == "not_performed";
+            bool rootWorkCountersComplete = true;
+            bool hiddenDiversity = false;
+            std::set<std::string> directFingerprints;
+            for (std::size_t idx = 0; idx < bridgeParticles.size(); ++idx) {
+                const auto direct = directParticles[idx].cast<pybind11::dict>();
+                const auto bridged = bridgeParticles[idx].cast<pybind11::dict>();
+                directSamplerParity = directSamplerParity
+                        && direct["particle_index"].equal(bridged["particle_index"])
+                        && direct["sampler_seed"].equal(bridged["sampler_seed"])
+                        && direct["hidden_future_fingerprint"].equal(
+                                bridged["hidden_future_fingerprint"])
+                        && direct["public_information_projection"].equal(
+                                bridged["public_information_projection"])
+                        && !bridged["root_rows"].cast<pybind11::list>()[0]
+                                .cast<pybind11::dict>().contains("bits");
+                const auto rootEvaluation = bridged["root_evaluation"].cast<pybind11::dict>();
+                const auto workCounters = rootEvaluation["work_counters"]
+                        .cast<pybind11::dict>();
+                rootWorkCountersComplete = rootWorkCountersComplete
+                        && workCounters.contains("action_execution_count")
+                        && workCounters.contains("tree_node_expansion_count")
+                        && workCounters.contains("rollout_count")
+                        && workCounters.contains("terminal_utility_evaluation_count");
+                directFingerprints.insert(
+                        direct["hidden_future_fingerprint"].cast<std::string>());
+            }
+            hiddenDiversity = directFingerprints.size() > 1;
+
+            bc.player.setHasRelic<R::FROZEN_EYE>(true);
+            const auto directFrozenSearch = battleSearchV2(
+                    1, false, pybind11::none(), pybind11::none());
+            const auto frozenBridge = sampleHiddenFutureParticlesSearch(
+                    0x2468ACE0ULL, 0, 1, 1, false);
+            const auto frozenParticles = frozenBridge["particles"].cast<pybind11::list>();
+            const auto frozenRoot = frozenParticles[0].cast<pybind11::dict>()[
+                    "root_rows"].cast<pybind11::list>();
+            const auto directRoot = directFrozenSearch["root_rows"].cast<pybind11::list>();
+            bool frozenEyeCompatibility = frozenRoot.size() == directRoot.size();
+            if (frozenEyeCompatibility) {
+                for (std::size_t idx = 0; idx < frozenRoot.size(); ++idx) {
+                    const auto bridged = frozenRoot[idx].cast<pybind11::dict>();
+                    const auto direct = directRoot[idx].cast<pybind11::dict>();
+                    for (const char *field : {"kind", "idx1", "idx2", "idx3",
+                            "visits", "evaluation_sum", "mean_value"}) {
+                        frozenEyeCompatibility = frozenEyeCompatibility
+                                && bridged[field].equal(direct[field]);
+                    }
+                }
+            }
+
+            bc.player.setHasRelic<R::FROZEN_EYE>(false);
+            bc.knownDrawTopUniqueIds.push_back(
+                    bc.cards.drawPile.back().getUniqueId());
+            const auto knownPositionBridge = sampleHiddenFutureParticlesSearch(
+                    0x10203040ULL, 0, 2, 1, false);
+            const auto knownPositionParticles = knownPositionBridge[
+                    "particles"].cast<pybind11::list>();
+            bool knownDrawConstraintPreserved = true;
+            for (const auto &particleHandle : knownPositionParticles) {
+                const auto particle = particleHandle.cast<pybind11::dict>();
+                const auto projection = particle[
+                        "public_information_projection"].cast<pybind11::dict>();
+                const auto drawOrder = projection["visibility"].cast<pybind11::dict>()[
+                        "draw_order"].cast<pybind11::dict>();
+                knownDrawConstraintPreserved = knownDrawConstraintPreserved
+                        && drawOrder["classification"].cast<std::string>() == "known_prefix"
+                        && drawOrder["known_top_prefix"].cast<pybind11::list>().size() == 1
+                        && particle["root_action_mapping_complete"].cast<bool>();
+            }
+
+            bc.markDrawKnowledgeUnsupported(
+                    DrawKnowledgeUnsupportedReason::SUBSET_MEMBERSHIP);
+            bool unsupportedAnchorFailsClosed = false;
+            try {
+                (void) sampleHiddenFutureParticlesSearch(
+                        0x55667788ULL, 0, 1, 1, false);
+            } catch (const std::runtime_error &) {
+                unsupportedAnchorFailsClosed = true;
+            }
+
+            pybind11::dict report;
+            report["schema_id"] = "native-stsr006-particle-search-audit-v1";
+            report["direct_sampler_parity"] = directSamplerParity;
+            report["value_semantics_labeled"] = valueSemanticsLabeled;
+            report["root_work_counters_complete"] = rootWorkCountersComplete;
+            report["hidden_particle_diversity"] = hiddenDiversity;
+            report["frozen_eye_search_compatibility"] = frozenEyeCompatibility;
+            report["known_draw_constraint_preserved"] = knownDrawConstraintPreserved;
+            report["unsupported_anchor_fails_closed"] = unsupportedAnchorFailsClosed;
+            restore();
+            return report;
+        } catch (...) {
+            restore();
+            throw;
+        }
     }
 
     pybind11::dict completeBattleTransitionIfTerminal() {
@@ -1958,6 +2395,7 @@ struct StepSimulator {
     }
 
     pybind11::dict buildBattleSearchReport(
+            const BattleContext &searchState,
             const search::BattleScumSearcher2 &searcher,
             std::int64_t simulations,
             bool includePotions,
@@ -1966,7 +2404,7 @@ struct StepSimulator {
             const std::vector<double> *legalActionPriors,
             const std::vector<int> *edgeAllocations,
             const pybind11::object &allocationMetadata) {
-        const auto legalActions = enumerateBattleActions(bc);
+        const auto legalActions = enumerateBattleActions(searchState);
         std::vector<bool> matchedEdges(searcher.root.edges.size(), false);
         pybind11::list rootRows;
         int unsearchedLegalActionCount = 0;
@@ -1984,7 +2422,7 @@ struct StepSimulator {
             }
 
             pybind11::dict row = publicProjectionActionSnapshot(
-                    makeBattleAction(bc, legalAction));
+                    makeBattleAction(searchState, legalAction));
             row["search_tree_present"] = matchedEdge != nullptr;
             row["search_edge_index"] = matchedEdgeIndex >= 0
                     ? pybind11::object(pybind11::int_(matchedEdgeIndex))
@@ -2059,6 +2497,7 @@ struct StepSimulator {
         searcher.includePotions = includePotions;
         searcher.search(simulations);
         return buildBattleSearchReport(
+                bc,
                 searcher,
                 simulations,
                 includePotions,
@@ -2287,6 +2726,7 @@ struct StepSimulator {
         }
         searcher.search(simulations);
         auto report = buildBattleSearchReport(
+                bc,
                 searcher,
                 simulations,
                 includePotions,
@@ -2414,6 +2854,7 @@ struct StepSimulator {
         searcher.enableStateUtilizationTelemetry();
         searcher.search(simulations);
         auto report = buildBattleSearchReport(
+                bc,
                 searcher,
                 simulations,
                 includePotions,
@@ -2615,6 +3056,7 @@ struct StepSimulator {
         allocationMetadata["allocation_plan"] = allocationPlan;
 
         return buildBattleSearchReport(
+                bc,
                 searcher,
                 simulations,
                 includePotions,
@@ -2845,6 +3287,15 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("sampler_seed"),
             pybind11::arg("particle_start"),
             pybind11::arg("particle_count"))
+        .def(
+            "sample_hidden_future_particles_search",
+            &StepSimulator::sampleHiddenFutureParticlesSearch,
+            pybind11::arg("sampler_seed"),
+            pybind11::arg("particle_start"),
+            pybind11::arg("particle_count"),
+            pybind11::arg("search_simulations"),
+            pybind11::arg("include_potions") = false)
+        .def("stsr006_particle_search_audit", &StepSimulator::stsr006ParticleSearchAudit)
         .def(
             "battle_search",
             &StepSimulator::battleSearch,
