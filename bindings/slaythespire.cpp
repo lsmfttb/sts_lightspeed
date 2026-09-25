@@ -2743,6 +2743,118 @@ struct StepSimulator {
         report["tree_internal_telemetry"] = treeTelemetry;
     }
 
+    void appendInternalTeacherTelemetry(
+            pybind11::dict &report,
+            const search::BattleScumSearcher2 &searcher) const {
+        // This traversal intentionally runs only after Search has completed.
+        // Every transition receives a private BattleContext copy, so collection
+        // cannot consume Search RNG or mutate its counters/tree/statistics.
+        pybind11::dict telemetry;
+        telemetry["schema_id"] = "native-battle-search-v2-internal-teacher-telemetry-v1";
+        telemetry["schema_version"] = 1;
+        telemetry["candidate_input_states"] = pybind11::make_tuple(
+                "PLAYER_NORMAL", "CARD_SELECT");
+        telemetry["collection_phase"] = "post_search_private_state_replay";
+        telemetry["search_rng_or_counter_mutated"] = false;
+        telemetry["raw_private_state_exported"] = false;
+
+        pybind11::list rows;
+        std::int64_t extractionTransitions = 0;
+        std::function<void(const search::BattleScumSearcher2::Node &, const BattleContext &,
+                           int, const std::string &)> visit;
+        visit = [&](const search::BattleScumSearcher2::Node &node,
+                    const BattleContext &state,
+                    int depth,
+                    const std::string &occurrenceIdentity) {
+            // An empty edge list is an unexpanded tree node and is never a
+            // candidate. Terminal states are excluded even if a malformed tree
+            // happened to contain edges below one.
+            if (node.edges.empty() || state.outcome != Outcome::UNDECIDED) {
+                return;
+            }
+
+            if (depth >= 1 &&
+                (state.inputState == InputState::PLAYER_NORMAL ||
+                 state.inputState == InputState::CARD_SELECT)) {
+                pybind11::dict row;
+                row["occurrence_identity"] = occurrenceIdentity;
+                row["tree_depth"] = depth;
+                row["expansion_ordinal"] = node.expansionOrdinal;
+                row["input_state"] = inputStateLabel(state.inputState);
+                // battleSearchNodeSnapshot is the existing public tactical
+                // projection. It deliberately exposes no checkpoint, RNG,
+                // draw order, ActionQueue, or native-node data.
+                row["public_battle_projection"] = battleSearchNodeSnapshot(state);
+
+                pybind11::list searchable;
+                std::vector<std::uint32_t> searchableBits;
+                searchableBits.reserve(node.edges.size());
+                for (const auto &edge : node.edges) {
+                    pybind11::dict child;
+                    child["action"] = publicProjectionActionSnapshot(
+                            makeBattleAction(state, edge.action));
+                    child["visits"] = edge.node.simulationCount;
+                    if (edge.node.simulationCount > 0) {
+                        const double mean = edge.node.evaluationSum /
+                                static_cast<double>(edge.node.simulationCount);
+                        if (!std::isfinite(mean)) {
+                            throw std::logic_error("internal telemetry child mean is non-finite");
+                        }
+                        child["mean_value"] = mean;
+                    } else {
+                        child["mean_value"] = pybind11::none();
+                    }
+                    searchable.append(child);
+                    searchableBits.push_back(edge.action.bits);
+                }
+                row["teacher_searchable_actions"] = searchable;
+
+                // Publicly legal actions that the frozen teacher did not
+                // enumerate are reported apart from teacher support. They are
+                // never represented as zero-visit tree children.
+                pybind11::list excluded;
+                for (const auto &publicAction : enumerateBattleActions(state)) {
+                    bool searchableAction = false;
+                    for (const auto bits : searchableBits) {
+                        if (bits == publicAction.bits) {
+                            searchableAction = true;
+                            break;
+                        }
+                    }
+                    if (searchableAction) {
+                        continue;
+                    }
+                    pybind11::dict excludedAction;
+                    excludedAction["action"] = publicProjectionActionSnapshot(
+                            makeBattleAction(state, publicAction));
+                    excludedAction["exclusion_reason"] =
+                            publicAction.getActionType() == search::ActionType::POTION
+                            ? "frozen_no_potion_teacher_configuration"
+                            : "not_enumerated_by_frozen_teacher";
+                    excluded.append(excludedAction);
+                }
+                row["public_teacher_excluded_actions"] = excluded;
+                rows.append(row);
+            }
+
+            for (std::size_t index = 0; index < node.edges.size(); ++index) {
+                BattleContext childState(state);
+                node.edges[index].action.execute(childState);
+                ++extractionTransitions;
+                visit(node.edges[index].node, childState, depth + 1,
+                        occurrenceIdentity + "." + std::to_string(index));
+            }
+        };
+
+        visit(searcher.root, *searcher.rootState, 0, "root");
+        telemetry["telemetry_extraction_transition_count"] = extractionTransitions;
+        telemetry["candidate_count"] = static_cast<std::int64_t>(rows.size());
+        telemetry["rows"] = rows;
+        auto treeTelemetry = report["tree_internal_telemetry"].cast<pybind11::dict>();
+        treeTelemetry["internal_teacher_telemetry"] = telemetry;
+        report["tree_internal_telemetry"] = treeTelemetry;
+    }
+
     void appendClassicalSearchTelemetry(
             pybind11::dict &report,
             const search::BattleScumSearcher2 &searcher) const {
@@ -3014,6 +3126,60 @@ struct StepSimulator {
                 ? "after_first_action_from_newly_expanded_node" : "disabled";
         report["tree_internal_telemetry"] = mechanismTelemetry;
         appendStateUtilizationTelemetry(report, searcher);
+        appendTreeGeometryTelemetry(report, searcher);
+        return report;
+    }
+
+    pybind11::dict battleSearchV2WithInternalTeacherTelemetry(
+            std::int64_t simulations, bool includePotions) {
+        // This bounded companion intentionally has no callback arguments. It
+        // is the frozen unguided Search-v2@400 teacher with default-off
+        // telemetry, not a new controller or action-space configuration.
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle search requested outside battle");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("battle search v2 simulations must be positive");
+        }
+        if (includePotions) {
+            throw std::invalid_argument(
+                    "internal teacher telemetry is fixed to the no-potion Search-v2 action space");
+        }
+        search::BattleScumSearcher2 searcher(bc);
+        searcher.includePotions = includePotions;
+        searcher.search(simulations);
+        auto report = buildBattleSearchReport(
+                searcher,
+                simulations,
+                includePotions,
+                "StepSimulator.battle_search_v2_with_internal_teacher_telemetry.v1",
+                "sts_lightspeed_battle_search_v2_internal_teacher_telemetry_v1",
+                nullptr,
+                nullptr,
+                pybind11::none());
+        report["model_calls"] = 0;
+        pybind11::dict teacherConfig;
+        teacherConfig["schema_id"] = "t092-frozen-search-v2-teacher-config-v1";
+        teacherConfig["implementation"] = "BattleScumSearcher2";
+        teacherConfig["search_api"] = "StepSimulator.battle_search_v2";
+        teacherConfig["information_regime"] = "full_simulator_state_oracle_like";
+        teacherConfig["simulations"] = simulations;
+        teacherConfig["root_selection"] = "highest_mean";
+        teacherConfig["include_potions"] = false;
+        teacherConfig["policy_prior"] = pybind11::none();
+        teacherConfig["learned_leaf_value"] = pybind11::none();
+        teacherConfig["rollout"] = "playoutRandom";
+        teacherConfig["terminal_utility"] = "evaluateEndState";
+        report["teacher_config"] = teacherConfig;
+        pybind11::dict mechanismTelemetry;
+        mechanismTelemetry["expanded_nodes"] = searcher.expandedNodeCount;
+        mechanismTelemetry["policy_prior_calls"] = 0;
+        mechanismTelemetry["leaf_value_calls"] = 0;
+        mechanismTelemetry["policy_prior_scope"] = "disabled";
+        mechanismTelemetry["leaf_value_boundary"] = "disabled";
+        report["tree_internal_telemetry"] = mechanismTelemetry;
+        appendInternalTeacherTelemetry(report, searcher);
         appendTreeGeometryTelemetry(report, searcher);
         return report;
     }
@@ -3474,6 +3640,11 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),
             pybind11::arg("leaf_value_callback") = pybind11::none())
+        .def(
+            "battle_search_v2_with_internal_teacher_telemetry",
+            &StepSimulator::battleSearchV2WithInternalTeacherTelemetry,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false)
         .def(
             "battle_search_with_root_priors",
             &StepSimulator::battleSearchWithRootPriors,
