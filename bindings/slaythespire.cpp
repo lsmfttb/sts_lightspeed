@@ -1127,6 +1127,23 @@ pybind11::dict makeT096PublicInformationProjection(
 }
 
 struct StepSimulator {
+    enum class ParticleSearchFailureInjection {
+        NONE,
+        ROOT_OCCURRENCE_MAPPING,
+        SEARCH_SETUP,
+        SEARCH_EXECUTION,
+        SANITIZED_ROOT_REPORT,
+    };
+
+    static constexpr const char *particleSearchStageNames[] = {
+        "hidden_future_sample_construction",
+        "public_fidelity_validation",
+        "root_occurrence_mapping",
+        "search_setup",
+        "search_execution",
+        "sanitized_root_report",
+    };
+
     struct SearchRootMapping {
         std::vector<int> publicToEdge;
         std::vector<std::string> mappingModes;
@@ -1136,13 +1153,115 @@ struct StepSimulator {
     GameContext gc;
     BattleContext bc;
     bool battleActive = false;
+    pybind11::dict lastParticleSearchStageDiagnostics;
 
-    StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {}
+    StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {
+        beginParticleSearchStageTrace();
+        lastParticleSearchStageDiagnostics["attempt_status"] = "not_attempted";
+    }
+
+    pybind11::dict makeParticleSearchStageTraceRow(pybind11::object particleIndex) {
+        pybind11::dict stages;
+        for (const auto *name : particleSearchStageNames) {
+            stages[name] = "not_reached";
+        }
+        pybind11::dict row;
+        row["particle_index"] = std::move(particleIndex);
+        row["stages"] = stages;
+        row["first_failed_stage"] = pybind11::none();
+        row["failure_code"] = pybind11::none();
+        return row;
+    }
+
+    void beginParticleSearchStageTrace() {
+        lastParticleSearchStageDiagnostics = pybind11::dict();
+        lastParticleSearchStageDiagnostics["schema_id"] =
+                "native-particle-search-stage-observability-v1";
+        lastParticleSearchStageDiagnostics["attempt_status"] = "in_progress";
+        lastParticleSearchStageDiagnostics["first_failed_stage"] = pybind11::none();
+        lastParticleSearchStageDiagnostics["failure_code"] = pybind11::none();
+        lastParticleSearchStageDiagnostics["accepted_root_report_returned"] = false;
+        lastParticleSearchStageDiagnostics["particles"] = pybind11::list();
+    }
+
+    pybind11::dict appendParticleSearchStageTraceRow(
+            const pybind11::object &particleIndex) {
+        auto row = makeParticleSearchStageTraceRow(particleIndex);
+        lastParticleSearchStageDiagnostics["particles"].cast<pybind11::list>().append(row);
+        return row;
+    }
+
+    static void setParticleSearchStage(
+            const pybind11::dict &row,
+            const char *stage,
+            const char *status) {
+        row["stages"].cast<pybind11::dict>()[stage] = status;
+    }
+
+    void failParticleSearchStage(
+            const pybind11::dict &row,
+            const char *stage,
+            const char *failureCode) {
+        setParticleSearchStage(row, stage, "failed");
+        row["first_failed_stage"] = stage;
+        row["failure_code"] = failureCode;
+        lastParticleSearchStageDiagnostics["attempt_status"] = "failed_closed";
+        lastParticleSearchStageDiagnostics["first_failed_stage"] = stage;
+        lastParticleSearchStageDiagnostics["failure_code"] = failureCode;
+    }
+
+    void recordUnhandledParticleSearchFailure() {
+        if (lastParticleSearchStageDiagnostics["attempt_status"].cast<std::string>()
+                != "in_progress") {
+            return;
+        }
+        const auto particles = lastParticleSearchStageDiagnostics["particles"]
+                .cast<pybind11::list>();
+        for (std::size_t rowIdx = particles.size(); rowIdx > 0; --rowIdx) {
+            const auto row = particles[rowIdx - 1].cast<pybind11::dict>();
+            const auto stages = row["stages"].cast<pybind11::dict>();
+            for (std::size_t stageIdx = std::size(particleSearchStageNames);
+                    stageIdx > 0; --stageIdx) {
+                const auto *name = particleSearchStageNames[stageIdx - 1];
+                if (stages[name].cast<std::string>() == "entered") {
+                    failParticleSearchStage(row, name, "native_stage_exception");
+                    return;
+                }
+            }
+        }
+        lastParticleSearchStageDiagnostics["attempt_status"] = "failed_closed";
+        lastParticleSearchStageDiagnostics["failure_code"] = "request_or_preflight_failure";
+    }
+
+    pybind11::dict particleSearchStageDiagnosticsSnapshot() const {
+        pybind11::dict snapshot;
+        for (const auto &entry : lastParticleSearchStageDiagnostics) {
+            snapshot[entry.first] = entry.second;
+        }
+        pybind11::list particles;
+        for (const auto &entry : lastParticleSearchStageDiagnostics["particles"].cast<pybind11::list>()) {
+            const auto row = entry.cast<pybind11::dict>();
+            pybind11::dict rowCopy;
+            rowCopy["particle_index"] = row["particle_index"];
+            rowCopy["first_failed_stage"] = row["first_failed_stage"];
+            rowCopy["failure_code"] = row["failure_code"];
+            pybind11::dict stageCopy;
+            for (const auto *name : particleSearchStageNames) {
+                stageCopy[name] = row["stages"].cast<pybind11::dict>()[name];
+            }
+            rowCopy["stages"] = stageCopy;
+            particles.append(rowCopy);
+        }
+        snapshot["particles"] = particles;
+        return snapshot;
+    }
 
     void reset(CharacterClass cc, std::uint64_t seed, int ascension) {
         gc = GameContext(cc, seed, ascension);
         bc = BattleContext();
         battleActive = false;
+        beginParticleSearchStageTrace();
+        lastParticleSearchStageDiagnostics["attempt_status"] = "not_attempted";
     }
 
     void ensureBattleContext() {
@@ -2088,12 +2207,44 @@ struct StepSimulator {
             int particleCount,
             std::int64_t searchSimulations,
             bool includePotions) {
+        beginParticleSearchStageTrace();
+        try {
+            auto result = runParticleSearchWithStageObservability(
+                    samplerSeed, particleStart, particleCount,
+                    searchSimulations, includePotions);
+            lastParticleSearchStageDiagnostics["attempt_status"] = "accepted";
+            lastParticleSearchStageDiagnostics["accepted_root_report_returned"] = true;
+            return result;
+        } catch (...) {
+            recordUnhandledParticleSearchFailure();
+            throw;
+        }
+    }
+
+    pybind11::dict lastParticleSearchStageDiagnosticsSnapshot() const {
+        return particleSearchStageDiagnosticsSnapshot();
+    }
+
+    pybind11::dict runParticleSearchWithStageObservability(
+            std::uint64_t samplerSeed,
+            int particleStart,
+            int particleCount,
+            std::int64_t searchSimulations,
+            bool includePotions,
+            ParticleSearchFailureInjection injection =
+                    ParticleSearchFailureInjection::NONE) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error(
                     "STSRL-006 particle Search requested outside battle");
         }
+        pybind11::dict anchorTrace;
         if (publicInformationUnsupported(bc)) {
+            anchorTrace = appendParticleSearchStageTraceRow(pybind11::none());
+            setParticleSearchStage(anchorTrace,
+                    "public_fidelity_validation", "entered");
+            failParticleSearchStage(anchorTrace,
+                    "public_fidelity_validation", "anchor_unsupported_fidelity");
             throw std::runtime_error(
                     "STSRL-006 particle Search unavailable: anchor unsupported_fidelity");
         }
@@ -2121,6 +2272,11 @@ struct StepSimulator {
                 "ordered_public_legal_actions"].cast<pybind11::list>();
         if (anchorProjection["information_fidelity"].cast<std::string>()
                 != "supported") {
+            anchorTrace = appendParticleSearchStageTraceRow(pybind11::none());
+            setParticleSearchStage(anchorTrace,
+                    "public_fidelity_validation", "entered");
+            failParticleSearchStage(anchorTrace,
+                    "public_fidelity_validation", "anchor_unsupported_fidelity");
             throw std::runtime_error(
                     "STSRL-006 particle Search unavailable: anchor unsupported_fidelity");
         }
@@ -2132,29 +2288,57 @@ struct StepSimulator {
             std::vector<LightSpeedAction> actions;
             pybind11::dict projection;
             std::string hiddenFingerprint;
+            pybind11::dict stageTrace;
         };
         std::vector<PreparedParticle> prepared;
         prepared.reserve(static_cast<std::size_t>(particleCount));
         for (int index = 0; index < particleCount; ++index) {
             const int particleIndex = particleStart + index;
+            auto stageTrace = appendParticleSearchStageTraceRow(
+                    pybind11::int_(particleIndex));
+            setParticleSearchStage(stageTrace,
+                    "hidden_future_sample_construction", "entered");
             std::uint64_t particleSeed = 0;
-            auto particle = buildHiddenFutureParticle(
-                    samplerSeed, particleIndex, particleSeed);
-            if (publicInformationUnsupported(particle)) {
-                throw std::runtime_error(
-                        "STSRL-006 sampled particle became unsupported_fidelity");
+            BattleContext particle = [&]() {
+                try {
+                    auto state = buildHiddenFutureParticle(
+                            samplerSeed, particleIndex, particleSeed);
+                    setParticleSearchStage(stageTrace,
+                            "hidden_future_sample_construction", "completed");
+                    return state;
+                } catch (...) {
+                    failParticleSearchStage(stageTrace,
+                            "hidden_future_sample_construction", "native_exception");
+                    throw;
+                }
+            }();
+            setParticleSearchStage(stageTrace,
+                    "public_fidelity_validation", "entered");
+            std::vector<LightSpeedAction> actions;
+            pybind11::dict projection;
+            try {
+                if (publicInformationUnsupported(particle)) {
+                    throw std::runtime_error(
+                            "STSRL-006 sampled particle became unsupported_fidelity");
+                }
+                actions = publicBattleActions(particle);
+                projection = makeT096PublicInformationProjection(
+                        gc, particle, actions);
+                const auto particlePublicActions = projection[
+                        "ordered_public_legal_actions"].cast<pybind11::list>();
+                if (!projection.equal(anchorProjection)
+                        || !particlePublicActions.equal(anchorPublicActions)) {
+                    throw std::runtime_error(
+                            "STSRL-006 sampled particle public parity check failed");
+                }
+                validatePublicActionSurface(anchorActions, actions);
+                setParticleSearchStage(stageTrace,
+                        "public_fidelity_validation", "completed");
+            } catch (...) {
+                failParticleSearchStage(stageTrace,
+                        "public_fidelity_validation", "public_fidelity_failed");
+                throw;
             }
-            auto actions = publicBattleActions(particle);
-            const auto projection = makeT096PublicInformationProjection(
-                    gc, particle, actions);
-            const auto particlePublicActions = projection[
-                    "ordered_public_legal_actions"].cast<pybind11::list>();
-            if (!projection.equal(anchorProjection)
-                    || !particlePublicActions.equal(anchorPublicActions)) {
-                throw std::runtime_error(
-                        "STSRL-006 sampled particle public parity check failed");
-            }
-            validatePublicActionSurface(anchorActions, actions);
             PreparedParticle item{
                     particleIndex,
                     particleSeed,
@@ -2162,6 +2346,7 @@ struct StepSimulator {
                     std::move(actions),
                     projection,
                     "",
+                    stageTrace,
             };
             item.hiddenFingerprint = hiddenFutureFingerprint(item.state);
             prepared.push_back(std::move(item));
@@ -2169,13 +2354,58 @@ struct StepSimulator {
 
         pybind11::list rows;
         for (auto &item : prepared) {
-            search::BattleScumSearcher2 searcher(item.state);
-            searcher.includePotions = includePotions;
-            searcher.search(searchSimulations);
-            const auto rootMapping = validateSearchRootMapping(item.state, searcher);
+            setParticleSearchStage(item.stageTrace, "search_setup", "entered");
+            std::unique_ptr<search::BattleScumSearcher2> searcher;
+            try {
+                if (injection == ParticleSearchFailureInjection::SEARCH_SETUP) {
+                    throw std::runtime_error("test-only Search setup failure injection");
+                }
+                searcher = std::make_unique<search::BattleScumSearcher2>(item.state);
+                searcher->includePotions = includePotions;
+                setParticleSearchStage(item.stageTrace, "search_setup", "completed");
+            } catch (...) {
+                failParticleSearchStage(item.stageTrace,
+                        "search_setup", "native_exception");
+                throw;
+            }
+            setParticleSearchStage(item.stageTrace, "search_execution", "entered");
+            try {
+                if (injection == ParticleSearchFailureInjection::SEARCH_EXECUTION) {
+                    throw std::runtime_error("test-only Search execution failure injection");
+                }
+                searcher->search(searchSimulations);
+                setParticleSearchStage(item.stageTrace,
+                        "search_execution", "completed");
+            } catch (...) {
+                failParticleSearchStage(item.stageTrace,
+                        "search_execution", "native_exception");
+                throw;
+            }
+            setParticleSearchStage(item.stageTrace,
+                    "root_occurrence_mapping", "entered");
+            SearchRootMapping rootMapping;
+            try {
+                if (injection == ParticleSearchFailureInjection::ROOT_OCCURRENCE_MAPPING) {
+                    searcher->root.edges.clear();
+                }
+                rootMapping = validateSearchRootMapping(item.state, *searcher);
+                setParticleSearchStage(item.stageTrace,
+                        "root_occurrence_mapping", "completed");
+            } catch (...) {
+                failParticleSearchStage(item.stageTrace,
+                        "root_occurrence_mapping", "root_occurrence_mapping_failed");
+                throw;
+            }
+            setParticleSearchStage(item.stageTrace,
+                    "sanitized_root_report", "entered");
+            if (injection == ParticleSearchFailureInjection::SANITIZED_ROOT_REPORT) {
+                failParticleSearchStage(item.stageTrace,
+                        "sanitized_root_report", "native_stage_exception");
+                throw std::runtime_error("test-only sanitized report failure injection");
+            }
             const auto rootReport = buildBattleSearchReport(
                     item.state,
-                    searcher,
+                    *searcher,
                     searchSimulations,
                     includePotions,
                     "StepSimulator.sample_hidden_future_particles_search.v1",
@@ -2222,7 +2452,7 @@ struct StepSimulator {
                 mappingRow["source_action"] = publicInformationActionIdentity(
                         makeBattleAction(
                                 item.state,
-                                searcher.root.edges[rootMapping.publicToEdge[actionIdx]].action));
+                                searcher->root.edges[rootMapping.publicToEdge[actionIdx]].action));
                 mappingRow["edge_public_occurrence_count"] = static_cast<int>(
                         rootMapping.edgeToPublic[rootMapping.publicToEdge[actionIdx]].size());
                 rootMappingAudit.append(mappingRow);
@@ -2239,21 +2469,21 @@ struct StepSimulator {
             }
             pybind11::dict workCounters;
             workCounters["schema_id"] = "native-battle-search-work-v1";
-            workCounters["action_execution_count"] = searcher.actionExecutionCount;
-            workCounters["successor_transition_count"] = searcher.actionExecutionCount;
+            workCounters["action_execution_count"] = searcher->actionExecutionCount;
+            workCounters["successor_transition_count"] = searcher->actionExecutionCount;
             workCounters["tree_and_rollout_action_execution_count"] =
-                    searcher.actionExecutionCount
-                    - searcher.heuristicSuccessorTransitionCount;
+                    searcher->actionExecutionCount
+                    - searcher->heuristicSuccessorTransitionCount;
             workCounters["heuristic_successor_transition_count"] =
-                    searcher.heuristicSuccessorTransitionCount;
-            workCounters["tree_node_expansion_count"] = searcher.expandedNodeCount;
-            workCounters["rollout_count"] = searcher.rolloutCount;
+                    searcher->heuristicSuccessorTransitionCount;
+            workCounters["tree_node_expansion_count"] = searcher->expandedNodeCount;
+            workCounters["rollout_count"] = searcher->rolloutCount;
             workCounters["terminal_utility_evaluation_count"] =
-                    searcher.terminalUtilityEvaluationCount;
-            workCounters["policy_prior_calls"] = searcher.policyPriorCallCount;
-            workCounters["leaf_value_calls"] = searcher.leafValueCallCount;
-            workCounters["model_calls"] = searcher.policyPriorCallCount
-                    + searcher.leafValueCallCount;
+                    searcher->terminalUtilityEvaluationCount;
+            workCounters["policy_prior_calls"] = searcher->policyPriorCallCount;
+            workCounters["leaf_value_calls"] = searcher->leafValueCallCount;
+            workCounters["model_calls"] = searcher->policyPriorCallCount
+                    + searcher->leafValueCallCount;
             publicRootReport["work_counters"] = workCounters;
             pybind11::dict searchConfiguration;
             searchConfiguration["policy_prior_enabled"] = false;
@@ -2281,6 +2511,8 @@ struct StepSimulator {
             row["root_evaluation"] = publicRootReport;
             row["root_rows"] = publicRootRows;
             rows.append(row);
+            setParticleSearchStage(item.stageTrace,
+                    "sanitized_root_report", "completed");
         }
 
         pybind11::dict semantics;
@@ -2494,6 +2726,145 @@ struct StepSimulator {
             report["unsupported_anchor_fails_closed"] = unsupportedAnchorFailsClosed;
             restore();
             return report;
+        } catch (...) {
+            restore();
+            throw;
+        }
+    }
+
+    pybind11::dict stsr007ParticleSearchStageAudit() {
+        const auto savedBattleContext = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedScreenState = gc.screenState;
+        const auto savedGameOutcome = gc.outcome;
+        const auto restore = [&]() {
+            bc = savedBattleContext;
+            battleActive = savedBattleActive;
+            gc.screenState = savedScreenState;
+            gc.outcome = savedGameOutcome;
+        };
+        const auto runInjected = [&](const ParticleSearchFailureInjection injection) {
+            beginParticleSearchStageTrace();
+            try {
+                (void) runParticleSearchWithStageObservability(
+                        0x6A09E667ULL, 0, 1, 1, false, injection);
+            } catch (const std::exception &) {
+                recordUnhandledParticleSearchFailure();
+            }
+            return particleSearchStageDiagnosticsSnapshot();
+        };
+        const auto stage = [](const pybind11::dict &trace, const std::size_t row,
+                                   const char *name) {
+            const auto rows = trace["particles"].cast<pybind11::list>();
+            return rows[row].cast<pybind11::dict>()["stages"]
+                    .cast<pybind11::dict>()[name].cast<std::string>();
+        };
+
+        try {
+            gc.screenState = ScreenState::BATTLE;
+            gc.outcome = GameOutcome::UNDECIDED;
+            bc = BattleContext();
+            bc.inputState = InputState::PLAYER_NORMAL;
+            bc.turn = 0;
+            bc.player.curHp = 80;
+            bc.player.maxHp = 80;
+            bc.player.energy = 3;
+            bc.player.energyPerTurn = 3;
+            bc.monsters.monsterCount = 1;
+            bc.monsters.monstersAlive = 1;
+            auto &monster = bc.monsters.arr[0];
+            monster.idx = 0;
+            monster.id = MonsterId::JAW_WORM;
+            monster.curHp = 30;
+            monster.maxHp = 30;
+            monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+            monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+            for (const auto &[cardId, uniqueId] : {
+                    std::pair<CardId, int>{CardId::STRIKE_RED, 400},
+                    std::pair<CardId, int>{CardId::DEFEND_RED, 401},
+                    std::pair<CardId, int>{CardId::BASH, 402},
+                    std::pair<CardId, int>{CardId::HEADBUTT, 403}}) {
+                CardInstance card(cardId);
+                card.setUniqueId(uniqueId);
+                bc.cards.drawPile.push_back(card);
+            }
+            battleActive = true;
+
+            const auto successReport = sampleHiddenFutureParticlesSearch(
+                    0x6A09E667ULL, 0, 1, 1, false);
+            const auto successTrace = lastParticleSearchStageDiagnosticsSnapshot();
+            const auto successStages = successTrace["particles"].cast<pybind11::list>()[0]
+                    .cast<pybind11::dict>()["stages"].cast<pybind11::dict>();
+            bool successAllStagesCompleted = true;
+            for (const auto *name : particleSearchStageNames) {
+                successAllStagesCompleted = successAllStagesCompleted
+                        && successStages[name].cast<std::string>() == "completed";
+            }
+            const auto successRows = successReport["particles"].cast<pybind11::list>();
+            const auto successParticle = successRows[0].cast<pybind11::dict>();
+            const auto successRootRows = successParticle["root_rows"].cast<pybind11::list>();
+            bool successOutputSanitized = !successRootRows.empty();
+            for (const auto &rowHandle : successRootRows) {
+                successOutputSanitized = successOutputSanitized
+                        && !rowHandle.cast<pybind11::dict>().contains("bits");
+            }
+
+            const auto mappingFailure = runInjected(
+                    ParticleSearchFailureInjection::ROOT_OCCURRENCE_MAPPING);
+            const auto setupFailure = runInjected(
+                    ParticleSearchFailureInjection::SEARCH_SETUP);
+            const auto executionFailure = runInjected(
+                    ParticleSearchFailureInjection::SEARCH_EXECUTION);
+            const auto reportFailure = runInjected(
+                    ParticleSearchFailureInjection::SANITIZED_ROOT_REPORT);
+
+            bc.markDrawKnowledgeUnsupported(
+                    DrawKnowledgeUnsupportedReason::SUBSET_MEMBERSHIP);
+            beginParticleSearchStageTrace();
+            try {
+                (void) runParticleSearchWithStageObservability(
+                        0x6A09E667ULL, 0, 1, 1, false);
+            } catch (const std::exception &) {
+                recordUnhandledParticleSearchFailure();
+            }
+            const auto earlyFailure = particleSearchStageDiagnosticsSnapshot();
+
+            pybind11::dict result;
+            result["schema_id"] = "native-stsr007-particle-search-stage-audit-v1";
+            result["success_all_stages_completed"] = successAllStagesCompleted;
+            result["success_output_sanitized"] = successOutputSanitized;
+            result["mapping_failure_attributed"] =
+                    mappingFailure["first_failed_stage"].cast<std::string>()
+                            == "root_occurrence_mapping"
+                    && stage(mappingFailure, 0, "hidden_future_sample_construction")
+                            == "completed"
+                    && stage(mappingFailure, 0, "public_fidelity_validation") == "completed"
+                    && stage(mappingFailure, 0, "search_setup") == "completed"
+                    && stage(mappingFailure, 0, "search_execution") == "completed"
+                    && stage(mappingFailure, 0, "sanitized_root_report") == "not_reached";
+            result["search_setup_failure_attributed"] =
+                    setupFailure["first_failed_stage"].cast<std::string>() == "search_setup"
+                    && stage(setupFailure, 0, "search_execution") == "not_reached"
+                    && stage(setupFailure, 0, "root_occurrence_mapping") == "not_reached";
+            result["search_execution_failure_attributed"] =
+                    executionFailure["first_failed_stage"].cast<std::string>()
+                            == "search_execution"
+                    && stage(executionFailure, 0, "search_setup") == "completed"
+                    && stage(executionFailure, 0, "root_occurrence_mapping") == "not_reached";
+            result["sanitized_report_failure_attributed"] =
+                    reportFailure["first_failed_stage"].cast<std::string>()
+                            == "sanitized_root_report"
+                    && stage(reportFailure, 0, "root_occurrence_mapping") == "completed";
+            result["early_public_failure_stops_later_stages"] =
+                    earlyFailure["first_failed_stage"].cast<std::string>()
+                            == "public_fidelity_validation"
+                    && stage(earlyFailure, 0, "hidden_future_sample_construction")
+                            == "not_reached"
+                    && stage(earlyFailure, 0, "search_setup") == "not_reached"
+                    && stage(earlyFailure, 0, "search_execution") == "not_reached"
+                    && stage(earlyFailure, 0, "sanitized_root_report") == "not_reached";
+            restore();
+            return result;
         } catch (...) {
             restore();
             throw;
@@ -3435,7 +3806,11 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("particle_count"),
             pybind11::arg("search_simulations"),
             pybind11::arg("include_potions") = false)
+        .def("last_particle_search_stage_diagnostics",
+                &StepSimulator::lastParticleSearchStageDiagnosticsSnapshot)
         .def("stsr006_particle_search_audit", &StepSimulator::stsr006ParticleSearchAudit)
+        .def("stsr007_particle_search_stage_audit",
+                &StepSimulator::stsr007ParticleSearchStageAudit)
         .def(
             "battle_search",
             &StepSimulator::battleSearch,
