@@ -30,6 +30,7 @@ REQUIRED_STEP_SIMULATOR_METHODS = (
     "rebuild_battle_start",
     "t096_public_information_projection",
     "sample_hidden_future_particles_search",
+    "last_particle_search_stage_diagnostics",
 )
 
 REQUIRED_SNAPSHOT_FIELDS = (
