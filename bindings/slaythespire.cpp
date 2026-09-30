@@ -1129,7 +1129,13 @@ pybind11::dict makeT096PublicInformationProjection(
 struct StepSimulator {
     enum class ParticleSearchFailureInjection {
         NONE,
-        ROOT_OCCURRENCE_MAPPING,
+        ROOT_MAPPING_NO_PUBLIC_ACTIONS,
+        ROOT_MAPPING_MULTIPLE_DIRECT,
+        ROOT_MAPPING_MISSING_NON_CARD,
+        ROOT_MAPPING_REPRESENTATIVE_INELIGIBLE,
+        ROOT_MAPPING_REPRESENTATIVE_ZERO,
+        ROOT_MAPPING_REPRESENTATIVE_MULTIPLE,
+        ROOT_MAPPING_UNCOVERED_EDGE,
         SEARCH_SETUP,
         SEARCH_EXECUTION,
         SANITIZED_ROOT_REPORT,
@@ -1170,6 +1176,7 @@ struct StepSimulator {
         row["stages"] = stages;
         row["first_failed_stage"] = pybind11::none();
         row["failure_code"] = pybind11::none();
+        row["root_occurrence_mapping_diagnostic"] = pybind11::none();
         return row;
     }
 
@@ -1245,6 +1252,34 @@ struct StepSimulator {
             rowCopy["particle_index"] = row["particle_index"];
             rowCopy["first_failed_stage"] = row["first_failed_stage"];
             rowCopy["failure_code"] = row["failure_code"];
+            const auto mappingDiagnostic = row[
+                    "root_occurrence_mapping_diagnostic"];
+            if (mappingDiagnostic.is_none()) {
+                rowCopy["root_occurrence_mapping_diagnostic"] = pybind11::none();
+            } else {
+                const auto source = mappingDiagnostic.cast<pybind11::dict>();
+                pybind11::dict mappingCopy;
+                for (const char *field : {
+                        "schema_id",
+                        "status",
+                        "mapping_subreason",
+                        "public_legal_occurrence_count",
+                        "search_root_edge_count",
+                        "public_occurrences_mapped",
+                        "search_root_edges_covered",
+                        "public_occurrence_index",
+                        "public_action_kind",
+                        "direct_match_multiplicity",
+                        "representative_match_multiplicity",
+                        "direct_mapping_count",
+                        "mechanical_duplicate_mapping_count",
+                    }) {
+                    if (source.contains(field)) {
+                        mappingCopy[field] = source[field];
+                    }
+                }
+                rowCopy["root_occurrence_mapping_diagnostic"] = mappingCopy;
+            }
             pybind11::dict stageCopy;
             for (const auto *name : particleSearchStageNames) {
                 stageCopy[name] = row["stages"].cast<pybind11::dict>()[name];
@@ -2121,18 +2156,80 @@ struct StepSimulator {
                 && publicCard.specialData == searchCard.specialData;
     }
 
+    static const char *mappingMatchMultiplicity(const std::size_t count) {
+        if (count == 0) {
+            return "zero";
+        }
+        if (count == 1) {
+            return "one";
+        }
+        return "multiple";
+    }
+
+    static int coveredSearchRootEdgeCount(const SearchRootMapping &mapping) {
+        return static_cast<int>(std::count_if(
+                mapping.edgeToPublic.begin(),
+                mapping.edgeToPublic.end(),
+                [](const auto &publicOccurrences) {
+                    return !publicOccurrences.empty();
+                }));
+    }
+
+    static void updateRootOccurrenceMappingProgress(
+            const pybind11::dict &diagnostic,
+            const SearchRootMapping &mapping,
+            const int directMappingCount,
+            const int duplicateMappingCount) {
+        diagnostic["public_occurrences_mapped"] = static_cast<int>(std::count_if(
+                mapping.publicToEdge.begin(),
+                mapping.publicToEdge.end(),
+                [](const int edgeIdx) { return edgeIdx >= 0; }));
+        diagnostic["search_root_edges_covered"] =
+                coveredSearchRootEdgeCount(mapping);
+        diagnostic["direct_mapping_count"] = directMappingCount;
+        diagnostic["mechanical_duplicate_mapping_count"] = duplicateMappingCount;
+    }
+
+    static void failRootOccurrenceMappingDiagnostic(
+            const pybind11::dict &diagnostic,
+            const char *subreason) {
+        diagnostic["status"] = "failed";
+        diagnostic["mapping_subreason"] = subreason;
+    }
+
     SearchRootMapping validateSearchRootMapping(
             const BattleContext &searchState,
-            const search::BattleScumSearcher2 &searcher) const {
-        const auto legalActions = enumerateBattleActions(searchState);
+            const search::BattleScumSearcher2 &searcher,
+            const pybind11::dict &diagnostic,
+            const ParticleSearchFailureInjection injection) const {
+        auto legalActions = enumerateBattleActions(searchState);
+        if (injection == ParticleSearchFailureInjection::ROOT_MAPPING_NO_PUBLIC_ACTIONS) {
+            legalActions.clear();
+        }
+        const std::size_t effectiveSearchRootEdgeCount = searcher.root.edges.size()
+                + (injection == ParticleSearchFailureInjection::ROOT_MAPPING_UNCOVERED_EDGE
+                        ? 1
+                        : 0);
+        diagnostic["public_legal_occurrence_count"] =
+                static_cast<int>(legalActions.size());
+        diagnostic["search_root_edge_count"] =
+                static_cast<int>(effectiveSearchRootEdgeCount);
+        diagnostic["public_occurrences_mapped"] = 0;
+        diagnostic["search_root_edges_covered"] = 0;
+        diagnostic["direct_mapping_count"] = 0;
+        diagnostic["mechanical_duplicate_mapping_count"] = 0;
         if (legalActions.empty()) {
+            failRootOccurrenceMappingDiagnostic(
+                    diagnostic, "no_public_legal_action_surface");
             throw std::runtime_error(
                     "STSRL-006 particle has no public legal actions for Search-v2");
         }
         SearchRootMapping mapping;
         mapping.publicToEdge.resize(legalActions.size(), -1);
         mapping.mappingModes.resize(legalActions.size());
-        mapping.edgeToPublic.resize(searcher.root.edges.size());
+        mapping.edgeToPublic.resize(effectiveSearchRootEdgeCount);
+        int directMappingCount = 0;
+        int duplicateMappingCount = 0;
         for (std::size_t legalIdx = 0; legalIdx < legalActions.size(); ++legalIdx) {
             const auto &legalAction = legalActions[legalIdx];
             std::vector<int> directMatches;
@@ -2142,15 +2239,42 @@ struct StepSimulator {
                     directMatches.push_back(edgeIdx);
                 }
             }
+            if (injection == ParticleSearchFailureInjection::ROOT_MAPPING_MULTIPLE_DIRECT
+                    && directMatches.size() == 1) {
+                directMatches.push_back(directMatches.front());
+            }
+            if (injection
+                            == ParticleSearchFailureInjection::ROOT_MAPPING_MISSING_NON_CARD
+                    && legalAction.getActionType() != search::ActionType::CARD) {
+                directMatches.clear();
+            }
+            if (injection
+                            == ParticleSearchFailureInjection::ROOT_MAPPING_REPRESENTATIVE_INELIGIBLE
+                    && legalAction.getActionType() == search::ActionType::CARD
+                    && legalAction.getSourceIdx() == 0) {
+                directMatches.clear();
+            }
             if (directMatches.size() > 1) {
+                diagnostic["public_occurrence_index"] = static_cast<int>(legalIdx);
+                diagnostic["public_action_kind"] = battleActionKind(legalAction);
+                diagnostic["direct_match_multiplicity"] =
+                        mappingMatchMultiplicity(directMatches.size());
+                failRootOccurrenceMappingDiagnostic(
+                        diagnostic, "multiple_direct_search_root_matches");
                 throw std::runtime_error(
                         "STSRL-006 ambiguous direct Search-v2 root mapping");
             }
             if (directMatches.size() == 1) {
                 mapping.publicToEdge[legalIdx] = directMatches[0];
                 mapping.mappingModes[legalIdx] = "direct_action_bits";
+                ++directMappingCount;
             } else {
                 if (legalAction.getActionType() != search::ActionType::CARD) {
+                    diagnostic["public_occurrence_index"] = static_cast<int>(legalIdx);
+                    diagnostic["public_action_kind"] = battleActionKind(legalAction);
+                    diagnostic["direct_match_multiplicity"] = "zero";
+                    failRootOccurrenceMappingDiagnostic(
+                            diagnostic, "missing_non_card_direct_search_root_match");
                     throw std::runtime_error(
                             "STSRL-006 incomplete or ambiguous Search-v2 occurrence mapping");
                 }
@@ -2160,6 +2284,11 @@ struct StepSimulator {
                         || !mechanicallyEquivalentCards(
                                 searchState.cards.hand[publicSource - 1],
                                 searchState.cards.hand[publicSource])) {
+                    diagnostic["public_occurrence_index"] = static_cast<int>(legalIdx);
+                    diagnostic["public_action_kind"] = battleActionKind(legalAction);
+                    diagnostic["direct_match_multiplicity"] = "zero";
+                    failRootOccurrenceMappingDiagnostic(
+                            diagnostic, "card_not_adjacent_mechanical_duplicate");
                     throw std::runtime_error(
                             "STSRL-006 incomplete or ambiguous Search-v2 occurrence mapping");
                 }
@@ -2181,23 +2310,57 @@ struct StepSimulator {
                         equivalentMatches.push_back(edgeIdx);
                     }
                 }
-                if (equivalentMatches.size() != 1) {
+                if (injection
+                                == ParticleSearchFailureInjection::ROOT_MAPPING_REPRESENTATIVE_ZERO
+                        && legalAction.getSourceIdx() > 0) {
+                    equivalentMatches.clear();
+                }
+                if (injection
+                                == ParticleSearchFailureInjection::ROOT_MAPPING_REPRESENTATIVE_MULTIPLE
+                        && legalAction.getSourceIdx() > 0
+                        && equivalentMatches.size() == 1) {
+                    equivalentMatches.push_back(equivalentMatches.front());
+                }
+                if (equivalentMatches.empty()) {
+                    diagnostic["public_occurrence_index"] = static_cast<int>(legalIdx);
+                    diagnostic["public_action_kind"] = battleActionKind(legalAction);
+                    diagnostic["direct_match_multiplicity"] = "zero";
+                    diagnostic["representative_match_multiplicity"] = "zero";
+                    failRootOccurrenceMappingDiagnostic(
+                            diagnostic, "representative_search_root_match_zero");
+                    throw std::runtime_error(
+                            "STSRL-006 incomplete or ambiguous Search-v2 occurrence mapping");
+                }
+                if (equivalentMatches.size() > 1) {
+                    diagnostic["public_occurrence_index"] = static_cast<int>(legalIdx);
+                    diagnostic["public_action_kind"] = battleActionKind(legalAction);
+                    diagnostic["direct_match_multiplicity"] = "zero";
+                    diagnostic["representative_match_multiplicity"] = "multiple";
+                    failRootOccurrenceMappingDiagnostic(
+                            diagnostic, "representative_search_root_match_multiple");
                     throw std::runtime_error(
                             "STSRL-006 incomplete or ambiguous Search-v2 occurrence mapping");
                 }
                 mapping.publicToEdge[legalIdx] = equivalentMatches[0];
                 mapping.mappingModes[legalIdx] =
                         "mechanical_duplicate_card_occurrence";
+                ++duplicateMappingCount;
             }
             mapping.edgeToPublic[mapping.publicToEdge[legalIdx]].push_back(
                     static_cast<int>(legalIdx));
+            updateRootOccurrenceMappingProgress(
+                    diagnostic, mapping, directMappingCount, duplicateMappingCount);
         }
         for (std::size_t edgeIdx = 0; edgeIdx < mapping.edgeToPublic.size(); ++edgeIdx) {
             if (mapping.edgeToPublic[edgeIdx].empty()) {
+                failRootOccurrenceMappingDiagnostic(
+                        diagnostic, "uncovered_search_root_edge");
                 throw std::runtime_error(
                         "STSRL-006 Search-v2 root edge has no public occurrence mapping");
             }
         }
+        diagnostic["status"] = "completed";
+        diagnostic["mapping_subreason"] = "mapping_completed";
         return mapping;
     }
 
@@ -2383,12 +2546,16 @@ struct StepSimulator {
             }
             setParticleSearchStage(item.stageTrace,
                     "root_occurrence_mapping", "entered");
+            pybind11::dict mappingDiagnostic;
+            mappingDiagnostic["schema_id"] =
+                    "native-root-occurrence-mapping-diagnostic-v1";
+            mappingDiagnostic["status"] = "entered";
+            mappingDiagnostic["mapping_subreason"] = pybind11::none();
+            item.stageTrace["root_occurrence_mapping_diagnostic"] = mappingDiagnostic;
             SearchRootMapping rootMapping;
             try {
-                if (injection == ParticleSearchFailureInjection::ROOT_OCCURRENCE_MAPPING) {
-                    searcher->root.edges.clear();
-                }
-                rootMapping = validateSearchRootMapping(item.state, *searcher);
+                rootMapping = validateSearchRootMapping(
+                        item.state, *searcher, mappingDiagnostic, injection);
                 setParticleSearchStage(item.stageTrace,
                         "root_occurrence_mapping", "completed");
             } catch (...) {
@@ -2810,7 +2977,7 @@ struct StepSimulator {
             }
 
             const auto mappingFailure = runInjected(
-                    ParticleSearchFailureInjection::ROOT_OCCURRENCE_MAPPING);
+                    ParticleSearchFailureInjection::ROOT_MAPPING_MISSING_NON_CARD);
             const auto setupFailure = runInjected(
                     ParticleSearchFailureInjection::SEARCH_SETUP);
             const auto executionFailure = runInjected(
@@ -2863,6 +3030,259 @@ struct StepSimulator {
                     && stage(earlyFailure, 0, "search_setup") == "not_reached"
                     && stage(earlyFailure, 0, "search_execution") == "not_reached"
                     && stage(earlyFailure, 0, "sanitized_root_report") == "not_reached";
+            restore();
+            return result;
+        } catch (...) {
+            restore();
+            throw;
+        }
+    }
+
+    pybind11::dict stsr008RootOccurrenceMappingAudit() {
+        const auto savedBattleContext = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedScreenState = gc.screenState;
+        const auto savedGameOutcome = gc.outcome;
+        const auto restore = [&]() {
+            bc = savedBattleContext;
+            battleActive = savedBattleActive;
+            gc.screenState = savedScreenState;
+            gc.outcome = savedGameOutcome;
+        };
+        const auto runInjected = [&](const ParticleSearchFailureInjection injection,
+                                         const int particleCount = 1) {
+            beginParticleSearchStageTrace();
+            try {
+                (void) runParticleSearchWithStageObservability(
+                        0xBB67AE85ULL, 0, particleCount, 1, false, injection);
+            } catch (const std::exception &) {
+                recordUnhandledParticleSearchFailure();
+            }
+            return particleSearchStageDiagnosticsSnapshot();
+        };
+        const auto stage = [](const pybind11::dict &trace, const std::size_t row,
+                                   const char *name) {
+            const auto rows = trace["particles"].cast<pybind11::list>();
+            return rows[row].cast<pybind11::dict>()["stages"]
+                    .cast<pybind11::dict>()[name].cast<std::string>();
+        };
+        const auto mappingDiagnostic = [](const pybind11::dict &trace,
+                                               const std::size_t row) {
+            return trace["particles"].cast<pybind11::list>()[row]
+                    .cast<pybind11::dict>()["root_occurrence_mapping_diagnostic"]
+                    .cast<pybind11::dict>();
+        };
+        const auto failureMatches = [&](const pybind11::dict &trace,
+                                            const char *subreason) {
+            const auto rows = trace["particles"].cast<pybind11::list>();
+            if (rows.empty()) {
+                return false;
+            }
+            const auto diagnostic = mappingDiagnostic(trace, 0);
+            return trace["first_failed_stage"].cast<std::string>()
+                            == "root_occurrence_mapping"
+                    && stage(trace, 0, "root_occurrence_mapping") == "failed"
+                    && stage(trace, 0, "sanitized_root_report") == "not_reached"
+                    && diagnostic["schema_id"].cast<std::string>()
+                            == "native-root-occurrence-mapping-diagnostic-v1"
+                    && diagnostic["status"].cast<std::string>() == "failed"
+                    && diagnostic["mapping_subreason"].cast<std::string>() == subreason;
+        };
+
+        try {
+            gc.screenState = ScreenState::BATTLE;
+            gc.outcome = GameOutcome::UNDECIDED;
+            bc = BattleContext();
+            bc.inputState = InputState::PLAYER_NORMAL;
+            bc.turn = 0;
+            bc.player.curHp = 80;
+            bc.player.maxHp = 80;
+            bc.player.energy = 3;
+            bc.player.energyPerTurn = 3;
+            bc.monsters.monsterCount = 1;
+            bc.monsters.monstersAlive = 1;
+            auto &monster = bc.monsters.arr[0];
+            monster.idx = 0;
+            monster.id = MonsterId::JAW_WORM;
+            monster.curHp = 30;
+            monster.maxHp = 30;
+            monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+            monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+            for (const auto &[cardId, uniqueId] : {
+                    std::pair<CardId, int>{CardId::STRIKE_RED, 500},
+                    std::pair<CardId, int>{CardId::DEFEND_RED, 501},
+                    std::pair<CardId, int>{CardId::BASH, 502},
+                    std::pair<CardId, int>{CardId::HEADBUTT, 503}}) {
+                CardInstance card(cardId);
+                card.setUniqueId(uniqueId);
+                bc.cards.drawPile.push_back(card);
+            }
+            battleActive = true;
+
+            const auto noPublicSurface = runInjected(
+                    ParticleSearchFailureInjection::ROOT_MAPPING_NO_PUBLIC_ACTIONS);
+            const auto multipleDirect = runInjected(
+                    ParticleSearchFailureInjection::ROOT_MAPPING_MULTIPLE_DIRECT, 2);
+            const auto missingNonCard = runInjected(
+                    ParticleSearchFailureInjection::ROOT_MAPPING_MISSING_NON_CARD);
+            const auto mappingNotReached = runInjected(
+                    ParticleSearchFailureInjection::SEARCH_SETUP);
+
+            bc.cards.cardsInHand = 2;
+            for (const auto &[uniqueId, slot] : {
+                    std::pair<int, int>{600, 0},
+                    std::pair<int, int>{601, 1}}) {
+                CardInstance duplicate(CardId::STRIKE_RED);
+                duplicate.setUniqueId(uniqueId);
+                bc.cards.hand[slot] = duplicate;
+            }
+
+            const auto duplicateReport = sampleHiddenFutureParticlesSearch(
+                    0x3C6EF372ULL, 0, 1, 1, false);
+            const auto duplicateSuccess = lastParticleSearchStageDiagnosticsSnapshot();
+            const auto successDiagnostic = mappingDiagnostic(duplicateSuccess, 0);
+            const auto duplicateParticle = duplicateReport["particles"]
+                    .cast<pybind11::list>()[0].cast<pybind11::dict>();
+            const auto duplicateRoot = duplicateParticle["root_evaluation"]
+                    .cast<pybind11::dict>();
+            const auto duplicateRows = duplicateParticle["root_rows"]
+                    .cast<pybind11::list>();
+            bool semanticRootReportPreserved = duplicateRows.size() == 3
+                    && duplicateRoot["search_edge_count"].cast<int>() == 2
+                    && duplicateRoot["unsearched_legal_action_count"].cast<int>() == 0
+                    && duplicateRoot["unmapped_search_edge_count"].cast<int>() == 0;
+            if (semanticRootReportPreserved) {
+                const auto firstCard = duplicateRows[1].cast<pybind11::dict>();
+                const auto secondCard = duplicateRows[2].cast<pybind11::dict>();
+                semanticRootReportPreserved =
+                        firstCard["search_equivalence_source_edge_index"].equal(
+                                secondCard["search_equivalence_source_edge_index"])
+                        && firstCard["search_equivalence_mapping_mode"].cast<std::string>()
+                                == "direct_action_bits"
+                        && secondCard["search_equivalence_mapping_mode"].cast<std::string>()
+                                == "mechanical_duplicate_card_occurrence";
+            }
+            const bool representativeSuccess =
+                    stage(duplicateSuccess, 0, "root_occurrence_mapping") == "completed"
+                    && successDiagnostic["status"].cast<std::string>() == "completed"
+                    && successDiagnostic["mapping_subreason"].cast<std::string>()
+                            == "mapping_completed"
+                    && successDiagnostic["public_legal_occurrence_count"].cast<int>() == 3
+                    && successDiagnostic["search_root_edge_count"].cast<int>() == 2
+                    && successDiagnostic["public_occurrences_mapped"].cast<int>() == 3
+                    && successDiagnostic["search_root_edges_covered"].cast<int>() == 2
+                    && successDiagnostic["direct_mapping_count"].cast<int>() == 2
+                    && successDiagnostic["mechanical_duplicate_mapping_count"].cast<int>()
+                            == 1
+                    && !successDiagnostic.contains("failure_subreason");
+
+            const auto representativeIneligible = runInjected(
+                    ParticleSearchFailureInjection::ROOT_MAPPING_REPRESENTATIVE_INELIGIBLE);
+            const auto representativeZero = runInjected(
+                    ParticleSearchFailureInjection::ROOT_MAPPING_REPRESENTATIVE_ZERO);
+            const auto representativeMultiple = runInjected(
+                    ParticleSearchFailureInjection::ROOT_MAPPING_REPRESENTATIVE_MULTIPLE);
+            const auto uncoveredEdge = runInjected(
+                    ParticleSearchFailureInjection::ROOT_MAPPING_UNCOVERED_EDGE);
+
+            const auto multipleDirectRows = multipleDirect["particles"]
+                    .cast<pybind11::list>();
+            const bool laterParticleNotMappingAttempted = multipleDirectRows.size() == 2
+                    && multipleDirectRows[1].cast<pybind11::dict>()[
+                            "root_occurrence_mapping_diagnostic"].is_none()
+                    && stage(multipleDirect, 1, "root_occurrence_mapping") == "not_reached";
+            const auto notReachedRows = mappingNotReached["particles"]
+                    .cast<pybind11::list>();
+            const bool notReachedAbsent = notReachedRows.size() == 1
+                    && notReachedRows[0].cast<pybind11::dict>()[
+                            "root_occurrence_mapping_diagnostic"].is_none()
+                    && stage(mappingNotReached, 0, "root_occurrence_mapping")
+                            == "not_reached";
+
+            const std::set<std::string> allowedDiagnosticFields{
+                "schema_id",
+                "status",
+                "mapping_subreason",
+                "public_legal_occurrence_count",
+                "search_root_edge_count",
+                "public_occurrences_mapped",
+                "search_root_edges_covered",
+                "public_occurrence_index",
+                "public_action_kind",
+                "direct_match_multiplicity",
+                "representative_match_multiplicity",
+                "direct_mapping_count",
+                "mechanical_duplicate_mapping_count",
+            };
+            bool diagnosticFieldWhitelist = true;
+            for (const auto &entry : successDiagnostic) {
+                diagnosticFieldWhitelist = diagnosticFieldWhitelist
+                        && allowedDiagnosticFields.find(
+                                entry.first.cast<std::string>())
+                                != allowedDiagnosticFields.end();
+            }
+            for (const auto &trace : {
+                    noPublicSurface,
+                    multipleDirect,
+                    missingNonCard,
+                    representativeIneligible,
+                    representativeZero,
+                    representativeMultiple,
+                    uncoveredEdge,
+                }) {
+                const auto diagnostic = mappingDiagnostic(trace, 0);
+                for (const auto &entry : diagnostic) {
+                    diagnosticFieldWhitelist = diagnosticFieldWhitelist
+                            && allowedDiagnosticFields.find(
+                                    entry.first.cast<std::string>())
+                                    != allowedDiagnosticFields.end();
+                }
+            }
+
+            pybind11::dict result;
+            result["schema_id"] = "native-stsr008-root-occurrence-mapping-audit-v1";
+            result["success_completion_reported"] = representativeSuccess;
+            result["success_root_report_semantics_preserved"] =
+                    semanticRootReportPreserved;
+            result["no_public_surface_classified"] = failureMatches(
+                    noPublicSurface, "no_public_legal_action_surface");
+            result["multiple_direct_classified"] = failureMatches(
+                    multipleDirect, "multiple_direct_search_root_matches")
+                    && mappingDiagnostic(multipleDirect, 0)[
+                            "direct_match_multiplicity"].cast<std::string>() == "multiple";
+            result["missing_non_card_classified"] = failureMatches(
+                    missingNonCard, "missing_non_card_direct_search_root_match")
+                    && mappingDiagnostic(missingNonCard, 0)[
+                            "direct_match_multiplicity"].cast<std::string>() == "zero"
+                    && !mappingDiagnostic(missingNonCard, 0).contains(
+                            "representative_match_multiplicity");
+            result["representative_ineligible_classified"] = failureMatches(
+                    representativeIneligible, "card_not_adjacent_mechanical_duplicate");
+            result["representative_zero_classified"] = failureMatches(
+                    representativeZero, "representative_search_root_match_zero")
+                    && mappingDiagnostic(representativeZero, 0)[
+                            "representative_match_multiplicity"].cast<std::string>() == "zero";
+            result["representative_multiple_classified"] = failureMatches(
+                    representativeMultiple,
+                    "representative_search_root_match_multiple")
+                    && mappingDiagnostic(representativeMultiple, 0)[
+                            "representative_match_multiplicity"].cast<std::string>()
+                            == "multiple";
+            result["uncovered_edge_classified"] = failureMatches(
+                    uncoveredEdge, "uncovered_search_root_edge");
+            result["not_reached_absent"] = notReachedAbsent;
+            result["later_particle_not_mapping_attempted"] =
+                    laterParticleNotMappingAttempted;
+            result["snapshot_attempt_isolation"] =
+                    successDiagnostic["status"].cast<std::string>() == "completed"
+                    && successDiagnostic["mapping_subreason"].cast<std::string>()
+                            == "mapping_completed"
+                    && mappingDiagnostic(representativeZero, 0)["status"]
+                            .cast<std::string>() == "failed"
+                    && mappingDiagnostic(representativeZero, 0)["mapping_subreason"]
+                            .cast<std::string>()
+                            == "representative_search_root_match_zero";
+            result["diagnostic_field_whitelist"] = diagnosticFieldWhitelist;
             restore();
             return result;
         } catch (...) {
@@ -3811,6 +4231,8 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("stsr006_particle_search_audit", &StepSimulator::stsr006ParticleSearchAudit)
         .def("stsr007_particle_search_stage_audit",
                 &StepSimulator::stsr007ParticleSearchStageAudit)
+        .def("stsr008_root_occurrence_mapping_audit",
+                &StepSimulator::stsr008RootOccurrenceMappingAudit)
         .def(
             "battle_search",
             &StepSimulator::battleSearch,

@@ -13,6 +13,11 @@ top-level fields are `attempt_status`, `first_failed_stage`, `failure_code`,
 `first_failed_stage`, and `failure_code`. Each of the six stage values is one
 of `not_reached`, `entered`, `completed`, or `failed`:
 
+STSRL-008 additively adds a per-row `root_occurrence_mapping_diagnostic`
+value. It is independently versioned and is documented in
+`docs/stsrl-008-root-occurrence-mapping-observability.md`; the T105 stage
+status and failure-code semantics below are unchanged.
+
 1. `hidden_future_sample_construction`
 2. `public_fidelity_validation`
 3. `root_occurrence_mapping`
