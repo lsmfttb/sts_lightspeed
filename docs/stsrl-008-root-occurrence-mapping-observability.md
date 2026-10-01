@@ -1,11 +1,19 @@
 # STSRL-008 root-occurrence mapping observability
 
-`last_particle_search_stage_diagnostics()` now includes an additive
+STSRL-008 introduced an additive
 `root_occurrence_mapping_diagnostic` value in each particle row. It is `null`
 until that particle enters the existing `root_occurrence_mapping` stage.
 Otherwise it is a dictionary with schema
 `native-root-occurrence-mapping-diagnostic-v1`, tied to the same most recent
 bridge attempt as the surrounding T105 stage trace.
+
+STSRL-009 supersedes this diagnostic with
+`native-root-occurrence-mapping-diagnostic-v2`. The successor preserves the v1
+failure vocabulary and adds classified, searched, and configuration-excluded
+public occurrence counts. See
+`docs/stsrl-009-configuration-aware-root-mapping.md` for the versioned partial
+mapping semantics; v1's all-public-occurrences-have-edges meaning is not
+silently reinterpreted.
 
 The closed `mapping_subreason` vocabulary is written directly at the existing
 production mapping branches:
