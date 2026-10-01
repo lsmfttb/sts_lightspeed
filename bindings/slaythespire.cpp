@@ -1153,6 +1153,8 @@ struct StepSimulator {
     struct SearchRootMapping {
         std::vector<int> publicToEdge;
         std::vector<std::string> mappingModes;
+        std::vector<std::string> mappingClassifications;
+        std::vector<std::string> configurationExclusionReasons;
         std::vector<std::vector<int>> edgeToPublic;
     };
 
@@ -1266,6 +1268,9 @@ struct StepSimulator {
                         "public_legal_occurrence_count",
                         "search_root_edge_count",
                         "public_occurrences_mapped",
+                        "public_occurrences_classified",
+                        "searched_public_occurrence_count",
+                        "configuration_excluded_public_occurrence_count",
                         "search_root_edges_covered",
                         "public_occurrence_index",
                         "public_action_kind",
@@ -2179,15 +2184,41 @@ struct StepSimulator {
             const pybind11::dict &diagnostic,
             const SearchRootMapping &mapping,
             const int directMappingCount,
-            const int duplicateMappingCount) {
-        diagnostic["public_occurrences_mapped"] = static_cast<int>(std::count_if(
+            const int duplicateMappingCount,
+            const int configurationExcludedCount) {
+        const int searchedPublicOccurrenceCount = static_cast<int>(std::count_if(
                 mapping.publicToEdge.begin(),
                 mapping.publicToEdge.end(),
                 [](const int edgeIdx) { return edgeIdx >= 0; }));
+        const int classifiedPublicOccurrenceCount = static_cast<int>(std::count_if(
+                mapping.mappingClassifications.begin(),
+                mapping.mappingClassifications.end(),
+                [](const std::string &classification) {
+                    return !classification.empty();
+                }));
+        diagnostic["public_occurrences_mapped"] = searchedPublicOccurrenceCount;
+        diagnostic["public_occurrences_classified"] = classifiedPublicOccurrenceCount;
+        diagnostic["searched_public_occurrence_count"] = searchedPublicOccurrenceCount;
+        diagnostic["configuration_excluded_public_occurrence_count"] =
+                configurationExcludedCount;
         diagnostic["search_root_edges_covered"] =
                 coveredSearchRootEdgeCount(mapping);
         diagnostic["direct_mapping_count"] = directMappingCount;
         diagnostic["mechanical_duplicate_mapping_count"] = duplicateMappingCount;
+    }
+
+    static bool searchConfigurationExcludesPublicAction(
+            const BattleContext &searchState,
+            const search::BattleScumSearcher2 &searcher,
+            const search::Action &action,
+            std::string &reason) {
+        if (searchState.inputState == InputState::PLAYER_NORMAL
+                && action.getActionType() == search::ActionType::POTION
+                && !searcher.includePotions) {
+            reason = "include_potions_false";
+            return true;
+        }
+        return false;
     }
 
     static void failRootOccurrenceMappingDiagnostic(
@@ -2215,6 +2246,9 @@ struct StepSimulator {
         diagnostic["search_root_edge_count"] =
                 static_cast<int>(effectiveSearchRootEdgeCount);
         diagnostic["public_occurrences_mapped"] = 0;
+        diagnostic["public_occurrences_classified"] = 0;
+        diagnostic["searched_public_occurrence_count"] = 0;
+        diagnostic["configuration_excluded_public_occurrence_count"] = 0;
         diagnostic["search_root_edges_covered"] = 0;
         diagnostic["direct_mapping_count"] = 0;
         diagnostic["mechanical_duplicate_mapping_count"] = 0;
@@ -2227,9 +2261,12 @@ struct StepSimulator {
         SearchRootMapping mapping;
         mapping.publicToEdge.resize(legalActions.size(), -1);
         mapping.mappingModes.resize(legalActions.size());
+        mapping.mappingClassifications.resize(legalActions.size());
+        mapping.configurationExclusionReasons.resize(legalActions.size());
         mapping.edgeToPublic.resize(effectiveSearchRootEdgeCount);
         int directMappingCount = 0;
         int duplicateMappingCount = 0;
+        int configurationExcludedCount = 0;
         for (std::size_t legalIdx = 0; legalIdx < legalActions.size(); ++legalIdx) {
             const auto &legalAction = legalActions[legalIdx];
             std::vector<int> directMatches;
@@ -2267,8 +2304,24 @@ struct StepSimulator {
             if (directMatches.size() == 1) {
                 mapping.publicToEdge[legalIdx] = directMatches[0];
                 mapping.mappingModes[legalIdx] = "direct_action_bits";
+                mapping.mappingClassifications[legalIdx] = "searched_direct";
                 ++directMappingCount;
             } else {
+                std::string exclusionReason;
+                if (searchConfigurationExcludesPublicAction(
+                            searchState, searcher, legalAction, exclusionReason)) {
+                    mapping.mappingClassifications[legalIdx] =
+                            "search_configuration_excluded";
+                    mapping.configurationExclusionReasons[legalIdx] = exclusionReason;
+                    ++configurationExcludedCount;
+                    updateRootOccurrenceMappingProgress(
+                            diagnostic,
+                            mapping,
+                            directMappingCount,
+                            duplicateMappingCount,
+                            configurationExcludedCount);
+                    continue;
+                }
                 if (legalAction.getActionType() != search::ActionType::CARD) {
                     diagnostic["public_occurrence_index"] = static_cast<int>(legalIdx);
                     diagnostic["public_action_kind"] = battleActionKind(legalAction);
@@ -2344,12 +2397,18 @@ struct StepSimulator {
                 mapping.publicToEdge[legalIdx] = equivalentMatches[0];
                 mapping.mappingModes[legalIdx] =
                         "mechanical_duplicate_card_occurrence";
+                mapping.mappingClassifications[legalIdx] =
+                        "searched_mechanical_duplicate_card_occurrence";
                 ++duplicateMappingCount;
             }
             mapping.edgeToPublic[mapping.publicToEdge[legalIdx]].push_back(
                     static_cast<int>(legalIdx));
             updateRootOccurrenceMappingProgress(
-                    diagnostic, mapping, directMappingCount, duplicateMappingCount);
+                    diagnostic,
+                    mapping,
+                    directMappingCount,
+                    duplicateMappingCount,
+                    configurationExcludedCount);
         }
         for (std::size_t edgeIdx = 0; edgeIdx < mapping.edgeToPublic.size(); ++edgeIdx) {
             if (mapping.edgeToPublic[edgeIdx].empty()) {
@@ -2548,7 +2607,7 @@ struct StepSimulator {
                     "root_occurrence_mapping", "entered");
             pybind11::dict mappingDiagnostic;
             mappingDiagnostic["schema_id"] =
-                    "native-root-occurrence-mapping-diagnostic-v1";
+                    "native-root-occurrence-mapping-diagnostic-v2";
             mappingDiagnostic["status"] = "entered";
             mappingDiagnostic["mapping_subreason"] = pybind11::none();
             item.stageTrace["root_occurrence_mapping_diagnostic"] = mappingDiagnostic;
@@ -2575,16 +2634,21 @@ struct StepSimulator {
                     *searcher,
                     searchSimulations,
                     includePotions,
-                    "StepSimulator.sample_hidden_future_particles_search.v1",
-                    "sts_lightspeed_native_particle_search_bridge_v1",
+                    "StepSimulator.sample_hidden_future_particles_search.v2",
+                    "sts_lightspeed_native_particle_search_bridge_v2",
                     nullptr,
                     nullptr,
                     pybind11::none(),
                     &rootMapping.publicToEdge);
-            if (rootReport["unsearched_legal_action_count"].cast<int>() != 0
+            const int configurationExcludedCount = static_cast<int>(std::count(
+                    rootMapping.mappingClassifications.begin(),
+                    rootMapping.mappingClassifications.end(),
+                    "search_configuration_excluded"));
+            if (rootReport["unsearched_legal_action_count"].cast<int>()
+                            != configurationExcludedCount
                     || rootReport["unmapped_search_edge_count"].cast<int>() != 0) {
                 throw std::runtime_error(
-                        "STSRL-006 Search-v2 root/action mapping was incomplete");
+                        "STSRL-009 Search-v2 root/action classification was incomplete");
             }
 
             const auto rawRootRows = rootReport["root_rows"].cast<pybind11::list>();
@@ -2604,24 +2668,52 @@ struct StepSimulator {
                     publicRow[field] = rawRow[field];
                 }
                 publicRow["public_action_ordinal"] = static_cast<int>(actionIdx);
-                publicRow["search_equivalence_source_edge_index"] =
-                        rootMapping.publicToEdge[actionIdx];
-                publicRow["search_equivalence_mapping_mode"] =
-                        rootMapping.mappingModes[actionIdx];
+                const int edgeIdx = rootMapping.publicToEdge[actionIdx];
+                const bool searched = edgeIdx >= 0;
+                publicRow["mapping_classification"] =
+                        rootMapping.mappingClassifications[actionIdx];
+                publicRow["configuration_exclusion_reason"] =
+                        rootMapping.configurationExclusionReasons[actionIdx].empty()
+                        ? pybind11::object(pybind11::none())
+                        : pybind11::object(pybind11::str(
+                                rootMapping.configurationExclusionReasons[actionIdx]));
+                publicRow["search_equivalence_source_edge_index"] = searched
+                        ? pybind11::object(pybind11::int_(edgeIdx))
+                        : pybind11::object(pybind11::none());
+                publicRow["search_equivalence_mapping_mode"] = searched
+                        ? pybind11::object(pybind11::str(
+                                rootMapping.mappingModes[actionIdx]))
+                        : pybind11::object(pybind11::none());
                 publicRootRows.append(publicRow);
 
                 pybind11::dict mappingRow;
                 mappingRow["public_action_ordinal"] = static_cast<int>(actionIdx);
                 mappingRow["public_action"] =
                         publicInformationActionIdentity(item.actions[actionIdx]);
-                mappingRow["search_edge_index"] = rootMapping.publicToEdge[actionIdx];
-                mappingRow["mapping_mode"] = rootMapping.mappingModes[actionIdx];
-                mappingRow["source_action"] = publicInformationActionIdentity(
-                        makeBattleAction(
-                                item.state,
-                                searcher->root.edges[rootMapping.publicToEdge[actionIdx]].action));
-                mappingRow["edge_public_occurrence_count"] = static_cast<int>(
-                        rootMapping.edgeToPublic[rootMapping.publicToEdge[actionIdx]].size());
+                mappingRow["mapping_classification"] =
+                        rootMapping.mappingClassifications[actionIdx];
+                mappingRow["configuration_exclusion_reason"] =
+                        rootMapping.configurationExclusionReasons[actionIdx].empty()
+                        ? pybind11::object(pybind11::none())
+                        : pybind11::object(pybind11::str(
+                                rootMapping.configurationExclusionReasons[actionIdx]));
+                mappingRow["search_edge_index"] = searched
+                        ? pybind11::object(pybind11::int_(edgeIdx))
+                        : pybind11::object(pybind11::none());
+                mappingRow["mapping_mode"] = searched
+                        ? pybind11::object(pybind11::str(
+                                rootMapping.mappingModes[actionIdx]))
+                        : pybind11::object(pybind11::none());
+                mappingRow["source_action"] = searched
+                        ? pybind11::object(publicInformationActionIdentity(
+                                makeBattleAction(
+                                        item.state,
+                                        searcher->root.edges[edgeIdx].action)))
+                        : pybind11::object(pybind11::none());
+                mappingRow["edge_public_occurrence_count"] = searched
+                        ? pybind11::object(pybind11::int_(static_cast<int>(
+                                rootMapping.edgeToPublic[edgeIdx].size())))
+                        : pybind11::object(pybind11::none());
                 rootMappingAudit.append(mappingRow);
             }
             pybind11::dict publicRootReport;
@@ -2634,6 +2726,7 @@ struct StepSimulator {
                     "unsearched_legal_action_count", "unmapped_search_edge_count"}) {
                 publicRootReport[field] = rootReport[field];
             }
+            publicRootReport["schema_id"] = "native-battle-search-root-v2";
             pybind11::dict workCounters;
             workCounters["schema_id"] = "native-battle-search-work-v1";
             workCounters["action_execution_count"] = searcher->actionExecutionCount;
@@ -2659,7 +2752,11 @@ struct StepSimulator {
             publicRootReport["search_v2_configuration"] = searchConfiguration;
             publicRootReport["root_rows"] = publicRootRows;
             publicRootReport["root_action_mapping_schema"] =
-                    "native-search-root-occurrence-equivalence-v1";
+                    "native-search-root-occurrence-equivalence-v2";
+            publicRootReport["root_action_mapping_completion_semantics"] =
+                    "every_public_occurrence_classified_and_every_search_edge_covered";
+            publicRootReport["configuration_excluded_public_action_count"] =
+                    configurationExcludedCount;
             publicRootReport["root_action_mapping"] = rootMappingAudit;
 
             pybind11::dict row;
@@ -2672,7 +2769,11 @@ struct StepSimulator {
             row["ordered_public_legal_actions"] = item.projection[
                     "ordered_public_legal_actions"];
             row["root_action_mapping_complete"] = true;
+            row["root_action_mapping_completion_semantics"] =
+                    "every_public_occurrence_classified_and_every_search_edge_covered";
             row["root_action_mapping_ambiguous"] = false;
+            row["configuration_excluded_public_action_count"] =
+                    configurationExcludedCount;
             row["search_value_semantics"] =
                     "full_state_continuation_strategy_fusion_proxy";
             row["root_evaluation"] = publicRootReport;
@@ -2690,11 +2791,13 @@ struct StepSimulator {
         semantics["q_public_claim"] = false;
         semantics["executable_no_sl_continuation_claim"] = false;
         semantics["information_set_optimal_claim"] = false;
+        semantics["configuration_excluded_action_values"] =
+                "not_evaluated_not_numeric";
 
         pybind11::dict ret;
-        ret["schema_id"] = "native-battle-public-particle-search-v1";
+        ret["schema_id"] = "native-battle-public-particle-search-v2";
         ret["native_api"] =
-                "StepSimulator.sample_hidden_future_particles_search.v1";
+                "StepSimulator.sample_hidden_future_particles_search.v2";
         ret["sampler_seed_input"] = samplerSeed;
         ret["particle_start"] = particleStart;
         ret["particle_count"] = particleCount;
@@ -3084,7 +3187,7 @@ struct StepSimulator {
                     && stage(trace, 0, "root_occurrence_mapping") == "failed"
                     && stage(trace, 0, "sanitized_root_report") == "not_reached"
                     && diagnostic["schema_id"].cast<std::string>()
-                            == "native-root-occurrence-mapping-diagnostic-v1"
+                            == "native-root-occurrence-mapping-diagnostic-v2"
                     && diagnostic["status"].cast<std::string>() == "failed"
                     && diagnostic["mapping_subreason"].cast<std::string>() == subreason;
         };
@@ -3206,6 +3309,9 @@ struct StepSimulator {
                 "public_legal_occurrence_count",
                 "search_root_edge_count",
                 "public_occurrences_mapped",
+                "public_occurrences_classified",
+                "searched_public_occurrence_count",
+                "configuration_excluded_public_occurrence_count",
                 "search_root_edges_covered",
                 "public_occurrence_index",
                 "public_action_kind",
@@ -3283,6 +3389,383 @@ struct StepSimulator {
                             .cast<std::string>()
                             == "representative_search_root_match_zero";
             result["diagnostic_field_whitelist"] = diagnosticFieldWhitelist;
+            restore();
+            return result;
+        } catch (...) {
+            restore();
+            throw;
+        }
+    }
+
+    pybind11::dict stsr009ConfigurationAwareRootMappingAudit() {
+        const auto savedBattleContext = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedScreenState = gc.screenState;
+        const auto savedGameOutcome = gc.outcome;
+        const auto restore = [&]() {
+            bc = savedBattleContext;
+            battleActive = savedBattleActive;
+            gc.screenState = savedScreenState;
+            gc.outcome = savedGameOutcome;
+        };
+        const auto runBridgeTrace = [&](const bool includePotions,
+                                             const ParticleSearchFailureInjection injection) {
+            beginParticleSearchStageTrace();
+            try {
+                (void) runParticleSearchWithStageObservability(
+                        0xA54FF53AULL, 0, 1, 1, includePotions, injection);
+            } catch (const std::exception &) {
+                recordUnhandledParticleSearchFailure();
+            }
+            return particleSearchStageDiagnosticsSnapshot();
+        };
+        const auto stage = [](const pybind11::dict &trace, const char *name) {
+            return trace["particles"].cast<pybind11::list>()[0]
+                    .cast<pybind11::dict>()["stages"]
+                    .cast<pybind11::dict>()[name].cast<std::string>();
+        };
+        const auto mappingDiagnostic = [](const pybind11::dict &trace) {
+            return trace["particles"].cast<pybind11::list>()[0]
+                    .cast<pybind11::dict>()["root_occurrence_mapping_diagnostic"]
+                    .cast<pybind11::dict>();
+        };
+        const auto failureMatches = [&](const pybind11::dict &trace,
+                                            const char *subreason,
+                                            const char *actionKind) {
+            const auto rows = trace["particles"].cast<pybind11::list>();
+            if (rows.empty()) {
+                return false;
+            }
+            const auto diagnostic = mappingDiagnostic(trace);
+            return trace["first_failed_stage"].cast<std::string>()
+                            == "root_occurrence_mapping"
+                    && stage(trace, "root_occurrence_mapping") == "failed"
+                    && stage(trace, "sanitized_root_report") == "not_reached"
+                    && diagnostic["schema_id"].cast<std::string>()
+                            == "native-root-occurrence-mapping-diagnostic-v2"
+                    && diagnostic["status"].cast<std::string>() == "failed"
+                    && diagnostic["mapping_subreason"].cast<std::string>() == subreason
+                    && diagnostic["public_action_kind"].cast<std::string>()
+                            == actionKind;
+        };
+        const auto excludedPublicRowValid = [](const pybind11::dict &row) {
+            return !row["search_tree_present"].cast<bool>()
+                    && row["search_edge_index"].is_none()
+                    && row["visits"].cast<std::int64_t>() == 0
+                    && row["evaluation_sum"].is_none()
+                    && row["mean_value"].is_none()
+                    && row["mapping_classification"].cast<std::string>()
+                            == "search_configuration_excluded"
+                    && row["configuration_exclusion_reason"].cast<std::string>()
+                            == "include_potions_false"
+                    && row["search_equivalence_source_edge_index"].is_none()
+                    && row["search_equivalence_mapping_mode"].is_none();
+        };
+        const auto excludedMappingRowValid = [](const pybind11::dict &row) {
+            return row["mapping_classification"].cast<std::string>()
+                            == "search_configuration_excluded"
+                    && row["configuration_exclusion_reason"].cast<std::string>()
+                            == "include_potions_false"
+                    && row["search_edge_index"].is_none()
+                    && row["mapping_mode"].is_none()
+                    && row["source_action"].is_none()
+                    && row["edge_public_occurrence_count"].is_none();
+        };
+
+        try {
+            gc.screenState = ScreenState::BATTLE;
+            gc.outcome = GameOutcome::UNDECIDED;
+            bc = BattleContext();
+            bc.inputState = InputState::PLAYER_NORMAL;
+            bc.turn = 0;
+            bc.player.curHp = 80;
+            bc.player.maxHp = 80;
+            bc.player.energy = 3;
+            bc.player.energyPerTurn = 3;
+            bc.monsters.monsterCount = 1;
+            bc.monsters.monstersAlive = 1;
+            auto &monster = bc.monsters.arr[0];
+            monster.idx = 0;
+            monster.id = MonsterId::JAW_WORM;
+            monster.curHp = 30;
+            monster.maxHp = 30;
+            monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+            monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+            bc.cards.cardsInHand = 2;
+            for (const auto &[uniqueId, slot] : {
+                    std::pair<int, int>{700, 0},
+                    std::pair<int, int>{701, 1}}) {
+                CardInstance duplicate(CardId::STRIKE_RED);
+                duplicate.setUniqueId(uniqueId);
+                bc.cards.hand[slot] = duplicate;
+            }
+            for (const auto &[cardId, uniqueId] : {
+                    std::pair<CardId, int>{CardId::STRIKE_RED, 710},
+                    std::pair<CardId, int>{CardId::DEFEND_RED, 711},
+                    std::pair<CardId, int>{CardId::BASH, 712},
+                    std::pair<CardId, int>{CardId::HEADBUTT, 713}}) {
+                CardInstance card(cardId);
+                card.setUniqueId(uniqueId);
+                bc.cards.drawPile.push_back(card);
+            }
+            bc.potionCapacity = 1;
+            bc.potionCount = 1;
+            bc.potions[0] = Potion::WEAK_POTION;
+            battleActive = true;
+
+            const auto bridgeReport = sampleHiddenFutureParticlesSearch(
+                    0x510E527FULL, 0, 1, 1, false);
+            const auto successTrace = lastParticleSearchStageDiagnosticsSnapshot();
+            const auto successDiagnostic = mappingDiagnostic(successTrace);
+            const auto particle = bridgeReport["particles"].cast<pybind11::list>()[0]
+                    .cast<pybind11::dict>();
+            const auto rootReport = particle["root_evaluation"].cast<pybind11::dict>();
+            const auto rootRows = particle["root_rows"].cast<pybind11::list>();
+            const auto mappingRows = rootReport["root_action_mapping"]
+                    .cast<pybind11::list>();
+
+            pybind11::dict endRow;
+            pybind11::dict firstCardRow;
+            pybind11::dict secondCardRow;
+            pybind11::dict potionUseRow;
+            pybind11::dict potionDiscardRow;
+            pybind11::dict potionUseMappingRow;
+            pybind11::dict potionDiscardMappingRow;
+            for (const auto &rowHandle : rootRows) {
+                const auto row = rowHandle.cast<pybind11::dict>();
+                const auto kind = row["kind"].cast<std::string>();
+                if (kind == "end_turn") {
+                    endRow = row;
+                } else if (kind == "card" && firstCardRow.empty()) {
+                    firstCardRow = row;
+                } else if (kind == "card") {
+                    secondCardRow = row;
+                } else if (kind == "potion") {
+                    potionUseRow = row;
+                } else if (kind == "potion_discard") {
+                    potionDiscardRow = row;
+                }
+            }
+            for (const auto &rowHandle : mappingRows) {
+                const auto row = rowHandle.cast<pybind11::dict>();
+                const auto action = row["public_action"].cast<pybind11::dict>();
+                const auto kind = action["kind"].cast<std::string>();
+                if (kind == "potion") {
+                    potionUseMappingRow = row;
+                } else if (kind == "potion_discard") {
+                    potionDiscardMappingRow = row;
+                }
+            }
+
+            const bool potionUseExcluded = !potionUseRow.empty()
+                    && !potionUseMappingRow.empty()
+                    && excludedPublicRowValid(potionUseRow)
+                    && excludedMappingRowValid(potionUseMappingRow);
+            const bool potionDiscardExcluded = !potionDiscardRow.empty()
+                    && !potionDiscardMappingRow.empty()
+                    && excludedPublicRowValid(potionDiscardRow)
+                    && excludedMappingRowValid(potionDiscardMappingRow);
+            bool publicActionOrderPreserved = rootRows.size() == 5
+                    && mappingRows.size() == rootRows.size();
+            const std::array<std::string, 5> expectedKinds{
+                    "end_turn", "card", "card", "potion", "potion_discard"};
+            for (std::size_t rowIdx = 0;
+                    publicActionOrderPreserved && rowIdx < rootRows.size(); ++rowIdx) {
+                const auto rootRow = rootRows[rowIdx].cast<pybind11::dict>();
+                const auto mappingRow = mappingRows[rowIdx].cast<pybind11::dict>();
+                const auto mappedAction = mappingRow["public_action"]
+                        .cast<pybind11::dict>();
+                publicActionOrderPreserved =
+                        rootRow["kind"].cast<std::string>() == expectedKinds[rowIdx]
+                        && mappedAction["kind"].cast<std::string>()
+                                == expectedKinds[rowIdx]
+                        && rootRow["public_action_ordinal"].cast<int>()
+                                == static_cast<int>(rowIdx)
+                        && mappingRow["public_action_ordinal"].cast<int>()
+                                == static_cast<int>(rowIdx);
+            }
+            const bool searchedActionsPreserved = rootRows.size() == 5
+                    && !endRow.empty()
+                    && !firstCardRow.empty()
+                    && !secondCardRow.empty()
+                    && endRow["mapping_classification"].cast<std::string>()
+                            == "searched_direct"
+                    && firstCardRow["mapping_classification"].cast<std::string>()
+                            == "searched_direct"
+                    && secondCardRow["mapping_classification"].cast<std::string>()
+                            == "searched_mechanical_duplicate_card_occurrence"
+                    && firstCardRow["search_equivalence_source_edge_index"].equal(
+                            secondCardRow["search_equivalence_source_edge_index"])
+                    && firstCardRow["search_equivalence_mapping_mode"].cast<std::string>()
+                            == "direct_action_bits"
+                    && secondCardRow["search_equivalence_mapping_mode"].cast<std::string>()
+                            == "mechanical_duplicate_card_occurrence";
+            const bool mappingSchemaVersioned =
+                    bridgeReport["schema_id"].cast<std::string>()
+                            == "native-battle-public-particle-search-v2"
+                    && bridgeReport["native_api"].cast<std::string>()
+                            == "StepSimulator.sample_hidden_future_particles_search.v2"
+                    && rootReport["schema_id"].cast<std::string>()
+                            == "native-battle-search-root-v2"
+                    && rootReport["root_action_mapping_schema"].cast<std::string>()
+                            == "native-search-root-occurrence-equivalence-v2"
+                    && particle["root_action_mapping_completion_semantics"]
+                            .cast<std::string>()
+                            == "every_public_occurrence_classified_and_every_search_edge_covered"
+                    && rootReport["configuration_excluded_public_action_count"].cast<int>()
+                            == 2;
+            const bool diagnosticCountsCorrect =
+                    successDiagnostic["schema_id"].cast<std::string>()
+                            == "native-root-occurrence-mapping-diagnostic-v2"
+                    && successDiagnostic["public_legal_occurrence_count"].cast<int>() == 5
+                    && successDiagnostic["public_occurrences_classified"].cast<int>() == 5
+                    && successDiagnostic["searched_public_occurrence_count"].cast<int>() == 3
+                    && successDiagnostic[
+                            "configuration_excluded_public_occurrence_count"].cast<int>() == 2
+                    && successDiagnostic["search_root_edge_count"].cast<int>() == 2
+                    && successDiagnostic["search_root_edges_covered"].cast<int>() == 2
+                    && successDiagnostic["direct_mapping_count"].cast<int>() == 2
+                    && successDiagnostic["mechanical_duplicate_mapping_count"].cast<int>()
+                            == 1;
+            const bool allSearchEdgesCovered =
+                    rootReport["search_edge_count"].cast<int>() == 2
+                    && rootReport["unsearched_legal_action_count"].cast<int>() == 2
+                    && rootReport["unmapped_search_edge_count"].cast<int>() == 0;
+            const bool noFakeValues = potionUseExcluded && potionDiscardExcluded
+                    && bridgeReport["semantic_boundary"].cast<pybind11::dict>()[
+                            "configuration_excluded_action_values"].cast<std::string>()
+                            == "not_evaluated_not_numeric";
+
+            const auto missingEndTurn = runBridgeTrace(
+                    false, ParticleSearchFailureInjection::ROOT_MAPPING_MISSING_NON_CARD);
+            const auto enabledPotionMissingDiscard = runBridgeTrace(
+                    true, ParticleSearchFailureInjection::NONE);
+            const auto uncoveredEdge = runBridgeTrace(
+                    false, ParticleSearchFailureInjection::ROOT_MAPPING_UNCOVERED_EDGE);
+
+            search::BattleScumSearcher2 directSearcher(bc);
+            directSearcher.includePotions = false;
+            directSearcher.search(1);
+            std::vector<std::uint32_t> edgeBitsBefore;
+            std::vector<std::int64_t> edgeVisitsBefore;
+            std::vector<double> edgeEvaluationBefore;
+            for (const auto &edge : directSearcher.root.edges) {
+                edgeBitsBefore.push_back(edge.action.bits);
+                edgeVisitsBefore.push_back(edge.node.simulationCount);
+                edgeEvaluationBefore.push_back(edge.node.evaluationSum);
+            }
+            const auto rootVisitsBefore = directSearcher.root.simulationCount;
+            const auto actionExecutionCountBefore = directSearcher.actionExecutionCount;
+            const auto expandedNodeCountBefore = directSearcher.expandedNodeCount;
+            const auto rolloutCountBefore = directSearcher.rolloutCount;
+            const auto terminalUtilityCountBefore =
+                    directSearcher.terminalUtilityEvaluationCount;
+            const auto heuristicTransitionsBefore =
+                    directSearcher.heuristicSuccessorTransitionCount;
+            const auto policyPriorCallsBefore = directSearcher.policyPriorCallCount;
+            const auto leafValueCallsBefore = directSearcher.leafValueCallCount;
+            const auto heuristicAvailableBefore = directSearcher.heuristicAvailableCount;
+            const auto heuristicTerminalUnavailableBefore =
+                    directSearcher.heuristicTerminalUnavailableCount;
+            const auto heuristicInvalidUnavailableBefore =
+                    directSearcher.heuristicInvalidUnavailableCount;
+            const auto progressiveBiasScoreCountBefore =
+                    directSearcher.progressiveBiasScoreCount;
+            const auto bestActionValueBefore = directSearcher.bestActionValue;
+            const auto minActionValueBefore = directSearcher.minActionValue;
+            const auto outcomePlayerHpBefore = directSearcher.outcomePlayerHp;
+            std::ostringstream randomStateBefore;
+            randomStateBefore << directSearcher.randGen;
+
+            pybind11::dict directDiagnostic;
+            directDiagnostic["schema_id"] =
+                    "native-root-occurrence-mapping-diagnostic-v2";
+            directDiagnostic["status"] = "entered";
+            directDiagnostic["mapping_subreason"] = pybind11::none();
+            const auto directMapping = validateSearchRootMapping(
+                    bc,
+                    directSearcher,
+                    directDiagnostic,
+                    ParticleSearchFailureInjection::NONE);
+            const auto directReport = buildBattleSearchReport(
+                    bc,
+                    directSearcher,
+                    1,
+                    false,
+                    "StepSimulator.sample_hidden_future_particles_search.v2",
+                    "sts_lightspeed_native_particle_search_bridge_v2",
+                    nullptr,
+                    nullptr,
+                    pybind11::none(),
+                    &directMapping.publicToEdge);
+
+            std::ostringstream randomStateAfter;
+            randomStateAfter << directSearcher.randGen;
+            bool edgeSurfaceAndValuesUnchanged =
+                    directSearcher.root.edges.size() == edgeBitsBefore.size();
+            for (std::size_t edgeIdx = 0;
+                    edgeSurfaceAndValuesUnchanged
+                            && edgeIdx < directSearcher.root.edges.size();
+                    ++edgeIdx) {
+                const auto &edge = directSearcher.root.edges[edgeIdx];
+                edgeSurfaceAndValuesUnchanged = edge.action.bits == edgeBitsBefore[edgeIdx]
+                        && edge.node.simulationCount == edgeVisitsBefore[edgeIdx]
+                        && edge.node.evaluationSum == edgeEvaluationBefore[edgeIdx]
+                        && edge.action.getActionType() != search::ActionType::POTION;
+            }
+            const bool searchSurfaceAndWorkUnchanged = edgeSurfaceAndValuesUnchanged
+                    && directSearcher.root.simulationCount == rootVisitsBefore
+                    && directSearcher.actionExecutionCount == actionExecutionCountBefore
+                    && directSearcher.expandedNodeCount == expandedNodeCountBefore
+                    && directSearcher.rolloutCount == rolloutCountBefore
+                    && directSearcher.terminalUtilityEvaluationCount
+                            == terminalUtilityCountBefore
+                    && directSearcher.heuristicSuccessorTransitionCount
+                            == heuristicTransitionsBefore
+                    && directSearcher.policyPriorCallCount == policyPriorCallsBefore
+                    && directSearcher.leafValueCallCount == leafValueCallsBefore
+                    && directSearcher.heuristicAvailableCount == heuristicAvailableBefore
+                    && directSearcher.heuristicTerminalUnavailableCount
+                            == heuristicTerminalUnavailableBefore
+                    && directSearcher.heuristicInvalidUnavailableCount
+                            == heuristicInvalidUnavailableBefore
+                    && directSearcher.progressiveBiasScoreCount
+                            == progressiveBiasScoreCountBefore
+                    && directSearcher.bestActionValue == bestActionValueBefore
+                    && directSearcher.minActionValue == minActionValueBefore
+                    && directSearcher.outcomePlayerHp == outcomePlayerHpBefore
+                    && randomStateAfter.str() == randomStateBefore.str()
+                    && directReport["search_edge_count"].cast<int>() == 2
+                    && directReport["unsearched_legal_action_count"].cast<int>() == 2
+                    && directReport["unmapped_search_edge_count"].cast<int>() == 0;
+
+            pybind11::dict result;
+            result["schema_id"] =
+                    "native-stsr009-configuration-aware-root-mapping-audit-v1";
+            result["potion_use_excluded"] = potionUseExcluded;
+            result["potion_discard_excluded"] = potionDiscardExcluded;
+            result["public_action_order_preserved"] = publicActionOrderPreserved;
+            result["searched_actions_preserved"] = searchedActionsPreserved;
+            result["no_fake_values"] = noFakeValues;
+            result["mapping_schema_versioned"] = mappingSchemaVersioned;
+            result["diagnostic_v2_counts_correct"] = diagnosticCountsCorrect;
+            result["required_missing_non_card_fails_closed"] = failureMatches(
+                    missingEndTurn,
+                    "missing_non_card_direct_search_root_match",
+                    "end_turn");
+            result["enabled_potion_missing_discard_fails_closed"] = failureMatches(
+                    enabledPotionMissingDiscard,
+                    "missing_non_card_direct_search_root_match",
+                    "potion_discard");
+            result["uncovered_edge_fails_closed"] =
+                    mappingDiagnostic(uncoveredEdge)["mapping_subreason"]
+                                    .cast<std::string>()
+                            == "uncovered_search_root_edge"
+                    && stage(uncoveredEdge, "root_occurrence_mapping") == "failed"
+                    && stage(uncoveredEdge, "sanitized_root_report") == "not_reached";
+            result["search_surface_and_work_unchanged"] =
+                    searchSurfaceAndWorkUnchanged;
+            result["all_search_edges_covered"] = allSearchEdgesCovered;
             restore();
             return result;
         } catch (...) {
@@ -4233,6 +4716,8 @@ PYBIND11_MODULE(slaythespire, m) {
                 &StepSimulator::stsr007ParticleSearchStageAudit)
         .def("stsr008_root_occurrence_mapping_audit",
                 &StepSimulator::stsr008RootOccurrenceMappingAudit)
+        .def("stsr009_configuration_aware_root_mapping_audit",
+                &StepSimulator::stsr009ConfigurationAwareRootMappingAudit)
         .def(
             "battle_search",
             &StepSimulator::battleSearch,
