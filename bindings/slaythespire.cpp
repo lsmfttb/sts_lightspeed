@@ -7,6 +7,7 @@
 #include <pybind11/stl_bind.h>
 #include <pybind11/functional.h>
 
+#include <chrono>
 #include <sstream>
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,7 @@
 #include <iomanip>
 #include <map>
 #include <numeric>
+#include <random>
 #include <set>
 
 #include "sim/ConsoleSimulator.h"
@@ -1158,10 +1160,54 @@ struct StepSimulator {
         std::vector<std::vector<int>> edgeToPublic;
     };
 
+    struct T114ActionSurface {
+        pybind11::dict projection;
+        std::string projectionPayload;
+        std::vector<search::Action> actions;
+        std::vector<std::string> actionKeys;
+        std::vector<pybind11::dict> identities;
+        std::vector<LightSpeedAction> publicActions;
+        SearchRootMapping occurrenceMapping;
+        int configurationExcludedCount = 0;
+    };
+
+    struct T114SharedEdge {
+        std::string actionKey;
+        pybind11::dict actionIdentity;
+        std::int64_t visits = 0;
+        double valueSum = 0.0;
+    };
+
+    struct T114SharedNode {
+        std::string key;
+        std::string publicProjectionPayload;
+        std::string publicProgression;
+        std::vector<std::string> actionKeys;
+        std::vector<T114SharedEdge> edges;
+        std::int64_t visits = 0;
+        double valueSum = 0.0;
+    };
+
+    struct T114PoolEntry {
+        BattleContext state;
+    };
+
+    struct T114SearchInternalAudit {
+        std::int64_t distinctParticleCountUsed = 0;
+        bool rootAllConfiguredEdgesVisited = false;
+        bool multipleParticlesContributedToRoot = false;
+    };
+
     GameContext gc;
     BattleContext bc;
     bool battleActive = false;
     pybind11::dict lastParticleSearchStageDiagnostics;
+    std::vector<T114PoolEntry> t114ParticlePool;
+    bool t114ParticlePoolReady = false;
+    std::uint64_t t114ParticleSeedInput = 0;
+    std::string t114PoolRootProjectionPayload;
+    pybind11::dict t114PoolRootProjection;
+    double t114ParticlePoolBuildWallSeconds = 0.0;
 
     StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {
         beginParticleSearchStageTrace();
@@ -1300,6 +1346,7 @@ struct StepSimulator {
         gc = GameContext(cc, seed, ascension);
         bc = BattleContext();
         battleActive = false;
+        clearT114ParticlePool();
         beginParticleSearchStageTrace();
         lastParticleSearchStageDiagnostics["attempt_status"] = "not_attempted";
     }
@@ -1401,6 +1448,934 @@ struct StepSimulator {
             actions.push_back(makeBattleAction(state, action));
         }
         return actions;
+    }
+
+    static std::string canonicalT114PublicJson(const pybind11::object &value) {
+        const auto json = pybind11::module_::import("json");
+        const auto separators = pybind11::make_tuple(",", ":");
+        return json.attr("dumps")(
+                value,
+                pybind11::arg("sort_keys") = true,
+                pybind11::arg("separators") = separators,
+                pybind11::arg("ensure_ascii") = true,
+                pybind11::arg("allow_nan") = false).cast<std::string>();
+    }
+
+    static std::string frameT114Payload(const std::string &payload) {
+        return std::to_string(payload.size()) + ":" + payload;
+    }
+
+    static std::string makeT114NodeKey(
+            const std::string &projectionPayload,
+            const std::string &publicProgression) {
+        return "t114-public-node-v1|" + frameT114Payload(projectionPayload)
+                + frameT114Payload(publicProgression);
+    }
+
+    T114ActionSurface buildT114ActionSurface(const BattleContext &state) const {
+        if (publicInformationUnsupported(state)) {
+            throw std::runtime_error(
+                    "T114 shared search unavailable: unsupported public information fidelity");
+        }
+        T114ActionSurface surface;
+        surface.publicActions = publicBattleActions(state);
+        surface.projection = makeT096PublicInformationProjection(
+                gc, state, surface.publicActions);
+        if (surface.projection["information_fidelity"].cast<std::string>()
+                != "supported") {
+            throw std::runtime_error(
+                    "T114 shared search unavailable: T096 projection is unsupported");
+        }
+        surface.projectionPayload = canonicalT114PublicJson(surface.projection);
+
+        search::BattleScumSearcher2 searcher(state);
+        searcher.includePotions = false;
+        searcher.policyPriorFnc = {};
+        searcher.learnedLeafValueFnc = {};
+        searcher.useLearnedLeafValue = false;
+        searcher.progressiveBiasEnabled = false;
+        searcher.actionExecutionCount = 0;
+        searcher.enumerateActionsForNode(searcher.root, state, false);
+        if (searcher.root.edges.empty()) {
+            throw std::runtime_error(
+                    "T114 shared search found no eligible Search-v2 public actions");
+        }
+        pybind11::dict mappingDiagnostic;
+        surface.occurrenceMapping = validateSearchRootMapping(
+                state,
+                searcher,
+                mappingDiagnostic,
+                ParticleSearchFailureInjection::NONE);
+        surface.configurationExcludedCount = mappingDiagnostic[
+                "configuration_excluded_public_occurrence_count"].cast<int>();
+
+        surface.actions.reserve(searcher.root.edges.size());
+        surface.actionKeys.reserve(searcher.root.edges.size());
+        surface.identities.reserve(searcher.root.edges.size());
+        for (const auto &edge : searcher.root.edges) {
+            auto action = makeBattleAction(state, edge.action);
+            auto identity = publicInformationActionIdentity(action);
+            auto key = canonicalT114PublicJson(identity);
+            if (std::find(surface.actionKeys.begin(), surface.actionKeys.end(), key)
+                    != surface.actionKeys.end()) {
+                throw std::runtime_error(
+                        "T114 shared Search-v2 edge has an ambiguous public action identity");
+            }
+            surface.actions.push_back(edge.action);
+            surface.actionKeys.push_back(std::move(key));
+            surface.identities.push_back(std::move(identity));
+        }
+        return surface;
+    }
+
+    static int findUniqueT114Action(
+            const std::vector<std::string> &actionKeys,
+            const std::string &requestedKey) {
+        int found = -1;
+        for (int idx = 0; idx < static_cast<int>(actionKeys.size()); ++idx) {
+            if (actionKeys[static_cast<std::size_t>(idx)] != requestedKey) {
+                continue;
+            }
+            if (found >= 0) {
+                throw std::runtime_error(
+                        "T114 public action mapping is ambiguous across compatible particles");
+            }
+            found = idx;
+        }
+        if (found < 0) {
+            throw std::runtime_error(
+                    "T114 public action mapping is missing in a compatible particle");
+        }
+        return found;
+    }
+
+    static std::uint64_t drawT114UniformBounded(
+            std::mt19937_64 &rng,
+            const std::uint64_t bound) {
+        if (bound == 0) {
+            throw std::invalid_argument("T114 uniform draw requires a positive bound");
+        }
+        // Reject the short tail so every residue has exactly the same number
+        // of 64-bit source values. Plain modulo would introduce bias.
+        const std::uint64_t rejectionThreshold = (std::uint64_t{0} - bound) % bound;
+        while (true) {
+            const auto value = rng();
+            if (value >= rejectionThreshold) {
+                return value % bound;
+            }
+        }
+    }
+
+    static std::vector<int> makeT114ParticleSchedule(
+            const int particleCount,
+            const std::uint64_t searchSeedInput) {
+        if (particleCount <= 0 || particleCount > 16) {
+            throw std::invalid_argument(
+                    "T114 prepared particle prefix must be in [1, 16]");
+        }
+        std::vector<int> schedule(static_cast<std::size_t>(particleCount));
+        std::iota(schedule.begin(), schedule.end(), 0);
+        std::mt19937_64 scheduleRng(searchSeedInput);
+        for (std::size_t remaining = schedule.size(); remaining > 1; --remaining) {
+            const auto selected = static_cast<std::size_t>(drawT114UniformBounded(
+                    scheduleRng, static_cast<std::uint64_t>(remaining)));
+            std::swap(schedule[remaining - 1], schedule[selected]);
+        }
+        return schedule;
+    }
+
+    static std::uint64_t t114RolloutSeed(
+            const std::uint64_t searchSeedInput,
+            const std::int64_t simulationOrdinal) {
+        std::uint64_t value = searchSeedInput
+                + 0x9E3779B97F4A7C15ULL
+                        * static_cast<std::uint64_t>(simulationOrdinal + 1);
+        value ^= value >> 30;
+        value *= 0xBF58476D1CE4E5B9ULL;
+        value ^= value >> 27;
+        value *= 0x94D049BB133111EBULL;
+        value ^= value >> 31;
+        return value;
+    }
+
+    static T114SharedNode makeT114SharedNode(
+            const std::string &projectionPayload,
+            const std::string &publicProgression,
+            const T114ActionSurface &surface) {
+        T114SharedNode node;
+        node.key = makeT114NodeKey(projectionPayload, publicProgression);
+        node.publicProjectionPayload = projectionPayload;
+        node.publicProgression = publicProgression;
+        node.actionKeys = surface.actionKeys;
+        node.edges.reserve(surface.actionKeys.size());
+        for (std::size_t idx = 0; idx < surface.actionKeys.size(); ++idx) {
+            node.edges.push_back(T114SharedEdge{
+                    surface.actionKeys[idx], surface.identities[idx], 0, 0.0});
+        }
+        return node;
+    }
+
+    static void validateT114NodeSurface(
+            const T114SharedNode &node,
+            const T114ActionSurface &surface) {
+        if (node.publicProjectionPayload != surface.projectionPayload
+                || node.actionKeys != surface.actionKeys
+                || node.edges.size() != surface.actionKeys.size()) {
+            throw std::runtime_error(
+                    "T114 shared public node/action surface changed across compatible particles");
+        }
+        for (std::size_t idx = 0; idx < node.edges.size(); ++idx) {
+            if (node.edges[idx].actionKey != surface.actionKeys[idx]
+                    || !node.edges[idx].actionIdentity.equal(surface.identities[idx])) {
+                throw std::runtime_error(
+                        "T114 shared public edge identity collision rejected by exact payload check");
+            }
+        }
+    }
+
+    static int selectT114SharedEdge(T114SharedNode &node) {
+        if (node.edges.empty()) {
+            throw std::runtime_error("T114 shared public node has no configured actions");
+        }
+        for (int idx = 0; idx < static_cast<int>(node.edges.size()); ++idx) {
+            if (node.edges[static_cast<std::size_t>(idx)].visits == 0) {
+                return idx;
+            }
+        }
+        if (node.visits <= 0) {
+            throw std::logic_error("T114 shared node has visited edges but no parent visits");
+        }
+        constexpr double exploration = 3.0 * 1.4142135623730950488;
+        int best = 0;
+        double bestScore = -std::numeric_limits<double>::infinity();
+        for (int idx = 0; idx < static_cast<int>(node.edges.size()); ++idx) {
+            const auto &edge = node.edges[static_cast<std::size_t>(idx)];
+            const double mean = edge.valueSum / static_cast<double>(edge.visits);
+            const double bonus = exploration * std::sqrt(
+                    std::log(static_cast<double>(node.visits))
+                    / static_cast<double>(edge.visits));
+            const double score = mean + bonus;
+            if (score > bestScore) {
+                best = idx;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    static void backupT114SharedPath(
+            std::vector<T114SharedNode> &nodes,
+            const std::vector<std::pair<int, int>> &path,
+            const double value) {
+        for (const auto &[nodeIdx, edgeIdx] : path) {
+            auto &node = nodes.at(static_cast<std::size_t>(nodeIdx));
+            auto &edge = node.edges.at(static_cast<std::size_t>(edgeIdx));
+            ++edge.visits;
+            edge.valueSum += value;
+            ++node.visits;
+            node.valueSum += value;
+        }
+    }
+
+    void clearT114ParticlePool() {
+        t114ParticlePool.clear();
+        t114ParticlePoolReady = false;
+        t114ParticleSeedInput = 0;
+        t114PoolRootProjectionPayload.clear();
+        t114PoolRootProjection = pybind11::dict();
+        t114ParticlePoolBuildWallSeconds = 0.0;
+    }
+
+    pybind11::dict t114PrepareSharedPublicBeliefParticlePool(
+            const std::uint64_t particleSeedInput) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error(
+                    "T114 particle-pool preparation requested outside battle");
+        }
+        if (t114ParticlePoolReady) {
+            throw std::runtime_error(
+                    "T114 particle pool is already prepared for this root; reset/advance the battle before rebuilding");
+        }
+        const auto anchorSurface = buildT114ActionSurface(bc);
+        std::vector<T114PoolEntry> prepared;
+        prepared.reserve(16);
+        // Match the T114 cost boundary: start immediately before the first
+        // accepted sampler call, after root restore/projection setup.
+        const auto started = std::chrono::steady_clock::now();
+        for (int particleIdx = 0; particleIdx < 16; ++particleIdx) {
+            std::uint64_t derivedSeed = 0;
+            auto particle = buildHiddenFutureParticle(
+                    particleSeedInput, particleIdx, derivedSeed);
+            auto surface = buildT114ActionSurface(particle);
+            if (!surface.projection.equal(anchorSurface.projection)
+                    || surface.projectionPayload != anchorSurface.projectionPayload) {
+                throw std::runtime_error(
+                        "T114 sampled particle failed exact T096 root public-projection parity");
+            }
+            validatePublicActionSurface(
+                    anchorSurface.publicActions, surface.publicActions);
+            if (surface.actionKeys != anchorSurface.actionKeys) {
+                throw std::runtime_error(
+                        "T114 sampled particle failed shared Search-v2 public action parity");
+            }
+            prepared.push_back(T114PoolEntry{std::move(particle)});
+        }
+        t114ParticlePool = std::move(prepared);
+        t114ParticlePoolReady = true;
+        t114ParticleSeedInput = particleSeedInput;
+        t114PoolRootProjectionPayload = anchorSurface.projectionPayload;
+        t114PoolRootProjection = anchorSurface.projection;
+        const auto stopped = std::chrono::steady_clock::now();
+        t114ParticlePoolBuildWallSeconds = std::chrono::duration<double>(
+                stopped - started).count();
+
+        pybind11::dict ret;
+        ret["schema_id"] = "native-t114-shared-public-belief-particle-pool-v1";
+        ret["pool_size"] = static_cast<int>(t114ParticlePool.size());
+        ret["particle_seed_input"] = particleSeedInput;
+        ret["root_public_projection"] = t114PoolRootProjection;
+        ret["pool_root_projection_parity"] = "exact_canonical_payload";
+        ret["particle_states_exposed"] = false;
+        ret["per_particle_seed_metadata_exposed"] = false;
+        pybind11::dict timing;
+        timing["pool_build_wall_seconds"] = t114ParticlePoolBuildWallSeconds;
+        ret["timing"] = timing;
+        return ret;
+    }
+
+    pybind11::dict t114SharedPublicBeliefSearch(
+            const std::uint64_t searchSeedInput,
+            const int particleCount,
+            const std::int64_t simulationBudget) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("T114 shared search requested outside battle");
+        }
+        if (!t114ParticlePoolReady || t114ParticlePool.size() != 16) {
+            throw std::runtime_error(
+                    "T114 shared search requires one prepared 16-particle root pool");
+        }
+        if (particleCount != 2 && particleCount != 4
+                && particleCount != 8 && particleCount != 16) {
+            throw std::invalid_argument(
+                    "T114 particle_count must be one of 2, 4, 8, or 16");
+        }
+        if (simulationBudget <= 0 || simulationBudget > 1600) {
+            throw std::invalid_argument(
+                    "T114 simulation_budget must be in [1, 1600]");
+        }
+        if (publicInformationUnsupported(bc)) {
+            throw std::runtime_error("T114 shared search unavailable: unsupported_fidelity");
+        }
+        const auto started = std::chrono::steady_clock::now();
+        const auto rootSurface = buildT114ActionSurface(bc);
+        if (rootSurface.projectionPayload != t114PoolRootProjectionPayload
+                || !rootSurface.projection.equal(t114PoolRootProjection)) {
+            throw std::runtime_error(
+                    "T114 prepared particle pool does not match the current exact public root");
+        }
+        if (rootSurface.actionKeys.empty()) {
+            throw std::runtime_error("T114 shared root has no Search-v2 public actions");
+        }
+
+        std::vector<T114SharedNode> nodes;
+        nodes.push_back(makeT114SharedNode(
+                rootSurface.projectionPayload, "", rootSurface));
+        std::map<std::string, int> exactPublicNodeIndex;
+        exactPublicNodeIndex.emplace(nodes.front().key, 0);
+
+        // The schedule is a seeded fixed cycle over the prepared prefix. It is
+        // built before any simulation and never depends on a state or outcome.
+        const auto particleSchedule = makeT114ParticleSchedule(
+                particleCount, searchSeedInput);
+
+        std::int64_t nativeSimulatorSteps = 0;
+        std::int64_t rolloutCount = 0;
+        std::int64_t sharedNodeEdgeSelections = 0;
+        std::vector<bool> usedParticles(static_cast<std::size_t>(particleCount), false);
+        std::int64_t uniqueParticlesUsed = 0;
+        for (std::int64_t simulationIdx = 0;
+                simulationIdx < simulationBudget; ++simulationIdx) {
+            const int particleIdx = particleSchedule[static_cast<std::size_t>(
+                    simulationIdx % particleCount)];
+            if (!usedParticles[static_cast<std::size_t>(particleIdx)]) {
+                usedParticles[static_cast<std::size_t>(particleIdx)] = true;
+                ++uniqueParticlesUsed;
+            }
+            BattleContext state = t114ParticlePool[
+                    static_cast<std::size_t>(particleIdx)].state;
+            int nodeIdx = 0;
+            std::string publicProgression;
+            std::vector<std::pair<int, int>> path;
+            double evaluation = 0.0;
+            bool completed = false;
+            for (int depth = 0; depth < 512; ++depth) {
+                if (state.outcome != Outcome::UNDECIDED) {
+                    evaluation = search::BattleScumSearcher2::evaluateEndState(state);
+                    completed = true;
+                    break;
+                }
+                const auto surface = buildT114ActionSurface(state);
+                auto &node = nodes.at(static_cast<std::size_t>(nodeIdx));
+                validateT114NodeSurface(node, surface);
+                const int edgeIdx = selectT114SharedEdge(node);
+                ++sharedNodeEdgeSelections;
+                const auto requestedKey = node.edges[
+                        static_cast<std::size_t>(edgeIdx)].actionKey;
+                const int mappedActionIdx = findUniqueT114Action(
+                        surface.actionKeys, requestedKey);
+                auto action = surface.actions[static_cast<std::size_t>(mappedActionIdx)];
+                if (!action.isValidAction(state)) {
+                    throw std::runtime_error(
+                            "T114 shared public action failed native validity in a compatible particle");
+                }
+                path.emplace_back(nodeIdx, edgeIdx);
+                action.execute(state);
+                ++nativeSimulatorSteps;
+
+                if (state.outcome != Outcome::UNDECIDED) {
+                    evaluation = search::BattleScumSearcher2::evaluateEndState(state);
+                    completed = true;
+                    break;
+                }
+
+                const auto childSurface = buildT114ActionSurface(state);
+                const auto actionPayload = requestedKey;
+                publicProgression += frameT114Payload(actionPayload);
+                publicProgression += frameT114Payload(childSurface.projectionPayload);
+                const auto childKey = makeT114NodeKey(
+                        childSurface.projectionPayload, publicProgression);
+                auto childIt = exactPublicNodeIndex.find(childKey);
+                if (childIt == exactPublicNodeIndex.end()) {
+                    auto child = makeT114SharedNode(
+                            childSurface.projectionPayload,
+                            publicProgression,
+                            childSurface);
+                    const int childIdx = static_cast<int>(nodes.size());
+                    nodes.push_back(std::move(child));
+                    exactPublicNodeIndex.emplace(nodes.back().key, childIdx);
+                    if (state.outcome != Outcome::UNDECIDED) {
+                        evaluation = search::BattleScumSearcher2::evaluateEndState(state);
+                    } else {
+                        search::BattleScumSearcher2 rollout(state);
+                        rollout.includePotions = false;
+                        rollout.policyPriorFnc = {};
+                        rollout.learnedLeafValueFnc = {};
+                        rollout.useLearnedLeafValue = false;
+                        rollout.progressiveBiasEnabled = false;
+                        const std::uint64_t rolloutSeed = t114RolloutSeed(
+                                searchSeedInput, simulationIdx);
+                        rollout.randGen.seed(static_cast<unsigned int>(
+                                rolloutSeed ^ (rolloutSeed >> 32)));
+                        std::vector<search::Action> rolloutPath;
+                        rollout.playoutRandom(state, rolloutPath);
+                        nativeSimulatorSteps += rollout.actionExecutionCount;
+                        ++rolloutCount;
+                        evaluation = search::BattleScumSearcher2::evaluateEndState(state);
+                    }
+                    ++nodes.at(static_cast<std::size_t>(childIdx)).visits;
+                    nodes.at(static_cast<std::size_t>(childIdx)).valueSum += evaluation;
+                    completed = true;
+                    break;
+                }
+                nodeIdx = childIt->second;
+                const auto &child = nodes.at(static_cast<std::size_t>(nodeIdx));
+                if (child.publicProjectionPayload != childSurface.projectionPayload
+                        || child.publicProgression != publicProgression) {
+                    throw std::runtime_error(
+                            "T114 public node collision rejected by exact canonical payload equality");
+                }
+            }
+            if (!completed) {
+                throw std::runtime_error(
+                        "T114 shared search exceeded its bounded public tree depth");
+            }
+            backupT114SharedPath(nodes, path, evaluation);
+        }
+        const auto stopped = std::chrono::steady_clock::now();
+
+        const auto &root = nodes.front();
+        bool allRootEdgesVisited = true;
+        for (const auto &edge : root.edges) {
+            allRootEdgesVisited = allRootEdgesVisited && edge.visits > 0;
+        }
+        const auto rootLegalActions = enumerateBattleActions(bc);
+        pybind11::list actionRows;
+        pybind11::dict actionClassCounts;
+        int bestSelectedEdge = -1;
+        for (std::size_t legalIdx = 0; legalIdx < rootLegalActions.size(); ++legalIdx) {
+            const auto identity = publicInformationActionIdentity(
+                    makeBattleAction(bc, rootLegalActions[legalIdx]));
+            const auto actionKind = identity["kind"].cast<std::string>();
+            const auto actionKindKey = pybind11::str(actionKind);
+            const auto currentClassCount = actionClassCounts.contains(actionKindKey)
+                    ? actionClassCounts[actionKindKey].cast<int>() : 0;
+            actionClassCounts[actionKindKey] = currentClassCount + 1;
+            pybind11::dict row;
+            row["action"] = identity;
+            const int edgeIdx = rootSurface.occurrenceMapping.publicToEdge.at(legalIdx);
+            if (edgeIdx < 0) {
+                row["classification"] = "configuration_excluded";
+                row["exclusion_reason"] = rootSurface.occurrenceMapping
+                        .configurationExclusionReasons.at(legalIdx);
+                row["visits"] = 0;
+                row["evaluation_sum"] = pybind11::none();
+                row["mean_value"] = pybind11::none();
+            } else {
+                const auto &edge = root.edges.at(static_cast<std::size_t>(edgeIdx));
+                row["classification"] = "searched_shared_edge";
+                row["exclusion_reason"] = pybind11::none();
+                row["visits"] = edge.visits;
+                row["evaluation_sum"] = edge.visits > 0
+                        ? pybind11::object(pybind11::float_(edge.valueSum))
+                        : pybind11::object(pybind11::none());
+                row["mean_value"] = edge.visits > 0
+                        ? pybind11::object(pybind11::float_(
+                                edge.valueSum / static_cast<double>(edge.visits)))
+                        : pybind11::object(pybind11::none());
+                if (bestSelectedEdge < 0) {
+                    bestSelectedEdge = edgeIdx;
+                } else {
+                    const auto &best = root.edges.at(
+                            static_cast<std::size_t>(bestSelectedEdge));
+                    const double mean = edge.visits > 0
+                            ? edge.valueSum / static_cast<double>(edge.visits) : 0.0;
+                    const double bestMean = best.visits > 0
+                            ? best.valueSum / static_cast<double>(best.visits) : 0.0;
+                    if (edge.visits > best.visits
+                            || (edge.visits == best.visits && mean > bestMean)) {
+                        bestSelectedEdge = edgeIdx;
+                    }
+                }
+            }
+            actionRows.append(row);
+        }
+
+        pybind11::dict selectedAction;
+        if (bestSelectedEdge >= 0) {
+            selectedAction = root.edges.at(
+                    static_cast<std::size_t>(bestSelectedEdge)).actionIdentity;
+        }
+        pybind11::dict report;
+        report["schema_id"] = "native-t114-shared-public-belief-search-v1";
+        report["contract"] = "shared_public_belief_search_proxy";
+        report["native_api"] = "StepSimulator.t114_shared_public_belief_search.v1";
+        report["information_regime"] = "normal_information_shared_tree";
+        report["root_public_projection"] = rootSurface.projection;
+        report["root_public_action_count"] = static_cast<int>(rootLegalActions.size());
+        report["root_search_edge_count"] = static_cast<int>(root.edges.size());
+        report["root_configuration_excluded_count"] =
+                rootSurface.configurationExcludedCount;
+        report["particle_seed_input"] = t114ParticleSeedInput;
+        report["search_seed_input"] = searchSeedInput;
+        report["particle_count"] = particleCount;
+        report["particle_prefix_policy"] = "exact_prepared_pool_prefix";
+        report["simulation_budget"] = simulationBudget;
+        report["simulations_completed"] = simulationBudget;
+        report["shared_root_visits"] = root.visits;
+        report["shared_node_count"] = static_cast<int>(nodes.size());
+        report["root_actions_all_visited_before_uct"] = allRootEdgesVisited;
+        report["distinct_particles_used_aggregate"] = uniqueParticlesUsed;
+        report["private_particle_states_exposed"] = false;
+        report["per_particle_values_exposed"] = false;
+        report["independent_particle_root_searches"] = 0;
+        report["node_identity"] = "exact_T096_public_projection_plus_public_progression";
+        report["node_collision_check"] = "exact_canonical_payload_equality";
+        report["selected_root_action"] = selectedAction.empty()
+                ? pybind11::object(pybind11::none())
+                : pybind11::object(selectedAction);
+        report["action_rows"] = actionRows;
+        report["action_class_counts"] = actionClassCounts;
+        pybind11::dict publicAudit;
+        publicAudit["t096_projection_schema"] =
+                rootSurface.projection["schema_id"];
+        publicAudit["node_identity_inputs"] = pybind11::make_tuple(
+                "exact_canonical_T096_public_projection",
+                "ordered_public_action_and_observation_progression");
+        publicAudit["private_particle_state_or_rng_used_as_identity"] = false;
+        publicAudit["search_policy_or_leaf_models_used"] = false;
+        publicAudit["potion_actions_retained_in_public_audit"] =
+                rootSurface.configurationExcludedCount;
+        publicAudit["potion_actions_valued"] = 0;
+        publicAudit["exact_payload_collision_rejection"] = true;
+        report["public_audit"] = publicAudit;
+        pybind11::dict work;
+        work["native_simulator_steps"] = nativeSimulatorSteps;
+        work["rollout_count"] = rolloutCount;
+        work["shared_node_edge_selections"] = sharedNodeEdgeSelections;
+        work["policy_prior_calls"] = 0;
+        work["leaf_value_calls"] = 0;
+        work["heuristic_calls"] = 0;
+        report["work"] = work;
+        pybind11::dict timing;
+        timing["pool_build_wall_seconds"] = t114ParticlePoolBuildWallSeconds;
+        timing["search_wall_seconds"] = std::chrono::duration<double>(
+                stopped - started).count();
+        report["timing"] = timing;
+        return report;
+    }
+
+    pybind11::dict t114SharedPublicBeliefSearchAudit() {
+        const auto savedGc = gc;
+        const auto savedBc = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedPool = t114ParticlePool;
+        const auto savedPoolReady = t114ParticlePoolReady;
+        const auto savedParticleSeed = t114ParticleSeedInput;
+        const auto savedRootPayload = t114PoolRootProjectionPayload;
+        const auto savedRootProjection = t114PoolRootProjection;
+        const auto savedPoolWallSeconds = t114ParticlePoolBuildWallSeconds;
+        const auto restore = [&]() {
+            gc = savedGc;
+            bc = savedBc;
+            battleActive = savedBattleActive;
+            t114ParticlePool = savedPool;
+            t114ParticlePoolReady = savedPoolReady;
+            t114ParticleSeedInput = savedParticleSeed;
+            t114PoolRootProjectionPayload = savedRootPayload;
+            t114PoolRootProjection = savedRootProjection;
+            t114ParticlePoolBuildWallSeconds = savedPoolWallSeconds;
+        };
+
+        try {
+            gc.screenState = ScreenState::BATTLE;
+            gc.outcome = GameOutcome::UNDECIDED;
+            gc.act = 1;
+            gc.floorNum = 1;
+            bc = BattleContext();
+            bc.inputState = InputState::PLAYER_NORMAL;
+            bc.outcome = Outcome::UNDECIDED;
+            bc.turn = 0;
+            bc.player.curHp = 80;
+            bc.player.maxHp = 80;
+            bc.player.energy = 3;
+            bc.player.energyPerTurn = 3;
+            bc.monsters.monsterCount = 1;
+            bc.monsters.monstersAlive = 1;
+            auto &monster = bc.monsters.arr[0];
+            monster.idx = 0;
+            monster.id = MonsterId::JAW_WORM;
+            monster.curHp = 8;
+            monster.maxHp = 8;
+            monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+            monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+            bc.cards.cardsInHand = 2;
+            CardInstance strike(CardId::STRIKE_RED);
+            strike.setUniqueId(9100);
+            bc.cards.hand[0] = strike;
+            CardInstance defend(CardId::DEFEND_RED);
+            defend.setUniqueId(9101);
+            bc.cards.hand[1] = defend;
+            const std::array<CardId, 12> drawIds{
+                    CardId::STRIKE_RED, CardId::DEFEND_RED, CardId::BASH,
+                    CardId::HEADBUTT, CardId::ANGER, CardId::IRON_WAVE,
+                    CardId::SHRUG_IT_OFF, CardId::CLEAVE, CardId::POMMEL_STRIKE,
+                    CardId::THUNDERCLAP, CardId::ARMAMENTS, CardId::TRUE_GRIT};
+            for (std::size_t idx = 0; idx < drawIds.size(); ++idx) {
+                CardInstance card(drawIds[idx]);
+                card.setUniqueId(static_cast<int>(9200 + idx));
+                bc.cards.drawPile.push_back(card);
+            }
+            bc.potionCapacity = 1;
+            bc.potionCount = 1;
+            bc.potions[0] = Potion::WEAK_POTION;
+            battleActive = true;
+            clearT114ParticlePool();
+
+            constexpr std::uint64_t particleSeed = 0x54413134504F4F4CULL;
+            constexpr std::uint64_t searchSeed = 0x5441313453454152ULL;
+            (void) t114PrepareSharedPublicBeliefParticlePool(particleSeed);
+            std::vector<std::string> firstParticleFingerprints;
+            firstParticleFingerprints.reserve(t114ParticlePool.size());
+            bool sameProjectionAcrossPool = true;
+            bool samePublicNodeIdentityAcrossHiddenParticles = true;
+            const auto baseSurface = buildT114ActionSurface(
+                    t114ParticlePool.front().state);
+            const auto baseNodeKey = makeT114NodeKey(
+                    baseSurface.projectionPayload, "");
+            std::set<std::string> distinctPrivateFingerprints;
+            std::vector<std::string> priorPrefix;
+            bool exactPreparedPoolPrefixes = true;
+            for (std::size_t idx = 0; idx < t114ParticlePool.size(); ++idx) {
+                const auto &particle = t114ParticlePool[idx].state;
+                firstParticleFingerprints.push_back(hiddenFutureFingerprint(particle));
+                distinctPrivateFingerprints.insert(firstParticleFingerprints.back());
+                const auto surface = buildT114ActionSurface(particle);
+                sameProjectionAcrossPool = sameProjectionAcrossPool
+                        && surface.projectionPayload == baseSurface.projectionPayload
+                        && surface.projection.equal(baseSurface.projection);
+                samePublicNodeIdentityAcrossHiddenParticles =
+                        samePublicNodeIdentityAcrossHiddenParticles
+                        && makeT114NodeKey(surface.projectionPayload, "") == baseNodeKey;
+                if (idx + 1 == 2 || idx + 1 == 4 || idx + 1 == 8
+                        || idx + 1 == 16) {
+                    std::vector<std::string> currentPrefix(
+                            firstParticleFingerprints.begin(),
+                            firstParticleFingerprints.begin()
+                                    + static_cast<std::ptrdiff_t>(idx + 1));
+                    exactPreparedPoolPrefixes = exactPreparedPoolPrefixes
+                            && currentPrefix.size() >= priorPrefix.size()
+                            && std::equal(
+                                    priorPrefix.begin(), priorPrefix.end(),
+                                    currentPrefix.begin());
+                    priorPrefix = std::move(currentPrefix);
+                }
+            }
+            const bool hiddenParticleDiversity = distinctPrivateFingerprints.size() > 1;
+
+            const auto scheduleA = makeT114ParticleSchedule(8, searchSeed);
+            const auto scheduleB = makeT114ParticleSchedule(8, searchSeed);
+            const auto scheduleOtherPool = makeT114ParticleSchedule(8, searchSeed);
+            const bool fixedScheduleDeterministicAndStateIndependent =
+                    scheduleA == scheduleB && scheduleA == scheduleOtherPool
+                    && std::set<int>(scheduleA.begin(), scheduleA.end()).size() == 8;
+            bool boundedScheduleDrawIsUnbiased = true;
+            for (std::uint64_t bound = 1; bound <= 16; ++bound) {
+                const std::uint64_t threshold =
+                        (std::uint64_t{0} - bound) % bound;
+                const std::uint64_t acceptedRangeRemainder =
+                        ((std::numeric_limits<std::uint64_t>::max() - threshold)
+                                        % bound
+                                + 1)
+                        % bound;
+                boundedScheduleDrawIsUnbiased = boundedScheduleDrawIsUnbiased
+                        && acceptedRangeRemainder == 0;
+            }
+
+            auto fixtureNode = makeT114SharedNode(
+                    baseSurface.projectionPayload, "", baseSurface);
+            bool missingActionFailsClosed = false;
+            bool ambiguousActionFailsClosed = false;
+            try {
+                (void) findUniqueT114Action(
+                        baseSurface.actionKeys, "t114-missing-public-action");
+            } catch (const std::runtime_error &) {
+                missingActionFailsClosed = true;
+            }
+            if (!baseSurface.actionKeys.empty()) {
+                try {
+                    (void) findUniqueT114Action(
+                            {baseSurface.actionKeys.front(),
+                                    baseSurface.actionKeys.front()},
+                            baseSurface.actionKeys.front());
+                } catch (const std::runtime_error &) {
+                    ambiguousActionFailsClosed = true;
+                }
+            }
+            auto incompatibleSurface = baseSurface;
+            if (!incompatibleSurface.actionKeys.empty()) {
+                incompatibleSurface.actionKeys.front() += "|incompatible";
+            }
+            bool incompatibleActionSurfaceFailsClosed = false;
+            try {
+                validateT114NodeSurface(fixtureNode, incompatibleSurface);
+            } catch (const std::runtime_error &) {
+                incompatibleActionSurfaceFailsClosed = true;
+            }
+            auto alteredProjectionSurface = baseSurface;
+            alteredProjectionSurface.projectionPayload += "|altered-public-payload";
+            bool changedProjectionCollisionRejected = false;
+            try {
+                validateT114NodeSurface(fixtureNode, alteredProjectionSurface);
+            } catch (const std::runtime_error &) {
+                changedProjectionCollisionRejected = true;
+            }
+            const bool progressionChangesNodeIdentity = makeT114NodeKey(
+                    baseSurface.projectionPayload, "public-action-observation-A")
+                    != makeT114NodeKey(
+                            baseSurface.projectionPayload,
+                            "public-action-observation-B");
+
+            search::BattleScumSearcher2 mappingSearcher(bc);
+            mappingSearcher.includePotions = false;
+            mappingSearcher.enumerateActionsForNode(
+                    mappingSearcher.root, bc, false);
+            pybind11::dict multipleDiagnostic;
+            bool multipleNativeMappingFailsClosed = false;
+            try {
+                (void) validateSearchRootMapping(
+                        bc,
+                        mappingSearcher,
+                        multipleDiagnostic,
+                        ParticleSearchFailureInjection::ROOT_MAPPING_MULTIPLE_DIRECT);
+            } catch (const std::runtime_error &) {
+                multipleNativeMappingFailsClosed = true;
+            }
+            pybind11::dict missingDiagnostic;
+            bool missingNativeMappingFailsClosed = false;
+            try {
+                (void) validateSearchRootMapping(
+                        bc,
+                        mappingSearcher,
+                        missingDiagnostic,
+                        ParticleSearchFailureInjection::ROOT_MAPPING_MISSING_NON_CARD);
+            } catch (const std::runtime_error &) {
+                missingNativeMappingFailsClosed = true;
+            }
+
+            const auto firstSearch = t114SharedPublicBeliefSearch(
+                    searchSeed, 2, 2);
+            const auto secondSearch = t114SharedPublicBeliefSearch(
+                    searchSeed, 2, 2);
+            pybind11::dict firstSearchCore;
+            pybind11::dict secondSearchCore;
+            for (const auto &item : firstSearch) {
+                const auto key = item.first.cast<std::string>();
+                if (key != "timing") {
+                    firstSearchCore[item.first] = item.second;
+                }
+            }
+            for (const auto &item : secondSearch) {
+                const auto key = item.first.cast<std::string>();
+                if (key != "timing") {
+                    secondSearchCore[item.first] = item.second;
+                }
+            }
+            const bool deterministicAggregateReport =
+                    firstSearchCore.equal(secondSearchCore);
+            const bool multipleParticlesContributedToSharedRoot =
+                    firstSearch["distinct_particles_used_aggregate"].cast<int>() == 2
+                    && firstSearch["shared_root_visits"].cast<std::int64_t>() == 2
+                    && secondSearch["distinct_particles_used_aggregate"].cast<int>() == 2;
+
+            bool potionsRemainAuditableAndUnvalued = false;
+            bool publicRowsContainNoNativeActionBits = true;
+            const auto outputRows = firstSearch["action_rows"].cast<pybind11::list>();
+            int potionRowCount = 0;
+            for (const auto &rowHandle : outputRows) {
+                const auto row = rowHandle.cast<pybind11::dict>();
+                const auto action = row["action"].cast<pybind11::dict>();
+                publicRowsContainNoNativeActionBits = publicRowsContainNoNativeActionBits
+                        && !action.contains("bits");
+                const auto kind = action["kind"].cast<std::string>();
+                if (kind == "potion" || kind == "potion_discard") {
+                    ++potionRowCount;
+                    potionsRemainAuditableAndUnvalued =
+                            row["classification"].cast<std::string>()
+                                    == "configuration_excluded"
+                            && row["visits"].cast<int>() == 0
+                            && row["evaluation_sum"].is_none()
+                            && row["mean_value"].is_none();
+                }
+            }
+            potionsRemainAuditableAndUnvalued = potionRowCount > 0
+                    && potionsRemainAuditableAndUnvalued;
+            const bool noPerParticleOutput = !firstSearch.contains("particles")
+                    && !firstSearch.contains("particle_rows")
+                    && !firstSearch.contains("hidden_future_fingerprint")
+                    && firstSearch["private_particle_states_exposed"].cast<bool>() == false
+                    && firstSearch["per_particle_values_exposed"].cast<bool>() == false;
+
+            clearT114ParticlePool();
+            (void) t114PrepareSharedPublicBeliefParticlePool(particleSeed);
+            bool deterministicPoolReconstruction =
+                    t114ParticlePool.size() == firstParticleFingerprints.size();
+            for (std::size_t idx = 0;
+                    deterministicPoolReconstruction && idx < t114ParticlePool.size();
+                    ++idx) {
+                deterministicPoolReconstruction = hiddenFutureFingerprint(
+                        t114ParticlePool[idx].state) == firstParticleFingerprints[idx];
+            }
+
+            std::vector<T114SharedNode> globalSelectionNodes;
+            T114SharedNode selectionNode;
+            selectionNode.key = "audit-public-root";
+            for (int idx = 0; idx < 3; ++idx) {
+                pybind11::dict identity;
+                identity["kind"] = "synthetic_public_action";
+                identity["public_ordinal"] = idx;
+                const auto actionKey = canonicalT114PublicJson(identity);
+                selectionNode.actionKeys.push_back(actionKey);
+                selectionNode.edges.push_back(T114SharedEdge{
+                        actionKey, identity, 0, 0.0});
+            }
+            globalSelectionNodes.push_back(std::move(selectionNode));
+            std::vector<int> globalFirstSelections;
+            std::set<int> conceptualParticleContributors;
+            for (int syntheticSimulation = 0; syntheticSimulation < 2;
+                    ++syntheticSimulation) {
+                const int edgeIdx = selectT114SharedEdge(globalSelectionNodes[0]);
+                globalFirstSelections.push_back(edgeIdx);
+                conceptualParticleContributors.insert(syntheticSimulation % 2);
+                backupT114SharedPath(
+                        globalSelectionNodes,
+                        {{0, edgeIdx}},
+                        syntheticSimulation == 0 ? 0.25 : 0.75);
+            }
+            T114SharedNode allEdgeNode;
+            allEdgeNode.key = "audit-all-unvisited-root";
+            for (int ordinal = 0; ordinal < 3; ++ordinal) {
+                pybind11::dict identity;
+                identity["kind"] = "synthetic_public_action";
+                identity["public_ordinal"] = ordinal;
+                const auto actionKey = canonicalT114PublicJson(identity);
+                allEdgeNode.actionKeys.push_back(actionKey);
+                allEdgeNode.edges.push_back(T114SharedEdge{
+                        actionKey, identity, 0, 0.0});
+            }
+            std::vector<T114SharedNode> allEdgeNodes{allEdgeNode};
+            std::vector<int> allFirstSelections;
+            for (int ordinal = 0; ordinal < 3; ++ordinal) {
+                const auto edgeIdx = selectT114SharedEdge(allEdgeNodes[0]);
+                allFirstSelections.push_back(edgeIdx);
+                backupT114SharedPath(allEdgeNodes, {{0, edgeIdx}}, 0.5);
+            }
+            const bool sharedExplorationAndBackup =
+                    globalFirstSelections == std::vector<int>{0, 1}
+                    && globalSelectionNodes[0].visits == 2
+                    && globalSelectionNodes[0].edges[0].visits == 1
+                    && globalSelectionNodes[0].edges[1].visits == 1
+                    && globalSelectionNodes[0].edges[0].valueSum == 0.25
+                    && globalSelectionNodes[0].edges[1].valueSum == 0.75
+                    && conceptualParticleContributors.size() == 2
+                    && allFirstSelections == std::vector<int>{0, 1, 2}
+                    && allEdgeNodes[0].visits == 3;
+
+            pybind11::dict result;
+            result["schema_id"] = "native-t114-shared-public-belief-search-audit-v1";
+            result["synthetic_only"] = true;
+            result["real_scientific_state_invoked"] = false;
+            result["prepared_particle_count"] = static_cast<int>(firstParticleFingerprints.size());
+            result["exact_T096_root_projection_parity"] = sameProjectionAcrossPool;
+            result["hidden_particle_diversity_private_only"] = hiddenParticleDiversity;
+            result["same_public_projection_shares_node_identity"] =
+                    samePublicNodeIdentityAcrossHiddenParticles;
+            result["prepared_pool_prefixes_2_4_8_16_are_nested"] =
+                    exactPreparedPoolPrefixes;
+            result["fixed_seed_schedule_is_deterministic_and_state_independent"] =
+                    fixedScheduleDeterministicAndStateIndependent;
+            result["fixed_seed_schedule_uses_unbiased_rejection_sampling"] =
+                    boundedScheduleDrawIsUnbiased;
+            result["missing_public_action_mapping_fails_closed"] = missingActionFailsClosed;
+            result["ambiguous_public_action_mapping_fails_closed"] = ambiguousActionFailsClosed;
+            result["incompatible_public_action_surface_fails_closed"] =
+                    incompatibleActionSurfaceFailsClosed;
+            result["changed_exact_public_projection_is_not_aliased"] =
+                    changedProjectionCollisionRejected && progressionChangesNodeIdentity;
+            result["native_missing_action_mapping_fails_closed"] =
+                    missingNativeMappingFailsClosed;
+            result["native_ambiguous_action_mapping_fails_closed"] =
+                    multipleNativeMappingFailsClosed;
+            result["shared_edge_global_exploration_and_backup"] =
+                    sharedExplorationAndBackup;
+            result["multiple_particles_contribute_to_one_shared_root"] =
+                    multipleParticlesContributedToSharedRoot;
+            result["same_seed_reconstructs_same_private_pool"] =
+                    deterministicPoolReconstruction;
+            result["same_inputs_reproduce_aggregate_report"] =
+                    deterministicAggregateReport;
+            result["potions_remain_auditable_but_excluded_and_unvalued"] =
+                    potionsRemainAuditableAndUnvalued;
+            result["output_uses_public_action_identity_only"] =
+                    publicRowsContainNoNativeActionBits;
+            result["no_per_particle_controller_output"] = noPerParticleOutput;
+            restore();
+            return result;
+        } catch (...) {
+            restore();
+            throw;
+        }
     }
 
     pybind11::dict snapshot() {
@@ -4482,6 +5457,7 @@ struct StepSimulator {
     }
 
     pybind11::dict step(const LightSpeedAction &action) {
+        clearT114ParticlePool();
         ensureBattleContext();
         if (action.scope == "battle") {
             if (!battleActive) {
@@ -4582,6 +5558,7 @@ struct StepSimulator {
             int hpBonus,
             bool addRandomPotion,
             int targetEncounterId) {
+        clearT114ParticlePool();
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error("battle-start transform requested outside battle");
@@ -4637,6 +5614,7 @@ struct StepSimulator {
     }
 
     pybind11::dict restoreCheckpoint(const StepSimulatorCheckpoint &checkpoint) {
+        clearT114ParticlePool();
         gc = checkpoint.gc;
         if (gc.map != nullptr) {
             gc.map = std::make_shared<Map>(*gc.map);
@@ -4695,6 +5673,16 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
         .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
         .def("t096_visibility_audit", &StepSimulator::t096VisibilityAudit)
+        .def("t114_shared_public_belief_search_audit",
+                &StepSimulator::t114SharedPublicBeliefSearchAudit)
+        .def("t114_prepare_shared_public_belief_particle_pool",
+                &StepSimulator::t114PrepareSharedPublicBeliefParticlePool,
+                pybind11::arg("particle_seed_input"))
+        .def("t114_shared_public_belief_search",
+                &StepSimulator::t114SharedPublicBeliefSearch,
+                pybind11::arg("search_seed_input"),
+                pybind11::arg("particle_count"),
+                pybind11::arg("simulation_budget"))
         .def(
             "sample_hidden_future_particles",
             &StepSimulator::sampleHiddenFutureParticles,
