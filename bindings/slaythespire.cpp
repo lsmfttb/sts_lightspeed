@@ -1919,10 +1919,20 @@ struct StepSimulator {
             pybind11::dict row;
             row["action"] = identity;
             const int edgeIdx = rootSurface.occurrenceMapping.publicToEdge.at(legalIdx);
+            row["shared_edge_index"] = edgeIdx >= 0
+                    ? pybind11::object(pybind11::int_(edgeIdx))
+                    : pybind11::object(pybind11::none());
+            row["mapping_mode"] = edgeIdx >= 0
+                    ? pybind11::object(pybind11::str(
+                            rootSurface.occurrenceMapping.mappingModes.at(legalIdx)))
+                    : pybind11::object(pybind11::none());
+            row["mapping_classification"] =
+                    rootSurface.occurrenceMapping.mappingClassifications.at(legalIdx);
             if (edgeIdx < 0) {
                 row["classification"] = "configuration_excluded";
                 row["exclusion_reason"] = rootSurface.occurrenceMapping
                         .configurationExclusionReasons.at(legalIdx);
+                row["shared_edge_action"] = pybind11::none();
                 row["visits"] = 0;
                 row["evaluation_sum"] = pybind11::none();
                 row["mean_value"] = pybind11::none();
@@ -1930,6 +1940,7 @@ struct StepSimulator {
                 const auto &edge = root.edges.at(static_cast<std::size_t>(edgeIdx));
                 row["classification"] = "searched_shared_edge";
                 row["exclusion_reason"] = pybind11::none();
+                row["shared_edge_action"] = edge.actionIdentity;
                 row["visits"] = edge.visits;
                 row["evaluation_sum"] = edge.visits > 0
                         ? pybind11::object(pybind11::float_(edge.valueSum))
@@ -2065,13 +2076,16 @@ struct StepSimulator {
             monster.maxHp = 8;
             monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
             monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
-            bc.cards.cardsInHand = 2;
+            bc.cards.cardsInHand = 3;
             CardInstance strike(CardId::STRIKE_RED);
             strike.setUniqueId(9100);
             bc.cards.hand[0] = strike;
+            CardInstance duplicateStrike(CardId::STRIKE_RED);
+            duplicateStrike.setUniqueId(9102);
+            bc.cards.hand[1] = duplicateStrike;
             CardInstance defend(CardId::DEFEND_RED);
             defend.setUniqueId(9101);
-            bc.cards.hand[1] = defend;
+            bc.cards.hand[2] = defend;
             const std::array<CardId, 12> drawIds{
                     CardId::STRIKE_RED, CardId::DEFEND_RED, CardId::BASH,
                     CardId::HEADBUTT, CardId::ANGER, CardId::IRON_WAVE,
@@ -2248,9 +2262,74 @@ struct StepSimulator {
                     && firstSearch["shared_root_visits"].cast<std::int64_t>() == 2
                     && secondSearch["distinct_particles_used_aggregate"].cast<int>() == 2;
 
-            bool potionsRemainAuditableAndUnvalued = false;
-            bool publicRowsContainNoNativeActionBits = true;
+            bool everySearchedOccurrenceMapsToItsSharedClass = true;
+            bool everyExcludedOccurrenceRemainsUnvalued = true;
+            std::map<int, std::string> sharedClassIdentityByIndex;
+            std::map<int, int> occurrenceCountBySharedClass;
+            std::map<int, std::set<std::string>> mappingKindsBySharedClass;
             const auto outputRows = firstSearch["action_rows"].cast<pybind11::list>();
+            for (const auto &rowHandle : outputRows) {
+                const auto row = rowHandle.cast<pybind11::dict>();
+                const auto classification = row["classification"].cast<std::string>();
+                const auto action = row["action"].cast<pybind11::dict>();
+                if (classification == "configuration_excluded") {
+                    everyExcludedOccurrenceRemainsUnvalued =
+                            everyExcludedOccurrenceRemainsUnvalued
+                            && row["shared_edge_index"].is_none()
+                            && row["shared_edge_action"].is_none()
+                            && row["mapping_mode"].is_none()
+                            && row["mapping_classification"].cast<std::string>()
+                                    == "search_configuration_excluded"
+                            && row["visits"].cast<int>() == 0
+                            && row["evaluation_sum"].is_none()
+                            && row["mean_value"].is_none();
+                    continue;
+                }
+                if (row["shared_edge_index"].is_none()
+                        || row["shared_edge_action"].is_none()) {
+                    everySearchedOccurrenceMapsToItsSharedClass = false;
+                    continue;
+                }
+                const int edgeIdx = row["shared_edge_index"].cast<int>();
+                const auto edgeIdentity = row["shared_edge_action"].cast<pybind11::dict>();
+                const auto identityPayload = canonicalT114PublicJson(edgeIdentity);
+                const auto [identityIt, identityInserted] = sharedClassIdentityByIndex.emplace(
+                        edgeIdx, identityPayload);
+                everySearchedOccurrenceMapsToItsSharedClass =
+                        everySearchedOccurrenceMapsToItsSharedClass
+                        && edgeIdx >= 0
+                        && edgeIdx < firstSearch["root_search_edge_count"].cast<int>()
+                        && (identityInserted || identityIt->second == identityPayload);
+                if (row["mapping_classification"].cast<std::string>() == "searched_direct") {
+                    everySearchedOccurrenceMapsToItsSharedClass =
+                            everySearchedOccurrenceMapsToItsSharedClass
+                            && action.equal(edgeIdentity);
+                }
+                ++occurrenceCountBySharedClass[edgeIdx];
+                mappingKindsBySharedClass[edgeIdx].insert(
+                        row["mapping_classification"].cast<std::string>());
+            }
+            const int expectedSharedClassCount =
+                    firstSearch["root_search_edge_count"].cast<int>();
+            everySearchedOccurrenceMapsToItsSharedClass =
+                    everySearchedOccurrenceMapsToItsSharedClass
+                    && static_cast<int>(sharedClassIdentityByIndex.size())
+                            == expectedSharedClassCount;
+            bool equivalentDuplicateOccurrencesShareOneClass = false;
+            for (const auto &[edgeIdx, occurrenceCount] : occurrenceCountBySharedClass) {
+                const auto &mappingKinds = mappingKindsBySharedClass.at(edgeIdx);
+                equivalentDuplicateOccurrencesShareOneClass =
+                        equivalentDuplicateOccurrencesShareOneClass
+                        || (occurrenceCount >= 2
+                                && mappingKinds.find("searched_direct")
+                                        != mappingKinds.end()
+                                && mappingKinds.find(
+                                        "searched_mechanical_duplicate_card_occurrence")
+                                        != mappingKinds.end());
+            }
+
+            bool potionsRemainAuditableAndUnvalued = true;
+            bool publicRowsContainNoNativeActionBits = true;
             int potionRowCount = 0;
             for (const auto &rowHandle : outputRows) {
                 const auto row = rowHandle.cast<pybind11::dict>();
@@ -2261,8 +2340,11 @@ struct StepSimulator {
                 if (kind == "potion" || kind == "potion_discard") {
                     ++potionRowCount;
                     potionsRemainAuditableAndUnvalued =
-                            row["classification"].cast<std::string>()
+                            potionsRemainAuditableAndUnvalued
+                            && row["classification"].cast<std::string>()
                                     == "configuration_excluded"
+                            && row["shared_edge_index"].is_none()
+                            && row["shared_edge_action"].is_none()
                             && row["visits"].cast<int>() == 0
                             && row["evaluation_sum"].is_none()
                             && row["mean_value"].is_none();
@@ -2376,6 +2458,12 @@ struct StepSimulator {
                     deterministicAggregateReport;
             result["aggregate_shared_edge_count_covers_all_nodes"] =
                     reportsAllSharedEdges;
+            result["every_searched_occurrence_maps_to_its_shared_class"] =
+                    everySearchedOccurrenceMapsToItsSharedClass;
+            result["equivalent_duplicate_occurrences_share_one_class"] =
+                    equivalentDuplicateOccurrencesShareOneClass;
+            result["excluded_occurrences_have_null_unvalued_edge_rows"] =
+                    everyExcludedOccurrenceRemainsUnvalued;
             result["potions_remain_auditable_but_excluded_and_unvalued"] =
                     potionsRemainAuditableAndUnvalued;
             result["output_uses_public_action_identity_only"] =
