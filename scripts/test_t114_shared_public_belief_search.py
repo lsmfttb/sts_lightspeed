@@ -47,6 +47,7 @@ def main() -> int:
         "multiple_particles_contribute_to_one_shared_root",
         "same_seed_reconstructs_same_private_pool",
         "same_inputs_reproduce_aggregate_report",
+        "aggregate_shared_edge_count_covers_all_nodes",
         "potions_remain_auditable_but_excluded_and_unvalued",
         "output_uses_public_action_identity_only",
         "no_per_particle_controller_output",

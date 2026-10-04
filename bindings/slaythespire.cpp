@@ -1896,6 +1896,10 @@ struct StepSimulator {
         const auto stopped = std::chrono::steady_clock::now();
 
         const auto &root = nodes.front();
+        std::int64_t sharedEdgeCount = 0;
+        for (const auto &node : nodes) {
+            sharedEdgeCount += static_cast<std::int64_t>(node.edges.size());
+        }
         bool allRootEdgesVisited = true;
         for (const auto &edge : root.edges) {
             allRootEdgesVisited = allRootEdgesVisited && edge.visits > 0;
@@ -1965,6 +1969,7 @@ struct StepSimulator {
         report["root_public_projection"] = rootSurface.projection;
         report["root_public_action_count"] = static_cast<int>(rootLegalActions.size());
         report["root_search_edge_count"] = static_cast<int>(root.edges.size());
+        report["shared_edge_count"] = sharedEdgeCount;
         report["root_configuration_excluded_count"] =
                 rootSurface.configurationExcludedCount;
         report["particle_seed_input"] = t114ParticleSeedInput;
@@ -2234,6 +2239,10 @@ struct StepSimulator {
             }
             const bool deterministicAggregateReport =
                     firstSearchCore.equal(secondSearchCore);
+            const bool reportsAllSharedEdges =
+                    firstSearch["shared_node_count"].cast<int>() > 1
+                    && firstSearch["shared_edge_count"].cast<std::int64_t>()
+                            > firstSearch["root_search_edge_count"].cast<std::int64_t>();
             const bool multipleParticlesContributedToSharedRoot =
                     firstSearch["distinct_particles_used_aggregate"].cast<int>() == 2
                     && firstSearch["shared_root_visits"].cast<std::int64_t>() == 2
@@ -2365,6 +2374,8 @@ struct StepSimulator {
                     deterministicPoolReconstruction;
             result["same_inputs_reproduce_aggregate_report"] =
                     deterministicAggregateReport;
+            result["aggregate_shared_edge_count_covers_all_nodes"] =
+                    reportsAllSharedEdges;
             result["potions_remain_auditable_but_excluded_and_unvalued"] =
                     potionsRemainAuditableAndUnvalued;
             result["output_uses_public_action_identity_only"] =
