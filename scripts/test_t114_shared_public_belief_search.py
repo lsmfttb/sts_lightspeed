@@ -43,9 +43,22 @@ def main() -> int:
         "changed_exact_public_projection_is_not_aliased",
         "native_missing_action_mapping_fails_closed",
         "native_ambiguous_action_mapping_fails_closed",
+        "root_precheck_failure_stage_and_cause_are_allowlisted",
+        "inconsistent_exact_fact_failure_is_classified",
+        "missing_action_mapping_failure_is_classified",
+        "ambiguous_action_mapping_failure_is_classified",
+        "incompatible_action_surface_failure_is_classified",
+        "invalid_action_execution_failure_is_classified",
         "shared_edge_global_exploration_and_backup",
         "multiple_particles_contribute_to_one_shared_root",
         "same_seed_reconstructs_same_private_pool",
+        "wild_strike_random_insertion_transition_reached",
+        "wild_strike_node_surface_reports_unsupported_fidelity",
+        "wild_strike_child_surface_reports_unsupported_fidelity",
+        "failure_diagnostic_contains_only_allowlisted_fields",
+        "failure_diagnostic_does_not_expose_private_state_rng_or_exception_text",
+        "arbitrary_native_exception_text_is_not_exported",
+        "report_build_failure_stage_is_allowlisted",
         "same_inputs_reproduce_aggregate_report",
         "aggregate_shared_edge_count_covers_all_nodes",
         "every_searched_occurrence_maps_to_its_shared_class",
@@ -64,6 +77,9 @@ def main() -> int:
         raise AssertionError("T114 audit did not prepare the exact N=16 private root pool")
     if audit.get("real_scientific_state_invoked") is not False:
         raise AssertionError("T114 audit unexpectedly invoked a real scientific state")
+    diagnostic = simulator.t114_last_search_failure_diagnostic()
+    if diagnostic.get("status") != "NO_FAILURE_RECORDED":
+        raise AssertionError("T114 synthetic audit leaked its internal test diagnostic")
 
     print("T114_SHARED_PUBLIC_BELIEF_SEARCH_AUDIT_PASS")
     for name in required:

@@ -1160,6 +1160,92 @@ struct StepSimulator {
         std::vector<std::vector<int>> edgeToPublic;
     };
 
+    enum class T114FailureStage {
+        ROOT_PRECHECK,
+        SIM_NODE_SURFACE,
+        SIM_ACTION_MAP,
+        SIM_ACTION_EXECUTE,
+        CHILD_SURFACE,
+        ROLLOUT,
+        REPORT_BUILD,
+    };
+
+    enum class T114FailureCause {
+        NATIVE_OPERATION_FAILED,
+        INVALID_REQUEST,
+        UNSUPPORTED_FIDELITY,
+        INCONSISTENT_EXACT_FACT,
+        EMPTY_ACTION_SURFACE,
+        ACTION_MAPPING_MISSING,
+        ACTION_MAPPING_AMBIGUOUS,
+        ACTION_MAPPING_INVALID,
+        ACTION_SURFACE_INCOMPATIBLE,
+        ACTION_INVALID,
+        TREE_DEPTH_EXCEEDED,
+    };
+
+    enum class T114PublicReasonClass {
+        UNKNOWN_INSERTION,
+        SUBSET_MEMBERSHIP,
+        INCONSISTENT_EXACT_FACT,
+        UNSUPPORTED_FIDELITY,
+    };
+
+    struct T114SearchFailure : std::runtime_error {
+        T114FailureStage stage;
+        T114FailureCause cause;
+        std::vector<T114PublicReasonClass> publicReasonClasses;
+
+        T114SearchFailure(
+                const T114FailureStage failureStage,
+                const T114FailureCause failureCause,
+                std::vector<T114PublicReasonClass> publicReasons = {})
+                : std::runtime_error("T114 shared search failure"),
+                  stage(failureStage), cause(failureCause),
+                  publicReasonClasses(std::move(publicReasons)) {}
+    };
+
+    static const char *t114FailureStageName(const T114FailureStage stage) {
+        switch (stage) {
+            case T114FailureStage::ROOT_PRECHECK: return "ROOT_PRECHECK";
+            case T114FailureStage::SIM_NODE_SURFACE: return "SIM_NODE_SURFACE";
+            case T114FailureStage::SIM_ACTION_MAP: return "SIM_ACTION_MAP";
+            case T114FailureStage::SIM_ACTION_EXECUTE: return "SIM_ACTION_EXECUTE";
+            case T114FailureStage::CHILD_SURFACE: return "CHILD_SURFACE";
+            case T114FailureStage::ROLLOUT: return "ROLLOUT";
+            case T114FailureStage::REPORT_BUILD: return "REPORT_BUILD";
+        }
+        return "ROOT_PRECHECK";
+    }
+
+    static const char *t114FailureCauseName(const T114FailureCause cause) {
+        switch (cause) {
+            case T114FailureCause::NATIVE_OPERATION_FAILED: return "NATIVE_OPERATION_FAILED";
+            case T114FailureCause::INVALID_REQUEST: return "INVALID_REQUEST";
+            case T114FailureCause::UNSUPPORTED_FIDELITY: return "UNSUPPORTED_FIDELITY";
+            case T114FailureCause::INCONSISTENT_EXACT_FACT: return "INCONSISTENT_EXACT_FACT";
+            case T114FailureCause::EMPTY_ACTION_SURFACE: return "EMPTY_ACTION_SURFACE";
+            case T114FailureCause::ACTION_MAPPING_MISSING: return "ACTION_MAPPING_MISSING";
+            case T114FailureCause::ACTION_MAPPING_AMBIGUOUS: return "ACTION_MAPPING_AMBIGUOUS";
+            case T114FailureCause::ACTION_MAPPING_INVALID: return "ACTION_MAPPING_INVALID";
+            case T114FailureCause::ACTION_SURFACE_INCOMPATIBLE: return "ACTION_SURFACE_INCOMPATIBLE";
+            case T114FailureCause::ACTION_INVALID: return "ACTION_INVALID";
+            case T114FailureCause::TREE_DEPTH_EXCEEDED: return "TREE_DEPTH_EXCEEDED";
+        }
+        return "NATIVE_OPERATION_FAILED";
+    }
+
+    static const char *t114PublicReasonClassName(
+            const T114PublicReasonClass reason) {
+        switch (reason) {
+            case T114PublicReasonClass::UNKNOWN_INSERTION: return "unknown_insertion";
+            case T114PublicReasonClass::SUBSET_MEMBERSHIP: return "subset_membership";
+            case T114PublicReasonClass::INCONSISTENT_EXACT_FACT: return "inconsistent_exact_fact";
+            case T114PublicReasonClass::UNSUPPORTED_FIDELITY: return "unsupported_fidelity";
+        }
+        return "unsupported_fidelity";
+    }
+
     struct T114ActionSurface {
         pybind11::dict projection;
         std::string projectionPayload;
@@ -1208,6 +1294,79 @@ struct StepSimulator {
     std::string t114PoolRootProjectionPayload;
     pybind11::dict t114PoolRootProjection;
     double t114ParticlePoolBuildWallSeconds = 0.0;
+    pybind11::dict lastT114SearchFailureDiagnostic;
+
+    static std::vector<T114PublicReasonClass> t114UnsupportedReasonClasses(
+            const BattleContext &state) {
+        std::vector<T114PublicReasonClass> reasons;
+        const auto addUnique = [&reasons](const T114PublicReasonClass value) {
+            if (std::find(reasons.begin(), reasons.end(), value) == reasons.end()) {
+                reasons.push_back(value);
+            }
+        };
+        const auto drawReasons = state.knownDrawUnsupportedReasons;
+        if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)) {
+            addUnique(T114PublicReasonClass::UNKNOWN_INSERTION);
+        }
+        if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::SUBSET_MEMBERSHIP)) {
+            addUnique(T114PublicReasonClass::SUBSET_MEMBERSHIP);
+        }
+        if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT)) {
+            addUnique(T114PublicReasonClass::INCONSISTENT_EXACT_FACT);
+        }
+        if (!knownDrawStateConsistent(state)) {
+            addUnique(T114PublicReasonClass::INCONSISTENT_EXACT_FACT);
+        }
+        for (int idx = 0; idx < state.monsters.monsterCount; ++idx) {
+            if (classifyMonsterMiscKnowledge(state, state.monsters.arr[idx])
+                    == MonsterMiscKnowledgeClass::MIXED_UNSUPPORTED) {
+                addUnique(T114PublicReasonClass::UNSUPPORTED_FIDELITY);
+                break;
+            }
+        }
+        if (reasons.empty()) {
+            addUnique(T114PublicReasonClass::UNSUPPORTED_FIDELITY);
+        }
+        return reasons;
+    }
+
+    void recordT114SearchFailure(
+            const T114FailureStage stage,
+            const T114FailureCause cause,
+            const std::vector<T114PublicReasonClass> &publicReasons = {}) {
+        pybind11::dict diagnostic;
+        diagnostic["schema_id"] = "native-t114-search-failure-diagnostic-v1";
+        diagnostic["failure_stage"] = t114FailureStageName(stage);
+        diagnostic["failure_cause_code"] = t114FailureCauseName(cause);
+        pybind11::list reasons;
+        for (const auto reason : publicReasons) {
+            reasons.append(t114PublicReasonClassName(reason));
+        }
+        diagnostic["public_reason_classes"] = reasons;
+        diagnostic["raw_exception_text_exposed"] = false;
+        diagnostic["private_simulator_state_exposed"] = false;
+        diagnostic["rng_or_hidden_draw_order_exposed"] = false;
+        lastT114SearchFailureDiagnostic = std::move(diagnostic);
+    }
+
+    void recordUnhandledT114SearchFailure(const T114FailureStage stage) {
+        recordT114SearchFailure(
+                stage, T114FailureCause::NATIVE_OPERATION_FAILED);
+    }
+
+    pybind11::dict t114LastSearchFailureDiagnostic() const {
+        pybind11::dict result;
+        if (lastT114SearchFailureDiagnostic.empty()) {
+            result["schema_id"] = "native-t114-search-failure-diagnostic-v1";
+            result["status"] = "NO_FAILURE_RECORDED";
+            return result;
+        }
+        for (const auto &item : lastT114SearchFailureDiagnostic) {
+            result[item.first] = item.second;
+        }
+        result["status"] = "FAILED";
+        return result;
+    }
 
     StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {
         beginParticleSearchStageTrace();
@@ -1347,6 +1506,7 @@ struct StepSimulator {
         bc = BattleContext();
         battleActive = false;
         clearT114ParticlePool();
+        lastT114SearchFailureDiagnostic = pybind11::dict();
         beginParticleSearchStageTrace();
         lastParticleSearchStageDiagnostics["attempt_status"] = "not_attempted";
     }
@@ -1472,10 +1632,14 @@ struct StepSimulator {
                 + frameT114Payload(publicProgression);
     }
 
-    T114ActionSurface buildT114ActionSurface(const BattleContext &state) const {
+    T114ActionSurface buildT114ActionSurface(
+            const BattleContext &state,
+            const T114FailureStage failureStage = T114FailureStage::ROOT_PRECHECK) const {
         if (publicInformationUnsupported(state)) {
-            throw std::runtime_error(
-                    "T114 shared search unavailable: unsupported public information fidelity");
+            throw T114SearchFailure(
+                    failureStage,
+                    T114FailureCause::UNSUPPORTED_FIDELITY,
+                    t114UnsupportedReasonClasses(state));
         }
         T114ActionSurface surface;
         surface.publicActions = publicBattleActions(state);
@@ -1483,8 +1647,10 @@ struct StepSimulator {
                 gc, state, surface.publicActions);
         if (surface.projection["information_fidelity"].cast<std::string>()
                 != "supported") {
-            throw std::runtime_error(
-                    "T114 shared search unavailable: T096 projection is unsupported");
+            throw T114SearchFailure(
+                    failureStage,
+                    T114FailureCause::UNSUPPORTED_FIDELITY,
+                    t114UnsupportedReasonClasses(state));
         }
         surface.projectionPayload = canonicalT114PublicJson(surface.projection);
 
@@ -1497,15 +1663,20 @@ struct StepSimulator {
         searcher.actionExecutionCount = 0;
         searcher.enumerateActionsForNode(searcher.root, state, false);
         if (searcher.root.edges.empty()) {
-            throw std::runtime_error(
-                    "T114 shared search found no eligible Search-v2 public actions");
+            throw T114SearchFailure(
+                    failureStage, T114FailureCause::EMPTY_ACTION_SURFACE);
         }
         pybind11::dict mappingDiagnostic;
-        surface.occurrenceMapping = validateSearchRootMapping(
-                state,
-                searcher,
-                mappingDiagnostic,
-                ParticleSearchFailureInjection::NONE);
+        try {
+            surface.occurrenceMapping = validateSearchRootMapping(
+                    state,
+                    searcher,
+                    mappingDiagnostic,
+                    ParticleSearchFailureInjection::NONE);
+        } catch (...) {
+            throw T114SearchFailure(
+                    failureStage, T114FailureCause::ACTION_MAPPING_INVALID);
+        }
         surface.configurationExcludedCount = mappingDiagnostic[
                 "configuration_excluded_public_occurrence_count"].cast<int>();
 
@@ -1518,8 +1689,8 @@ struct StepSimulator {
             auto key = canonicalT114PublicJson(identity);
             if (std::find(surface.actionKeys.begin(), surface.actionKeys.end(), key)
                     != surface.actionKeys.end()) {
-                throw std::runtime_error(
-                        "T114 shared Search-v2 edge has an ambiguous public action identity");
+                throw T114SearchFailure(
+                        failureStage, T114FailureCause::ACTION_MAPPING_AMBIGUOUS);
             }
             surface.actions.push_back(edge.action);
             surface.actionKeys.push_back(std::move(key));
@@ -1537,16 +1708,28 @@ struct StepSimulator {
                 continue;
             }
             if (found >= 0) {
-                throw std::runtime_error(
-                        "T114 public action mapping is ambiguous across compatible particles");
+                throw T114SearchFailure(
+                        T114FailureStage::SIM_ACTION_MAP,
+                        T114FailureCause::ACTION_MAPPING_AMBIGUOUS);
             }
             found = idx;
         }
         if (found < 0) {
-            throw std::runtime_error(
-                    "T114 public action mapping is missing in a compatible particle");
+            throw T114SearchFailure(
+                    T114FailureStage::SIM_ACTION_MAP,
+                    T114FailureCause::ACTION_MAPPING_MISSING);
         }
         return found;
+    }
+
+    static void validateT114ActionForExecution(
+            const search::Action &action,
+            const BattleContext &state) {
+        if (!action.isValidAction(state)) {
+            throw T114SearchFailure(
+                    T114FailureStage::SIM_ACTION_EXECUTE,
+                    T114FailureCause::ACTION_INVALID);
+        }
     }
 
     static std::uint64_t drawT114UniformBounded(
@@ -1621,21 +1804,25 @@ struct StepSimulator {
         if (node.publicProjectionPayload != surface.projectionPayload
                 || node.actionKeys != surface.actionKeys
                 || node.edges.size() != surface.actionKeys.size()) {
-            throw std::runtime_error(
-                    "T114 shared public node/action surface changed across compatible particles");
+            throw T114SearchFailure(
+                    T114FailureStage::SIM_ACTION_MAP,
+                    T114FailureCause::ACTION_SURFACE_INCOMPATIBLE);
         }
         for (std::size_t idx = 0; idx < node.edges.size(); ++idx) {
             if (node.edges[idx].actionKey != surface.actionKeys[idx]
                     || !node.edges[idx].actionIdentity.equal(surface.identities[idx])) {
-                throw std::runtime_error(
-                        "T114 shared public edge identity collision rejected by exact payload check");
+                throw T114SearchFailure(
+                        T114FailureStage::SIM_ACTION_MAP,
+                        T114FailureCause::ACTION_SURFACE_INCOMPATIBLE);
             }
         }
     }
 
     static int selectT114SharedEdge(T114SharedNode &node) {
         if (node.edges.empty()) {
-            throw std::runtime_error("T114 shared public node has no configured actions");
+            throw T114SearchFailure(
+                    T114FailureStage::SIM_ACTION_MAP,
+                    T114FailureCause::EMPTY_ACTION_SURFACE);
         }
         for (int idx = 0; idx < static_cast<int>(node.edges.size()); ++idx) {
             if (node.edges[static_cast<std::size_t>(idx)].visits == 0) {
@@ -1748,35 +1935,66 @@ struct StepSimulator {
             const std::uint64_t searchSeedInput,
             const int particleCount,
             const std::int64_t simulationBudget) {
+        lastT114SearchFailureDiagnostic = pybind11::dict();
+        auto failureStage = T114FailureStage::ROOT_PRECHECK;
+        try {
+            return t114SharedPublicBeliefSearchImpl(
+                    searchSeedInput, particleCount, simulationBudget, failureStage);
+        } catch (const T114SearchFailure &failure) {
+            recordT114SearchFailure(
+                    failure.stage, failure.cause, failure.publicReasonClasses);
+            throw std::runtime_error(
+                    "T114 shared search failed; inspect allowlisted failure diagnostic");
+        } catch (...) {
+            recordUnhandledT114SearchFailure(failureStage);
+            throw std::runtime_error(
+                    "T114 shared search failed; inspect allowlisted failure diagnostic");
+        }
+    }
+
+    pybind11::dict t114SharedPublicBeliefSearchImpl(
+            const std::uint64_t searchSeedInput,
+            const int particleCount,
+            const std::int64_t simulationBudget,
+            T114FailureStage &failureStage) {
         ensureBattleContext();
         if (!battleActive) {
-            throw std::runtime_error("T114 shared search requested outside battle");
+            throw T114SearchFailure(
+                    failureStage, T114FailureCause::INVALID_REQUEST);
         }
         if (!t114ParticlePoolReady || t114ParticlePool.size() != 16) {
-            throw std::runtime_error(
-                    "T114 shared search requires one prepared 16-particle root pool");
+            throw T114SearchFailure(
+                    failureStage, T114FailureCause::INVALID_REQUEST);
         }
         if (particleCount != 2 && particleCount != 4
                 && particleCount != 8 && particleCount != 16) {
-            throw std::invalid_argument(
-                    "T114 particle_count must be one of 2, 4, 8, or 16");
+            throw T114SearchFailure(
+                    failureStage, T114FailureCause::INVALID_REQUEST);
         }
         if (simulationBudget <= 0 || simulationBudget > 1600) {
-            throw std::invalid_argument(
-                    "T114 simulation_budget must be in [1, 1600]");
+            throw T114SearchFailure(
+                    failureStage, T114FailureCause::INVALID_REQUEST);
         }
         if (publicInformationUnsupported(bc)) {
-            throw std::runtime_error("T114 shared search unavailable: unsupported_fidelity");
+            throw T114SearchFailure(
+                    failureStage,
+                    T114FailureCause::UNSUPPORTED_FIDELITY,
+                    t114UnsupportedReasonClasses(bc));
         }
         const auto started = std::chrono::steady_clock::now();
-        const auto rootSurface = buildT114ActionSurface(bc);
+        failureStage = T114FailureStage::ROOT_PRECHECK;
+        const auto rootSurface = buildT114ActionSurface(
+                bc, T114FailureStage::ROOT_PRECHECK);
         if (rootSurface.projectionPayload != t114PoolRootProjectionPayload
                 || !rootSurface.projection.equal(t114PoolRootProjection)) {
-            throw std::runtime_error(
-                    "T114 prepared particle pool does not match the current exact public root");
+            throw T114SearchFailure(
+                    failureStage,
+                    T114FailureCause::INCONSISTENT_EXACT_FACT,
+                    {T114PublicReasonClass::INCONSISTENT_EXACT_FACT});
         }
         if (rootSurface.actionKeys.empty()) {
-            throw std::runtime_error("T114 shared root has no Search-v2 public actions");
+            throw T114SearchFailure(
+                    failureStage, T114FailureCause::EMPTY_ACTION_SURFACE);
         }
 
         std::vector<T114SharedNode> nodes;
@@ -1816,7 +2034,10 @@ struct StepSimulator {
                     completed = true;
                     break;
                 }
-                const auto surface = buildT114ActionSurface(state);
+                failureStage = T114FailureStage::SIM_NODE_SURFACE;
+                const auto surface = buildT114ActionSurface(
+                        state, T114FailureStage::SIM_NODE_SURFACE);
+                failureStage = T114FailureStage::SIM_ACTION_MAP;
                 auto &node = nodes.at(static_cast<std::size_t>(nodeIdx));
                 validateT114NodeSurface(node, surface);
                 const int edgeIdx = selectT114SharedEdge(node);
@@ -1826,11 +2047,9 @@ struct StepSimulator {
                 const int mappedActionIdx = findUniqueT114Action(
                         surface.actionKeys, requestedKey);
                 auto action = surface.actions[static_cast<std::size_t>(mappedActionIdx)];
-                if (!action.isValidAction(state)) {
-                    throw std::runtime_error(
-                            "T114 shared public action failed native validity in a compatible particle");
-                }
+                validateT114ActionForExecution(action, state);
                 path.emplace_back(nodeIdx, edgeIdx);
+                failureStage = T114FailureStage::SIM_ACTION_EXECUTE;
                 action.execute(state);
                 ++nativeSimulatorSteps;
 
@@ -1840,7 +2059,9 @@ struct StepSimulator {
                     break;
                 }
 
-                const auto childSurface = buildT114ActionSurface(state);
+                failureStage = T114FailureStage::CHILD_SURFACE;
+                const auto childSurface = buildT114ActionSurface(
+                        state, T114FailureStage::CHILD_SURFACE);
                 const auto actionPayload = requestedKey;
                 publicProgression += frameT114Payload(actionPayload);
                 publicProgression += frameT114Payload(childSurface.projectionPayload);
@@ -1858,6 +2079,7 @@ struct StepSimulator {
                     if (state.outcome != Outcome::UNDECIDED) {
                         evaluation = search::BattleScumSearcher2::evaluateEndState(state);
                     } else {
+                        failureStage = T114FailureStage::ROLLOUT;
                         search::BattleScumSearcher2 rollout(state);
                         rollout.includePotions = false;
                         rollout.policyPriorFnc = {};
@@ -1883,18 +2105,23 @@ struct StepSimulator {
                 const auto &child = nodes.at(static_cast<std::size_t>(nodeIdx));
                 if (child.publicProjectionPayload != childSurface.projectionPayload
                         || child.publicProgression != publicProgression) {
-                    throw std::runtime_error(
-                            "T114 public node collision rejected by exact canonical payload equality");
+                    throw T114SearchFailure(
+                            T114FailureStage::CHILD_SURFACE,
+                            T114FailureCause::INCONSISTENT_EXACT_FACT,
+                            {T114PublicReasonClass::INCONSISTENT_EXACT_FACT});
                 }
             }
             if (!completed) {
-                throw std::runtime_error(
-                        "T114 shared search exceeded its bounded public tree depth");
+                throw T114SearchFailure(
+                        T114FailureStage::SIM_NODE_SURFACE,
+                        T114FailureCause::TREE_DEPTH_EXCEEDED);
             }
+            failureStage = T114FailureStage::SIM_ACTION_MAP;
             backupT114SharedPath(nodes, path, evaluation);
         }
         const auto stopped = std::chrono::steady_clock::now();
 
+        failureStage = T114FailureStage::REPORT_BUILD;
         const auto &root = nodes.front();
         std::int64_t sharedEdgeCount = 0;
         for (const auto &node : nodes) {
@@ -2042,6 +2269,7 @@ struct StepSimulator {
         const auto savedRootPayload = t114PoolRootProjectionPayload;
         const auto savedRootProjection = t114PoolRootProjection;
         const auto savedPoolWallSeconds = t114ParticlePoolBuildWallSeconds;
+        const auto savedFailureDiagnostic = lastT114SearchFailureDiagnostic;
         const auto restore = [&]() {
             gc = savedGc;
             bc = savedBc;
@@ -2052,6 +2280,7 @@ struct StepSimulator {
             t114PoolRootProjectionPayload = savedRootPayload;
             t114PoolRootProjection = savedRootProjection;
             t114ParticlePoolBuildWallSeconds = savedPoolWallSeconds;
+            lastT114SearchFailureDiagnostic = savedFailureDiagnostic;
         };
 
         try {
@@ -2166,11 +2395,23 @@ struct StepSimulator {
                     baseSurface.projectionPayload, "", baseSurface);
             bool missingActionFailsClosed = false;
             bool ambiguousActionFailsClosed = false;
+            bool missingActionDiagnosticClassified = false;
+            bool ambiguousActionDiagnosticClassified = false;
             try {
                 (void) findUniqueT114Action(
                         baseSurface.actionKeys, "t114-missing-public-action");
-            } catch (const std::runtime_error &) {
+            } catch (const T114SearchFailure &failure) {
                 missingActionFailsClosed = true;
+                recordT114SearchFailure(
+                        failure.stage,
+                        failure.cause,
+                        failure.publicReasonClasses);
+                const auto diagnostic = t114LastSearchFailureDiagnostic();
+                missingActionDiagnosticClassified =
+                        diagnostic["failure_stage"].cast<std::string>()
+                                == "SIM_ACTION_MAP"
+                        && diagnostic["failure_cause_code"].cast<std::string>()
+                                == "ACTION_MAPPING_MISSING";
             }
             if (!baseSurface.actionKeys.empty()) {
                 try {
@@ -2178,8 +2419,18 @@ struct StepSimulator {
                             {baseSurface.actionKeys.front(),
                                     baseSurface.actionKeys.front()},
                             baseSurface.actionKeys.front());
-                } catch (const std::runtime_error &) {
+                } catch (const T114SearchFailure &failure) {
                     ambiguousActionFailsClosed = true;
+                    recordT114SearchFailure(
+                            failure.stage,
+                            failure.cause,
+                            failure.publicReasonClasses);
+                    const auto diagnostic = t114LastSearchFailureDiagnostic();
+                    ambiguousActionDiagnosticClassified =
+                            diagnostic["failure_stage"].cast<std::string>()
+                                    == "SIM_ACTION_MAP"
+                            && diagnostic["failure_cause_code"].cast<std::string>()
+                                    == "ACTION_MAPPING_AMBIGUOUS";
                 }
             }
             auto incompatibleSurface = baseSurface;
@@ -2187,11 +2438,68 @@ struct StepSimulator {
                 incompatibleSurface.actionKeys.front() += "|incompatible";
             }
             bool incompatibleActionSurfaceFailsClosed = false;
+            bool incompatibleActionSurfaceDiagnosticClassified = false;
             try {
                 validateT114NodeSurface(fixtureNode, incompatibleSurface);
-            } catch (const std::runtime_error &) {
+            } catch (const T114SearchFailure &failure) {
                 incompatibleActionSurfaceFailsClosed = true;
+                recordT114SearchFailure(
+                        failure.stage,
+                        failure.cause,
+                        failure.publicReasonClasses);
+                const auto diagnostic = t114LastSearchFailureDiagnostic();
+                incompatibleActionSurfaceDiagnosticClassified =
+                        diagnostic["failure_stage"].cast<std::string>()
+                                == "SIM_ACTION_MAP"
+                        && diagnostic["failure_cause_code"].cast<std::string>()
+                                == "ACTION_SURFACE_INCOMPATIBLE";
             }
+            bool invalidActionDiagnosticClassified = false;
+            try {
+                validateT114ActionForExecution(
+                        search::Action(search::ActionType::CARD, 99, 0), bc);
+            } catch (const T114SearchFailure &failure) {
+                recordT114SearchFailure(
+                        failure.stage,
+                        failure.cause,
+                        failure.publicReasonClasses);
+                const auto diagnostic = t114LastSearchFailureDiagnostic();
+                invalidActionDiagnosticClassified =
+                        diagnostic["failure_stage"].cast<std::string>()
+                                == "SIM_ACTION_EXECUTE"
+                        && diagnostic["failure_cause_code"].cast<std::string>()
+                                == "ACTION_INVALID";
+            }
+            bool rootPrecheckDiagnosticClassified = false;
+            try {
+                (void) t114SharedPublicBeliefSearch(searchSeed, 3, 2);
+            } catch (const std::runtime_error &) {
+                const auto diagnostic = t114LastSearchFailureDiagnostic();
+                rootPrecheckDiagnosticClassified =
+                        diagnostic["failure_stage"].cast<std::string>()
+                                == "ROOT_PRECHECK"
+                        && diagnostic["failure_cause_code"].cast<std::string>()
+                                == "INVALID_REQUEST";
+            }
+            const auto savedPoolRootPayload = t114PoolRootProjectionPayload;
+            t114PoolRootProjectionPayload += "|synthetic-inconsistent-exact-fact";
+            bool inconsistentExactFactDiagnosticClassified = false;
+            try {
+                (void) t114SharedPublicBeliefSearch(searchSeed, 2, 1);
+            } catch (const std::runtime_error &) {
+                const auto diagnostic = t114LastSearchFailureDiagnostic();
+                const auto reasons = diagnostic["public_reason_classes"]
+                        .cast<pybind11::list>();
+                inconsistentExactFactDiagnosticClassified =
+                        diagnostic["failure_stage"].cast<std::string>()
+                                == "ROOT_PRECHECK"
+                        && diagnostic["failure_cause_code"].cast<std::string>()
+                                == "INCONSISTENT_EXACT_FACT"
+                        && reasons.size() == 1
+                        && reasons[0].cast<std::string>()
+                                == "inconsistent_exact_fact";
+            }
+            t114PoolRootProjectionPayload = savedPoolRootPayload;
             auto alteredProjectionSurface = baseSurface;
             alteredProjectionSurface.projectionPayload += "|altered-public-payload";
             bool changedProjectionCollisionRejected = false;
@@ -2369,6 +2677,114 @@ struct StepSimulator {
                         t114ParticlePool[idx].state) == firstParticleFingerprints[idx];
             }
 
+            auto wildStrikeState = bc;
+            wildStrikeState.cards.cardsInHand = 1;
+            CardInstance wildStrike(CardId::WILD_STRIKE);
+            wildStrike.setUniqueId(9999);
+            wildStrikeState.cards.hand[0] = wildStrike;
+            wildStrikeState.player.energy = 3;
+            wildStrikeState.monsters.arr[0].curHp = 100;
+            wildStrikeState.monsters.arr[0].maxHp = 100;
+            const search::Action wildStrikeAction(
+                    search::ActionType::CARD, 0, 0);
+            bool randomInsertionTransitionReached = false;
+            bool wildStrikeNodeSurfaceClassified = false;
+            bool wildStrikeChildSurfaceClassified = false;
+            bool failureDiagnosticContainsOnlyAllowlistedFields = false;
+            bool failureDiagnosticDoesNotExposePrivateData = false;
+            bool arbitraryExceptionTextNotExported = false;
+            if (wildStrikeAction.isValidAction(wildStrikeState)) {
+                wildStrikeAction.execute(wildStrikeState);
+                const auto unknownInsertionBit = static_cast<std::uint8_t>(
+                        DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION);
+                randomInsertionTransitionReached =
+                        (wildStrikeState.knownDrawUnsupportedReasons
+                                & unknownInsertionBit) != 0;
+                if (randomInsertionTransitionReached) {
+                    try {
+                        (void) buildT114ActionSurface(
+                                wildStrikeState,
+                                T114FailureStage::SIM_NODE_SURFACE);
+                    } catch (const T114SearchFailure &failure) {
+                        recordT114SearchFailure(
+                                failure.stage,
+                                failure.cause,
+                                failure.publicReasonClasses);
+                        const auto diagnostic = t114LastSearchFailureDiagnostic();
+                        const auto reasons = diagnostic["public_reason_classes"]
+                                .cast<pybind11::list>();
+                        wildStrikeNodeSurfaceClassified =
+                                diagnostic["failure_stage"].cast<std::string>()
+                                        == "SIM_NODE_SURFACE"
+                                && diagnostic["failure_cause_code"].cast<std::string>()
+                                        == "UNSUPPORTED_FIDELITY"
+                                && reasons.size() == 1
+                                && reasons[0].cast<std::string>()
+                                        == "unknown_insertion";
+                    }
+                    try {
+                        (void) buildT114ActionSurface(
+                                wildStrikeState,
+                                T114FailureStage::CHILD_SURFACE);
+                    } catch (const T114SearchFailure &failure) {
+                        recordT114SearchFailure(
+                                failure.stage,
+                                failure.cause,
+                                failure.publicReasonClasses);
+                        const auto diagnostic = t114LastSearchFailureDiagnostic();
+                        const std::set<std::string> diagnosticFields{
+                            "schema_id",
+                            "failure_stage",
+                            "failure_cause_code",
+                            "public_reason_classes",
+                            "raw_exception_text_exposed",
+                            "private_simulator_state_exposed",
+                            "rng_or_hidden_draw_order_exposed",
+                            "status",
+                        };
+                        std::set<std::string> observedFields;
+                        for (const auto &item : diagnostic) {
+                            observedFields.insert(item.first.cast<std::string>());
+                        }
+                        failureDiagnosticContainsOnlyAllowlistedFields =
+                                observedFields == diagnosticFields;
+                        const auto reasons = diagnostic["public_reason_classes"]
+                                .cast<pybind11::list>();
+                        wildStrikeChildSurfaceClassified =
+                                diagnostic["failure_stage"].cast<std::string>()
+                                        == "CHILD_SURFACE"
+                                && diagnostic["failure_cause_code"].cast<std::string>()
+                                        == "UNSUPPORTED_FIDELITY"
+                                && reasons.size() == 1
+                                && reasons[0].cast<std::string>()
+                                        == "unknown_insertion";
+                        failureDiagnosticDoesNotExposePrivateData =
+                                diagnostic["raw_exception_text_exposed"].cast<bool>()
+                                        == false
+                                && diagnostic["private_simulator_state_exposed"].cast<bool>()
+                                        == false
+                                && diagnostic["rng_or_hidden_draw_order_exposed"].cast<bool>()
+                                        == false;
+                    }
+                }
+            }
+            const std::string privateExceptionMarker =
+                    "synthetic-private-rng-draw-order-intent-marker";
+            try {
+                throw std::runtime_error(privateExceptionMarker);
+            } catch (...) {
+                recordUnhandledT114SearchFailure(T114FailureStage::ROLLOUT);
+            }
+            arbitraryExceptionTextNotExported = canonicalT114PublicJson(
+                    t114LastSearchFailureDiagnostic()).find(privateExceptionMarker)
+                    == std::string::npos;
+            recordT114SearchFailure(
+                    T114FailureStage::REPORT_BUILD,
+                    T114FailureCause::NATIVE_OPERATION_FAILED);
+            const bool reportBuildStageAllowed =
+                    t114LastSearchFailureDiagnostic()["failure_stage"]
+                            .cast<std::string>() == "REPORT_BUILD";
+
             std::vector<T114SharedNode> globalSelectionNodes;
             T114SharedNode selectionNode;
             selectionNode.key = "audit-public-root";
@@ -2448,12 +2864,38 @@ struct StepSimulator {
                     missingNativeMappingFailsClosed;
             result["native_ambiguous_action_mapping_fails_closed"] =
                     multipleNativeMappingFailsClosed;
+            result["root_precheck_failure_stage_and_cause_are_allowlisted"] =
+                    rootPrecheckDiagnosticClassified;
+            result["inconsistent_exact_fact_failure_is_classified"] =
+                    inconsistentExactFactDiagnosticClassified;
+            result["missing_action_mapping_failure_is_classified"] =
+                    missingActionDiagnosticClassified;
+            result["ambiguous_action_mapping_failure_is_classified"] =
+                    ambiguousActionDiagnosticClassified;
+            result["incompatible_action_surface_failure_is_classified"] =
+                    incompatibleActionSurfaceDiagnosticClassified;
+            result["invalid_action_execution_failure_is_classified"] =
+                    invalidActionDiagnosticClassified;
             result["shared_edge_global_exploration_and_backup"] =
                     sharedExplorationAndBackup;
             result["multiple_particles_contribute_to_one_shared_root"] =
                     multipleParticlesContributedToSharedRoot;
             result["same_seed_reconstructs_same_private_pool"] =
                     deterministicPoolReconstruction;
+            result["wild_strike_random_insertion_transition_reached"] =
+                    randomInsertionTransitionReached;
+            result["wild_strike_node_surface_reports_unsupported_fidelity"] =
+                    wildStrikeNodeSurfaceClassified;
+            result["wild_strike_child_surface_reports_unsupported_fidelity"] =
+                    wildStrikeChildSurfaceClassified;
+            result["failure_diagnostic_contains_only_allowlisted_fields"] =
+                    failureDiagnosticContainsOnlyAllowlistedFields;
+            result["failure_diagnostic_does_not_expose_private_state_rng_or_exception_text"] =
+                    failureDiagnosticDoesNotExposePrivateData;
+            result["arbitrary_native_exception_text_is_not_exported"] =
+                    arbitraryExceptionTextNotExported;
+            result["report_build_failure_stage_is_allowlisted"] =
+                    reportBuildStageAllowed;
             result["same_inputs_reproduce_aggregate_report"] =
                     deterministicAggregateReport;
             result["aggregate_shared_edge_count_covers_all_nodes"] =
@@ -5782,6 +6224,8 @@ PYBIND11_MODULE(slaythespire, m) {
                 pybind11::arg("search_seed_input"),
                 pybind11::arg("particle_count"),
                 pybind11::arg("simulation_budget"))
+        .def("t114_last_search_failure_diagnostic",
+                &StepSimulator::t114LastSearchFailureDiagnostic)
         .def(
             "sample_hidden_future_particles",
             &StepSimulator::sampleHiddenFutureParticles,
