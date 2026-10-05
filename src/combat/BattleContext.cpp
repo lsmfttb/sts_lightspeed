@@ -3154,7 +3154,9 @@ void BattleContext::noteRandomDrawInsertion(
                 DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED);
     }
     if (previousPileSize == 0) {
-        noteKnownDrawTop(card);
+        if (publicIdentityKnown) {
+            noteKnownDrawTop(card);
+        }
         knownGeneratedCardPublicIdentity[card.getUniqueId()] = publicIdentityKnown;
         return;
     }

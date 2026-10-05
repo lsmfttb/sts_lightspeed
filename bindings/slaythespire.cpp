@@ -3768,6 +3768,61 @@ struct StepSimulator {
                     && emptyPrefix[0].cast<pybind11::dict>()["id"].cast<int>()
                             == static_cast<int>(CardId::BASH);
 
+            BattleContext privateEmptyPile;
+            privateEmptyPile.inputState = InputState::PLAYER_NORMAL;
+            privateEmptyPile.turn = 1;
+            CardInstance privateEmptyInserted(CardId::WRAITH_FORM);
+            privateEmptyInserted.setUniqueId(3030);
+            privateEmptyPile.cards.drawPile.push_back(privateEmptyInserted);
+            privateEmptyPile.noteRandomDrawInsertion(
+                    privateEmptyInserted, 0, false);
+            const auto privateBeforeDrawProjection =
+                    makeT096PublicInformationProjection(
+                            gc, privateEmptyPile, noActions);
+            const auto privateBeforeDrawOrder = privateBeforeDrawProjection[
+                    "visibility"].cast<pybind11::dict>()["draw_order"]
+                    .cast<pybind11::dict>();
+            const auto privateBeforeDrawPayload = canonicalT114PublicJson(
+                    privateBeforeDrawProjection);
+            const auto privateEmptyCardId = static_cast<int>(
+                    privateEmptyInserted.getId());
+            const auto privateEmptyCardName = std::string(
+                    privateEmptyInserted.getName());
+            const bool unknownIdentityEmptyPileStaysPrivateBeforeDraw =
+                    privateBeforeDrawProjection["information_fidelity"]
+                                    .cast<std::string>() == "unsupported_fidelity"
+                    && privateBeforeDrawOrder["classification"]
+                                    .cast<std::string>() == "unsupported_fidelity"
+                    && !privateBeforeDrawOrder.contains("known_top_prefix")
+                    && privateBeforeDrawPayload.find(
+                            "\"id\":" + std::to_string(privateEmptyCardId))
+                            == std::string::npos
+                    && privateBeforeDrawPayload.find(
+                            "\"name\":\"" + privateEmptyCardName + "\"")
+                            == std::string::npos
+                    && !privateBeforeDrawProjection["draw_pile_membership"]
+                            .cast<pybind11::dict>().contains("multiset_counts");
+
+            privateEmptyPile.cards.draw(privateEmptyPile, 1);
+            const auto privateAfterDrawProjection =
+                    makeT096PublicInformationProjection(
+                            gc, privateEmptyPile, noActions);
+            const auto privateAfterDrawHand = privateAfterDrawProjection["hand"]
+                    .cast<pybind11::list>();
+            const auto privateAfterDrawReasons = privateAfterDrawProjection[
+                    "draw_knowledge_unsupported_reasons"].cast<pybind11::list>();
+            const bool unknownIdentityBecomesPublicAfterDraw =
+                    privateAfterDrawProjection["information_fidelity"]
+                                    .cast<std::string>() == "supported"
+                    && privateAfterDrawReasons.empty()
+                    && privateAfterDrawHand.size() == 1
+                    && privateAfterDrawHand[0].cast<pybind11::dict>()["id"]
+                                    .cast<int>() == privateEmptyCardId
+                    && privateAfterDrawHand[0].cast<pybind11::dict>()["name"]
+                                    .cast<std::string>() == privateEmptyCardName
+                    && privateEmptyPile.knownGeneratedCardPublicIdentity[
+                            privateEmptyInserted.getUniqueId()];
+
             auto bottomState = first;
             CardInstance knownBottom(CardId::ARMAMENTS);
             knownBottom.setUniqueId(3010);
@@ -3864,6 +3919,9 @@ struct StepSimulator {
             report["sampler_preserves_known_top"] = topSamplerPreserved;
             report["top_draw_consumes_insertion_constraints"] =
                     topDrawComposesWithInsertion;
+            report["unknown_identity_empty_pile_private_until_draw"] =
+                    unknownIdentityEmptyPileStaysPrivateBeforeDraw
+                    && unknownIdentityBecomesPublicAfterDraw;
             report["frozen_eye_remains_full_order_exact"] = frozenEyeStillExact;
             restore();
             return report;

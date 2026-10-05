@@ -25,6 +25,7 @@ def main() -> int:
         "known_top_composes_with_insertion",
         "sampler_preserves_known_top",
         "top_draw_consumes_insertion_constraints",
+        "unknown_identity_empty_pile_private_until_draw",
         "frozen_eye_remains_full_order_exact",
     )
     if report.get("schema_id") != "native-t115-draw-insertion-audit-v1":
