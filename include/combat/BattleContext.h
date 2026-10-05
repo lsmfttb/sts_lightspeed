@@ -44,6 +44,21 @@ namespace sts {
         SUBSET_MEMBERSHIP = 1 << 0,
         UNKNOWN_INSERTION = 1 << 1,
         INCONSISTENT_EXACT_FACT = 1 << 2,
+        INSERTION_DRAW_IDENTITY_AMBIGUOUS = 1 << 3,
+        INSERTION_NON_TOP_DRAW_UNREPRESENTED = 1 << 4,
+        INSERTION_CONSTRAINT_INCONSISTENT = 1 << 5,
+        INSERTION_MEMBERSHIP_UNREPRESENTED = 1 << 6,
+    };
+
+    struct DrawKnowledgeAnchor {
+        std::int32_t basePositionFromTop = 0;
+        std::int16_t uniqueId = -1;
+    };
+
+    struct DrawKnowledgeInsertion {
+        std::int16_t uniqueId = -1;
+        std::int32_t minimumPositionFromTop = 1;
+        std::int16_t beforeAnchorUniqueId = -1;
     };
 
     static constexpr const char * battleOutcomeStrings[] {
@@ -110,6 +125,16 @@ namespace sts {
         std::vector<std::int16_t> knownDrawTopUniqueIds;
         std::map<std::int32_t, std::int16_t> knownDrawPositionUniqueIds;
         std::uint8_t knownDrawUnsupportedReasons = 0;
+        // A random insertion is represented as a joint constraint over a
+        // baseline draw-pile permutation and the inserted cards. Anchors keep
+        // exact facts in the baseline permutation; insertion cards retain
+        // only their public rank domain and optional bottom-anchor bound.
+        // Unique ids are runtime bookkeeping and are never serialized into a
+        // public projection or public node key.
+        std::int32_t knownDrawInsertionBaseSize = -1;
+        std::vector<DrawKnowledgeAnchor> knownDrawInsertionAnchors;
+        std::vector<DrawKnowledgeInsertion> knownDrawInsertionCards;
+        std::map<std::int16_t, bool> knownGeneratedCardPublicIdentity;
 
         CardQueueItem curCardQueueItem;
 
@@ -217,7 +242,12 @@ namespace sts {
         void markDrawKnowledgeUnsupported(
                 DrawKnowledgeUnsupportedReason reason =
                         DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
-        void invalidateAfterUnknownDrawInsertion();
+        void noteRandomDrawInsertion(
+                const CardInstance &card, int previousPileSize,
+                bool publicIdentityKnown = true);
+        void insertTempCardRandomlyIntoDrawPile(
+                const CardInstance &card, bool publicIdentityKnown = true);
+        void shuffleCardIntoDrawPile(const CardInstance &card);
         void triggerAndMoveToExhaustPile(CardInstance c);
         void mummifiedHandOnUsePower();
 
