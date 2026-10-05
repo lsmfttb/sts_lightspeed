@@ -13,6 +13,7 @@ def main() -> int:
     required = (
         "ordinary_insertion_supported_with_exact_multiset",
         "hidden_realizations_share_public_identity",
+        "default_context_potion_slots_are_empty",
         "no_private_identity_or_insertion_outcome_leak",
         "repeated_insertions_remain_jointly_modeled",
         "representative_multi_card_action_supported",

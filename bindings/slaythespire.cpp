@@ -3572,6 +3572,22 @@ struct StepSimulator {
                     gc, second, noActions);
             const auto firstPayload = canonicalT114PublicJson(firstProjection);
             const auto secondPayload = canonicalT114PublicJson(secondProjection);
+            BattleContext defaultContext;
+            const auto defaultContextProjection = makeT096PublicInformationProjection(
+                    gc, defaultContext, noActions);
+            const auto defaultPotionRows = defaultContextProjection[
+                    "persistent_resources"].cast<pybind11::dict>()["potions"]
+                    .cast<pybind11::list>();
+            bool defaultContextPotionSlotsAreEmpty = defaultPotionRows.size()
+                    == static_cast<std::size_t>(defaultContext.potionCapacity);
+            for (const auto &rowHandle : defaultPotionRows) {
+                const auto row = rowHandle.cast<pybind11::dict>();
+                defaultContextPotionSlotsAreEmpty = defaultContextPotionSlotsAreEmpty
+                        && row["id"].cast<int>()
+                                == static_cast<int>(Potion::EMPTY_POTION_SLOT)
+                        && row["name"].cast<std::string>()
+                                == "EMPTY_POTION_SLOT";
+            }
             const auto firstDrawOrder = firstProjection["visibility"]
                     .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
             const auto firstMembership = firstProjection["draw_pile_membership"]
@@ -3896,6 +3912,8 @@ struct StepSimulator {
             report["synthetic_only"] = true;
             report["ordinary_insertion_supported_with_exact_multiset"] = projectionSupported;
             report["hidden_realizations_share_public_identity"] = hiddenStatesCanonicalizeTogether;
+            report["default_context_potion_slots_are_empty"] =
+                    defaultContextPotionSlotsAreEmpty;
             report["no_private_identity_or_insertion_outcome_leak"] =
                     noPrivateIdentityOrInsertionOutcomeLeak;
             report["repeated_insertions_remain_jointly_modeled"] =

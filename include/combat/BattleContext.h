@@ -109,7 +109,12 @@ namespace sts {
 
         int potionCount = 0;
         int potionCapacity = 3;
-        std::array<Potion, 5> potions;
+        std::array<Potion, 5> potions{
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT};
 
         int turn = 0;
         Player player;
