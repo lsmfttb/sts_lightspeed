@@ -25,7 +25,7 @@ def main() -> int:
             and snapshot.get("battle_input_state") == "PLAYER_NORMAL"
         ):
             projection = sim.t096_public_information_projection()
-            if projection.get("schema_id") != "native-battle-public-information-v2":
+            if projection.get("schema_id") != "native-battle-public-information-v3":
                 raise AssertionError("T096 native smoke missing visibility-aware schema")
             if projection["visibility"]["draw_order"]["classification"] != "hidden":
                 raise AssertionError("ordinary T096 smoke unexpectedly has draw-order knowledge")

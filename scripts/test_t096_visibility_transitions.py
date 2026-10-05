@@ -28,7 +28,7 @@ def main() -> int:
         "subset_reveal_fails_closed",
         "subset_reveal_shuffle_stays_unsupported",
         "subset_reveal_sampler_fails_closed",
-        "draw_knowledge_reason_typed",
+        "random_insertion_constraint_typed",
         "frozen_eye_full_order",
         "frozen_eye_sampler_preserves_order",
         "runic_dome_hides_current_intent",

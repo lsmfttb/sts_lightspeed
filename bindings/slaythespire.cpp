@@ -17,6 +17,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <tuple>
 
 #include "sim/ConsoleSimulator.h"
 #include "sim/search/ScumSearchAgent2.h"
@@ -797,7 +798,7 @@ pybind11::dict makeT096AnchorDistributionMetadata(
             && (frozenEye || knownTopCount > 0 || knownPositions);
     ret["draw_knowledge_fidelity"] = bc.knownDrawUnsupportedReasons != 0
             || !knownStateConsistent
-            ? "unsupported_fidelity" : "native-current-information-v2";
+            ? "unsupported_fidelity" : "native-current-information-v3";
     ret["discard_empty"] = discardEmpty;
     ret["exhaust_empty"] = exhaustEmpty;
     ret["deck_size"] = gc.deck.size();
@@ -936,6 +937,49 @@ std::size_t knownDrawTopCount(const BattleContext &bc) {
     return known.size();
 }
 
+pybind11::dict publicDrawCardFace(const CardInstance &card) {
+    pybind11::dict ret;
+    ret["id"] = static_cast<int>(card.getId());
+    ret["name"] = std::string(card.getName());
+    ret["type"] = cardTypeLabel(card.getType());
+    ret["upgraded"] = card.isUpgraded();
+    ret["upgrade_count"] = card.getUpgradeCount();
+    return ret;
+}
+
+bool drawPilePublicMembershipKnown(const GameContext &gc, const BattleContext &bc) {
+    for (const auto &card : bc.cards.drawPile) {
+        const auto uniqueId = static_cast<int>(card.getUniqueId());
+        const bool persistent = uniqueId >= 0
+                && uniqueId < static_cast<int>(gc.deck.size())
+                && card.getId() == gc.deck.cards[uniqueId].getId();
+        if (persistent) {
+            continue;
+        }
+        const auto known = bc.knownGeneratedCardPublicIdentity.find(card.getUniqueId());
+        if (known == bc.knownGeneratedCardPublicIdentity.end() || !known->second) {
+            return false;
+        }
+    }
+    return true;
+}
+
+pybind11::list drawPilePublicMultiset(const BattleContext &bc) {
+    std::map<std::pair<int, bool>, int> counts;
+    for (const auto &card : bc.cards.drawPile) {
+        ++counts[{static_cast<int>(card.getId()), card.isUpgraded()}];
+    }
+    pybind11::list ret;
+    for (const auto &[face, count] : counts) {
+        pybind11::dict row;
+        row["id"] = face.first;
+        row["upgraded"] = face.second;
+        row["count"] = count;
+        ret.append(row);
+    }
+    return ret;
+}
+
 bool knownDrawStateConsistent(const BattleContext &bc) {
     const auto &known = bc.knownDrawTopUniqueIds;
     if (known.size() > bc.cards.drawPile.size()) {
@@ -946,6 +990,92 @@ bool knownDrawStateConsistent(const BattleContext &bc) {
         if (bc.cards.drawPile[drawIdx].getUniqueId() != known[idx]) {
             return false;
         }
+    }
+    if (bc.knownDrawInsertionBaseSize >= 0) {
+        if (!bc.knownDrawPositionUniqueIds.empty()
+                || bc.knownDrawInsertionBaseSize
+                                + static_cast<std::int32_t>(
+                                        bc.knownDrawInsertionCards.size())
+                        != static_cast<std::int32_t>(bc.cards.drawPile.size())) {
+            return false;
+        }
+        std::map<std::int16_t, const CardInstance *> insertionById;
+        for (const auto &insertion : bc.knownDrawInsertionCards) {
+            if (insertion.uniqueId < 0
+                    || !insertionById.emplace(insertion.uniqueId, nullptr).second) {
+                return false;
+            }
+        }
+        for (int drawIdx = 0;
+                drawIdx < static_cast<int>(bc.cards.drawPile.size()); ++drawIdx) {
+            const auto &card = bc.cards.drawPile[drawIdx];
+            const auto insertion = insertionById.find(card.getUniqueId());
+            if (insertion != insertionById.end()) {
+                insertion->second = &card;
+            }
+        }
+        std::vector<const CardInstance *> baseline;
+        baseline.reserve(static_cast<std::size_t>(bc.knownDrawInsertionBaseSize));
+        for (auto it = bc.cards.drawPile.rbegin(); it != bc.cards.drawPile.rend(); ++it) {
+            if (insertionById.find(it->getUniqueId()) == insertionById.end()) {
+                baseline.push_back(&*it);
+            }
+        }
+        if (baseline.size()
+                != static_cast<std::size_t>(bc.knownDrawInsertionBaseSize)) {
+            return false;
+        }
+        std::map<std::int32_t, std::int16_t> anchorsByPosition;
+        std::map<std::int16_t, std::int32_t> anchorPositionById;
+        for (const auto &anchor : bc.knownDrawInsertionAnchors) {
+            if (anchor.basePositionFromTop < 0
+                    || static_cast<std::size_t>(anchor.basePositionFromTop)
+                            >= baseline.size()
+                    || !anchorsByPosition.emplace(
+                            anchor.basePositionFromTop, anchor.uniqueId).second
+                    || !anchorPositionById.emplace(
+                            anchor.uniqueId, anchor.basePositionFromTop).second
+                    || baseline[anchor.basePositionFromTop]->getUniqueId()
+                            != anchor.uniqueId) {
+                return false;
+            }
+        }
+        for (const auto &[uniqueId, card] : insertionById) {
+            if (card == nullptr) {
+                return false;
+            }
+            const auto drawIdx = static_cast<std::int32_t>(
+                    card - bc.cards.drawPile.data());
+            const auto rankFromTop = static_cast<std::int32_t>(
+                    bc.cards.drawPile.size() - 1) - drawIdx;
+            const auto insertion = std::find_if(
+                    bc.knownDrawInsertionCards.begin(),
+                    bc.knownDrawInsertionCards.end(),
+                    [&](const DrawKnowledgeInsertion &candidate) {
+                        return candidate.uniqueId == uniqueId;
+                    });
+            if (insertion == bc.knownDrawInsertionCards.end()
+                    || insertion->minimumPositionFromTop < 0
+                    || rankFromTop < insertion->minimumPositionFromTop) {
+                return false;
+            }
+            if (insertion->beforeAnchorUniqueId >= 0) {
+                const auto anchor = anchorPositionById.find(
+                        insertion->beforeAnchorUniqueId);
+                if (anchor == anchorPositionById.end()) {
+                    return false;
+                }
+                const auto anchorCard = baseline[anchor->second];
+                const auto anchorDrawIdx = static_cast<std::int32_t>(
+                        anchorCard - bc.cards.drawPile.data());
+                const auto anchorRankFromTop = static_cast<std::int32_t>(
+                        bc.cards.drawPile.size() - 1) - anchorDrawIdx;
+                if (rankFromTop >= anchorRankFromTop) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
     for (const auto &[position, uniqueId] : bc.knownDrawPositionUniqueIds) {
         if (position < static_cast<std::int32_t>(known.size())
@@ -983,8 +1113,11 @@ pybind11::list knownDrawPositionSnapshot(const BattleContext &bc) {
     return ret;
 }
 
-bool publicInformationUnsupported(const BattleContext &bc) {
+bool publicInformationUnsupported(const GameContext &gc, const BattleContext &bc) {
     if (bc.knownDrawUnsupportedReasons != 0 || !knownDrawStateConsistent(bc)) {
+        return true;
+    }
+    if (!drawPilePublicMembershipKnown(gc, bc)) {
         return true;
     }
     for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
@@ -1007,6 +1140,18 @@ pybind11::list drawKnowledgeUnsupportedReasonSnapshot(const std::uint8_t reasons
     if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT)) {
         ret.append("inconsistent_exact_fact");
     }
+    if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_DRAW_IDENTITY_AMBIGUOUS)) {
+        ret.append("insertion_draw_identity_ambiguous");
+    }
+    if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_NON_TOP_DRAW_UNREPRESENTED)) {
+        ret.append("insertion_non_top_draw_unrepresented");
+    }
+    if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT)) {
+        ret.append("insertion_constraint_inconsistent");
+    }
+    if (reasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED)) {
+        ret.append("insertion_membership_unrepresented");
+    }
     return ret;
 }
 
@@ -1015,12 +1160,16 @@ pybind11::dict makeT096PublicInformationProjection(
         const BattleContext &bc,
         const std::vector<LightSpeedAction> &actions) {
     const bool drawStateConsistent = knownDrawStateConsistent(bc);
-    const auto projectedDrawUnsupportedReasons = static_cast<std::uint8_t>(
+    auto projectedDrawUnsupportedReasons = static_cast<std::uint8_t>(
             bc.knownDrawUnsupportedReasons
             | (drawStateConsistent ? 0 : static_cast<std::uint8_t>(
                     DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT)));
+    if (!drawPilePublicMembershipKnown(gc, bc)) {
+        projectedDrawUnsupportedReasons |= static_cast<std::uint8_t>(
+                DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED);
+    }
     pybind11::dict ret;
-    ret["schema_id"] = "native-battle-public-information-v2";
+    ret["schema_id"] = "native-battle-public-information-v3";
     ret["information_regime"] = "normal_information";
     ret["screen_identity"] = "BATTLE";
     ret["act"] = gc.act;
@@ -1035,7 +1184,7 @@ pybind11::dict makeT096PublicInformationProjection(
     ret["exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);
     ret["draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
     ret["monsters"] = publicInformationMonsterGroupSnapshot(bc);
-    ret["information_fidelity"] = publicInformationUnsupported(bc)
+    ret["information_fidelity"] = publicInformationUnsupported(gc, bc)
             ? "unsupported_fidelity" : "supported";
     ret["draw_knowledge_unsupported_reasons"] =
             drawKnowledgeUnsupportedReasonSnapshot(projectedDrawUnsupportedReasons);
@@ -1056,6 +1205,7 @@ pybind11::dict makeT096PublicInformationProjection(
     const bool knownStateConsistent = drawStateConsistent;
     const bool hasKnownPositions = knownStateConsistent
             && !bc.knownDrawPositionUniqueIds.empty();
+    const bool hasInsertionConstraints = bc.knownDrawInsertionBaseSize >= 0;
     if (projectedDrawUnsupportedReasons != 0 || !knownStateConsistent) {
         drawOrder["classification"] = "unsupported_fidelity";
         drawOrder["constraint"] = "an information-changing draw transition is not modeled exactly";
@@ -1071,16 +1221,82 @@ pybind11::dict makeT096PublicInformationProjection(
     } else if (frozenEye) {
         drawOrder["classification"] = "full_public_exact";
         drawOrder["constraint"] = "Frozen Eye makes the current draw order visible";
-        drawOrder["fidelity"] = "native-current-information-v2";
+        drawOrder["fidelity"] = "native-current-information-v3";
         drawOrder["visible_order_from_top"] =
                 knownDrawTopSnapshot(bc, knownTopCount);
+    } else if (hasInsertionConstraints) {
+        drawOrder["classification"] = "random_insertion_constraints";
+        drawOrder["constraint"] =
+                "known inserted-card membership and public position domains over a hidden baseline permutation";
+        drawOrder["fidelity"] = "native-current-information-v3";
+        if (knownTopCount > 0) {
+            drawOrder["known_top_prefix"] = knownDrawTopSnapshot(bc, knownTopCount);
+        }
+        pybind11::list baselineAnchors;
+        for (const auto &anchor : bc.knownDrawInsertionAnchors) {
+            const auto card = std::find_if(
+                    bc.cards.drawPile.begin(), bc.cards.drawPile.end(),
+                    [&](const CardInstance &candidate) {
+                        return candidate.getUniqueId() == anchor.uniqueId;
+                    });
+            if (card == bc.cards.drawPile.end()) {
+                continue;
+            }
+            pybind11::dict fact;
+            fact["baseline_position_from_top"] = anchor.basePositionFromTop;
+            fact["card"] = publicDrawCardFace(*card);
+            baselineAnchors.append(fact);
+        }
+        drawOrder["baseline_order_anchors"] = baselineAnchors;
+        std::map<std::tuple<int, bool, int, int>, int> groupedInsertions;
+        for (const auto &insertion : bc.knownDrawInsertionCards) {
+            const auto card = std::find_if(
+                    bc.cards.drawPile.begin(), bc.cards.drawPile.end(),
+                    [&](const CardInstance &candidate) {
+                        return candidate.getUniqueId() == insertion.uniqueId;
+                    });
+            if (card == bc.cards.drawPile.end()) {
+                continue;
+            }
+            int beforeAnchorPosition = -1;
+            if (insertion.beforeAnchorUniqueId >= 0) {
+                const auto anchor = std::find_if(
+                        bc.knownDrawInsertionAnchors.begin(),
+                        bc.knownDrawInsertionAnchors.end(),
+                        [&](const DrawKnowledgeAnchor &candidate) {
+                            return candidate.uniqueId
+                                    == insertion.beforeAnchorUniqueId;
+                        });
+                if (anchor != bc.knownDrawInsertionAnchors.end()) {
+                    beforeAnchorPosition = anchor->basePositionFromTop;
+                }
+            }
+            ++groupedInsertions[{static_cast<int>(card->getId()),
+                    card->isUpgraded(), insertion.minimumPositionFromTop,
+                    beforeAnchorPosition}];
+        }
+        pybind11::list insertionConstraints;
+        for (const auto &[key, count] : groupedInsertions) {
+            pybind11::dict constraint;
+            pybind11::dict cardFace;
+            cardFace["id"] = std::get<0>(key);
+            cardFace["upgraded"] = std::get<1>(key);
+            constraint["card"] = cardFace;
+            constraint["count"] = count;
+            constraint["minimum_position_from_top"] = std::get<2>(key);
+            if (std::get<3>(key) >= 0) {
+                constraint["before_baseline_position_from_top"] = std::get<3>(key);
+            }
+            insertionConstraints.append(constraint);
+        }
+        drawOrder["inserted_card_constraints"] = insertionConstraints;
     } else if (knownTopCount > 0 || hasKnownPositions) {
         const auto classification = hasKnownPositions ? "known_positions" : "known_prefix";
         drawOrder["classification"] = classification;
         drawOrder["constraint"] = hasKnownPositions
                 ? "public deterministic exact draw-pile positions"
                 : "public deterministic top-of-draw-pile placement";
-        drawOrder["fidelity"] = "native-current-information-v2";
+        drawOrder["fidelity"] = "native-current-information-v3";
         if (knownTopCount > 0) {
             drawOrder["known_top_prefix"] = knownDrawTopSnapshot(bc, knownTopCount);
         }
@@ -1090,19 +1306,19 @@ pybind11::dict makeT096PublicInformationProjection(
     } else {
         drawOrder["classification"] = "hidden";
         drawOrder["constraint"] = "ordinary draw order is not exposed";
-        drawOrder["fidelity"] = "native-current-information-v2";
+        drawOrder["fidelity"] = "native-current-information-v3";
     }
     visibility["draw_order"] = drawOrder;
-    visibility["information_fidelity"] = publicInformationUnsupported(bc)
+    visibility["information_fidelity"] = publicInformationUnsupported(gc, bc)
             ? "unsupported_fidelity" : "supported";
     pybind11::dict enemyIntent;
     if (bc.player.hasRelic<R::RUNIC_DOME>()) {
         enemyIntent["classification"] = "hidden";
-        enemyIntent["fidelity"] = "native-current-information-v2";
+        enemyIntent["fidelity"] = "native-current-information-v3";
     } else {
         enemyIntent["classification"] = "public_exact";
         enemyIntent["source"] = "native Monster move state";
-        enemyIntent["fidelity"] = "native-current-information-v2";
+        enemyIntent["fidelity"] = "native-current-information-v3";
     }
     visibility["enemy_intent"] = enemyIntent;
     ret["visibility"] = visibility;
@@ -1121,8 +1337,9 @@ pybind11::dict makeT096PublicInformationProjection(
     }
     if (frozenEye) {
         membership["visible_order_from_top"] = knownDrawTopSnapshot(bc, knownTopCount);
-    } else {
-        membership["value"] = "membership not ordered; exact membership is not exposed";
+    }
+    if (drawPilePublicMembershipKnown(gc, bc)) {
+        membership["multiset_counts"] = drawPilePublicMultiset(bc);
     }
     ret["draw_pile_membership"] = membership;
     return ret;
@@ -1188,6 +1405,10 @@ struct StepSimulator {
         UNKNOWN_INSERTION,
         SUBSET_MEMBERSHIP,
         INCONSISTENT_EXACT_FACT,
+        INSERTION_DRAW_IDENTITY_AMBIGUOUS,
+        INSERTION_NON_TOP_DRAW_UNREPRESENTED,
+        INSERTION_CONSTRAINT_INCONSISTENT,
+        INSERTION_MEMBERSHIP_UNREPRESENTED,
         UNSUPPORTED_FIDELITY,
     };
 
@@ -1241,6 +1462,10 @@ struct StepSimulator {
             case T114PublicReasonClass::UNKNOWN_INSERTION: return "unknown_insertion";
             case T114PublicReasonClass::SUBSET_MEMBERSHIP: return "subset_membership";
             case T114PublicReasonClass::INCONSISTENT_EXACT_FACT: return "inconsistent_exact_fact";
+            case T114PublicReasonClass::INSERTION_DRAW_IDENTITY_AMBIGUOUS: return "insertion_draw_identity_ambiguous";
+            case T114PublicReasonClass::INSERTION_NON_TOP_DRAW_UNREPRESENTED: return "insertion_non_top_draw_unrepresented";
+            case T114PublicReasonClass::INSERTION_CONSTRAINT_INCONSISTENT: return "insertion_constraint_inconsistent";
+            case T114PublicReasonClass::INSERTION_MEMBERSHIP_UNREPRESENTED: return "insertion_membership_unrepresented";
             case T114PublicReasonClass::UNSUPPORTED_FIDELITY: return "unsupported_fidelity";
         }
         return "unsupported_fidelity";
@@ -1297,7 +1522,7 @@ struct StepSimulator {
     pybind11::dict lastT114SearchFailureDiagnostic;
 
     static std::vector<T114PublicReasonClass> t114UnsupportedReasonClasses(
-            const BattleContext &state) {
+            const GameContext &gc, const BattleContext &state) {
         std::vector<T114PublicReasonClass> reasons;
         const auto addUnique = [&reasons](const T114PublicReasonClass value) {
             if (std::find(reasons.begin(), reasons.end(), value) == reasons.end()) {
@@ -1313,6 +1538,21 @@ struct StepSimulator {
         }
         if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT)) {
             addUnique(T114PublicReasonClass::INCONSISTENT_EXACT_FACT);
+        }
+        if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_DRAW_IDENTITY_AMBIGUOUS)) {
+            addUnique(T114PublicReasonClass::INSERTION_DRAW_IDENTITY_AMBIGUOUS);
+        }
+        if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_NON_TOP_DRAW_UNREPRESENTED)) {
+            addUnique(T114PublicReasonClass::INSERTION_NON_TOP_DRAW_UNREPRESENTED);
+        }
+        if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT)) {
+            addUnique(T114PublicReasonClass::INSERTION_CONSTRAINT_INCONSISTENT);
+        }
+        if (drawReasons & static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED)) {
+            addUnique(T114PublicReasonClass::INSERTION_MEMBERSHIP_UNREPRESENTED);
+        }
+        if (!drawPilePublicMembershipKnown(gc, state)) {
+            addUnique(T114PublicReasonClass::INSERTION_MEMBERSHIP_UNREPRESENTED);
         }
         if (!knownDrawStateConsistent(state)) {
             addUnique(T114PublicReasonClass::INCONSISTENT_EXACT_FACT);
@@ -1554,45 +1794,157 @@ struct StepSimulator {
         if (!frozenEye && particle.knownDrawUnsupportedReasons == 0
                 && knownDrawStateConsistent(particle)) {
             java::Random randomizer(particleSeed);
-            // Shuffle only unconstrained positions.  Draw-pile top is the
-            // vector back; exact position facts are measured from that top
-            // and therefore survive particle generation.
-            std::vector<bool> fixed(particle.cards.drawPile.size(), false);
-            for (std::size_t position = 0; position < knownTop; ++position) {
-                fixed[particle.cards.drawPile.size() - 1 - position] = true;
-            }
-            bool positionStateValid = true;
-            for (const auto &[position, uniqueId] : particle.knownDrawPositionUniqueIds) {
-                if (position < 0
-                        || static_cast<std::size_t>(position)
-                                >= particle.cards.drawPile.size()) {
-                    positionStateValid = false;
-                    break;
+            if (particle.knownDrawInsertionBaseSize >= 0) {
+                std::map<std::int16_t, CardInstance> insertedCards;
+                for (const auto &insertion : particle.knownDrawInsertionCards) {
+                    const auto card = std::find_if(
+                            particle.cards.drawPile.begin(),
+                            particle.cards.drawPile.end(),
+                            [&](const CardInstance &candidate) {
+                                return candidate.getUniqueId() == insertion.uniqueId;
+                            });
+                    if (card == particle.cards.drawPile.end()
+                            || !insertedCards.emplace(
+                                    insertion.uniqueId, *card).second) {
+                        particle.markDrawKnowledgeUnsupported(
+                                DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                        return particle;
+                    }
                 }
-                const auto drawIdx = particle.cards.drawPile.size() - 1
-                        - static_cast<std::size_t>(position);
-                if (particle.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
-                    positionStateValid = false;
-                    break;
+
+                std::vector<CardInstance> baselineTopFirst;
+                baselineTopFirst.reserve(static_cast<std::size_t>(
+                        particle.knownDrawInsertionBaseSize));
+                for (auto card = particle.cards.drawPile.rbegin();
+                        card != particle.cards.drawPile.rend(); ++card) {
+                    if (insertedCards.find(card->getUniqueId())
+                            == insertedCards.end()) {
+                        baselineTopFirst.push_back(*card);
+                    }
                 }
-                fixed[drawIdx] = true;
-            }
-            if (!positionStateValid) {
-                particle.markDrawKnowledgeUnsupported();
-            } else {
+                if (baselineTopFirst.size()
+                        != static_cast<std::size_t>(
+                                particle.knownDrawInsertionBaseSize)) {
+                    particle.markDrawKnowledgeUnsupported(
+                            DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                    return particle;
+                }
+
+                std::vector<bool> fixed(baselineTopFirst.size(), false);
+                for (const auto &anchor : particle.knownDrawInsertionAnchors) {
+                    if (anchor.basePositionFromTop < 0
+                            || static_cast<std::size_t>(anchor.basePositionFromTop)
+                                    >= baselineTopFirst.size()
+                            || baselineTopFirst[anchor.basePositionFromTop]
+                                            .getUniqueId()
+                                    != anchor.uniqueId) {
+                        particle.markDrawKnowledgeUnsupported(
+                                DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                        return particle;
+                    }
+                    fixed[anchor.basePositionFromTop] = true;
+                }
                 std::vector<int> freeIndices;
                 std::vector<CardInstance> freeCards;
-                for (int drawIdx = 0;
-                        drawIdx < static_cast<int>(particle.cards.drawPile.size());
-                        ++drawIdx) {
-                    if (!fixed[drawIdx]) {
-                        freeIndices.push_back(drawIdx);
-                        freeCards.push_back(particle.cards.drawPile[drawIdx]);
+                for (int position = 0;
+                        position < static_cast<int>(baselineTopFirst.size());
+                        ++position) {
+                    if (!fixed[position]) {
+                        freeIndices.push_back(position);
+                        freeCards.push_back(baselineTopFirst[position]);
                     }
                 }
                 java::Collections::shuffle(freeCards.begin(), freeCards.end(), randomizer);
                 for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
-                    particle.cards.drawPile[freeIndices[idx]] = freeCards[idx];
+                    baselineTopFirst[freeIndices[idx]] = freeCards[idx];
+                }
+
+                bool constraintsValid = true;
+                for (const auto &insertion : particle.knownDrawInsertionCards) {
+                    const auto inserted = insertedCards.find(insertion.uniqueId);
+                    if (inserted == insertedCards.end()) {
+                        constraintsValid = false;
+                        break;
+                    }
+                    int lastPosition = static_cast<int>(baselineTopFirst.size());
+                    if (insertion.beforeAnchorUniqueId >= 0) {
+                        const auto anchor = std::find_if(
+                                baselineTopFirst.begin(), baselineTopFirst.end(),
+                                [&](const CardInstance &candidate) {
+                                    return candidate.getUniqueId()
+                                            == insertion.beforeAnchorUniqueId;
+                                });
+                        if (anchor == baselineTopFirst.end()) {
+                            constraintsValid = false;
+                            break;
+                        }
+                        lastPosition = static_cast<int>(
+                                std::distance(baselineTopFirst.begin(), anchor)) - 1;
+                    }
+                    const auto firstPosition = insertion.minimumPositionFromTop;
+                    if (firstPosition < 0 || firstPosition > lastPosition) {
+                        constraintsValid = false;
+                        break;
+                    }
+                    const auto choices = lastPosition - firstPosition + 1;
+                    const auto rank = firstPosition + randomizer.nextInt(choices);
+                    baselineTopFirst.insert(
+                            baselineTopFirst.begin() + rank, inserted->second);
+                }
+                if (!constraintsValid) {
+                    particle.markDrawKnowledgeUnsupported(
+                            DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                    return particle;
+                }
+                for (std::size_t rank = 0; rank < baselineTopFirst.size(); ++rank) {
+                    particle.cards.drawPile[baselineTopFirst.size() - 1 - rank]
+                            = baselineTopFirst[rank];
+                }
+                if (!knownDrawStateConsistent(particle)) {
+                    particle.markDrawKnowledgeUnsupported(
+                            DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                }
+            } else {
+                // Shuffle only unconstrained positions.  Draw-pile top is the
+                // vector back; exact position facts are measured from that top
+                // and therefore survive particle generation.
+                std::vector<bool> fixed(particle.cards.drawPile.size(), false);
+                for (std::size_t position = 0; position < knownTop; ++position) {
+                    fixed[particle.cards.drawPile.size() - 1 - position] = true;
+                }
+                bool positionStateValid = true;
+                for (const auto &[position, uniqueId] : particle.knownDrawPositionUniqueIds) {
+                    if (position < 0
+                            || static_cast<std::size_t>(position)
+                                    >= particle.cards.drawPile.size()) {
+                        positionStateValid = false;
+                        break;
+                    }
+                    const auto drawIdx = particle.cards.drawPile.size() - 1
+                            - static_cast<std::size_t>(position);
+                    if (particle.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
+                        positionStateValid = false;
+                        break;
+                    }
+                    fixed[drawIdx] = true;
+                }
+                if (!positionStateValid) {
+                    particle.markDrawKnowledgeUnsupported();
+                } else {
+                    std::vector<int> freeIndices;
+                    std::vector<CardInstance> freeCards;
+                    for (int drawIdx = 0;
+                            drawIdx < static_cast<int>(particle.cards.drawPile.size());
+                            ++drawIdx) {
+                        if (!fixed[drawIdx]) {
+                            freeIndices.push_back(drawIdx);
+                            freeCards.push_back(particle.cards.drawPile[drawIdx]);
+                        }
+                    }
+                    java::Collections::shuffle(freeCards.begin(), freeCards.end(), randomizer);
+                    for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
+                        particle.cards.drawPile[freeIndices[idx]] = freeCards[idx];
+                    }
                 }
             }
         } else if (!frozenEye && !knownDrawStateConsistent(particle)) {
@@ -1635,11 +1987,11 @@ struct StepSimulator {
     T114ActionSurface buildT114ActionSurface(
             const BattleContext &state,
             const T114FailureStage failureStage = T114FailureStage::ROOT_PRECHECK) const {
-        if (publicInformationUnsupported(state)) {
+        if (publicInformationUnsupported(gc, state)) {
             throw T114SearchFailure(
                     failureStage,
                     T114FailureCause::UNSUPPORTED_FIDELITY,
-                    t114UnsupportedReasonClasses(state));
+                    t114UnsupportedReasonClasses(gc, state));
         }
         T114ActionSurface surface;
         surface.publicActions = publicBattleActions(state);
@@ -1650,7 +2002,7 @@ struct StepSimulator {
             throw T114SearchFailure(
                     failureStage,
                     T114FailureCause::UNSUPPORTED_FIDELITY,
-                    t114UnsupportedReasonClasses(state));
+                    t114UnsupportedReasonClasses(gc, state));
         }
         surface.projectionPayload = canonicalT114PublicJson(surface.projection);
 
@@ -1975,11 +2327,11 @@ struct StepSimulator {
             throw T114SearchFailure(
                     failureStage, T114FailureCause::INVALID_REQUEST);
         }
-        if (publicInformationUnsupported(bc)) {
+        if (publicInformationUnsupported(gc, bc)) {
             throw T114SearchFailure(
                     failureStage,
                     T114FailureCause::UNSUPPORTED_FIDELITY,
-                    t114UnsupportedReasonClasses(bc));
+                    t114UnsupportedReasonClasses(gc, bc));
         }
         const auto started = std::chrono::steady_clock::now();
         failureStage = T114FailureStage::ROOT_PRECHECK;
@@ -2324,6 +2676,7 @@ struct StepSimulator {
                 CardInstance card(drawIds[idx]);
                 card.setUniqueId(static_cast<int>(9200 + idx));
                 bc.cards.drawPile.push_back(card);
+                bc.knownGeneratedCardPublicIdentity[card.getUniqueId()] = true;
             }
             bc.potionCapacity = 1;
             bc.potionCount = 1;
@@ -2688,8 +3041,8 @@ struct StepSimulator {
             const search::Action wildStrikeAction(
                     search::ActionType::CARD, 0, 0);
             bool randomInsertionTransitionReached = false;
-            bool wildStrikeNodeSurfaceClassified = false;
-            bool wildStrikeChildSurfaceClassified = false;
+            bool wildStrikeNodeSurfaceSupported = false;
+            bool wildStrikeChildSurfaceSupported = false;
             bool failureDiagnosticContainsOnlyAllowlistedFields = false;
             bool failureDiagnosticDoesNotExposePrivateData = false;
             bool arbitraryExceptionTextNotExported = false;
@@ -2698,73 +3051,45 @@ struct StepSimulator {
                 const auto unknownInsertionBit = static_cast<std::uint8_t>(
                         DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION);
                 randomInsertionTransitionReached =
-                        (wildStrikeState.knownDrawUnsupportedReasons
-                                & unknownInsertionBit) != 0;
+                        wildStrikeState.knownDrawInsertionBaseSize >= 0
+                        && (wildStrikeState.knownDrawUnsupportedReasons
+                                & unknownInsertionBit) == 0;
                 if (randomInsertionTransitionReached) {
                     try {
-                        (void) buildT114ActionSurface(
+                        const auto nodeSurface = buildT114ActionSurface(
                                 wildStrikeState,
                                 T114FailureStage::SIM_NODE_SURFACE);
+                        const auto drawOrder = nodeSurface.projection["visibility"]
+                                .cast<pybind11::dict>()["draw_order"]
+                                .cast<pybind11::dict>();
+                        wildStrikeNodeSurfaceSupported =
+                                nodeSurface.projection["information_fidelity"]
+                                        .cast<std::string>() == "supported"
+                                && drawOrder["classification"].cast<std::string>()
+                                        == "random_insertion_constraints";
                     } catch (const T114SearchFailure &failure) {
                         recordT114SearchFailure(
                                 failure.stage,
                                 failure.cause,
                                 failure.publicReasonClasses);
-                        const auto diagnostic = t114LastSearchFailureDiagnostic();
-                        const auto reasons = diagnostic["public_reason_classes"]
-                                .cast<pybind11::list>();
-                        wildStrikeNodeSurfaceClassified =
-                                diagnostic["failure_stage"].cast<std::string>()
-                                        == "SIM_NODE_SURFACE"
-                                && diagnostic["failure_cause_code"].cast<std::string>()
-                                        == "UNSUPPORTED_FIDELITY"
-                                && reasons.size() == 1
-                                && reasons[0].cast<std::string>()
-                                        == "unknown_insertion";
                     }
                     try {
-                        (void) buildT114ActionSurface(
+                        const auto childSurface = buildT114ActionSurface(
                                 wildStrikeState,
                                 T114FailureStage::CHILD_SURFACE);
+                        const auto drawOrder = childSurface.projection["visibility"]
+                                .cast<pybind11::dict>()["draw_order"]
+                                .cast<pybind11::dict>();
+                        wildStrikeChildSurfaceSupported =
+                                childSurface.projection["information_fidelity"]
+                                        .cast<std::string>() == "supported"
+                                && drawOrder["classification"].cast<std::string>()
+                                        == "random_insertion_constraints";
                     } catch (const T114SearchFailure &failure) {
                         recordT114SearchFailure(
                                 failure.stage,
                                 failure.cause,
                                 failure.publicReasonClasses);
-                        const auto diagnostic = t114LastSearchFailureDiagnostic();
-                        const std::set<std::string> diagnosticFields{
-                            "schema_id",
-                            "failure_stage",
-                            "failure_cause_code",
-                            "public_reason_classes",
-                            "raw_exception_text_exposed",
-                            "private_simulator_state_exposed",
-                            "rng_or_hidden_draw_order_exposed",
-                            "status",
-                        };
-                        std::set<std::string> observedFields;
-                        for (const auto &item : diagnostic) {
-                            observedFields.insert(item.first.cast<std::string>());
-                        }
-                        failureDiagnosticContainsOnlyAllowlistedFields =
-                                observedFields == diagnosticFields;
-                        const auto reasons = diagnostic["public_reason_classes"]
-                                .cast<pybind11::list>();
-                        wildStrikeChildSurfaceClassified =
-                                diagnostic["failure_stage"].cast<std::string>()
-                                        == "CHILD_SURFACE"
-                                && diagnostic["failure_cause_code"].cast<std::string>()
-                                        == "UNSUPPORTED_FIDELITY"
-                                && reasons.size() == 1
-                                && reasons[0].cast<std::string>()
-                                        == "unknown_insertion";
-                        failureDiagnosticDoesNotExposePrivateData =
-                                diagnostic["raw_exception_text_exposed"].cast<bool>()
-                                        == false
-                                && diagnostic["private_simulator_state_exposed"].cast<bool>()
-                                        == false
-                                && diagnostic["rng_or_hidden_draw_order_exposed"].cast<bool>()
-                                        == false;
                     }
                 }
             }
@@ -2775,9 +3100,29 @@ struct StepSimulator {
             } catch (...) {
                 recordUnhandledT114SearchFailure(T114FailureStage::ROLLOUT);
             }
+            const auto sanitizedFailure = t114LastSearchFailureDiagnostic();
             arbitraryExceptionTextNotExported = canonicalT114PublicJson(
-                    t114LastSearchFailureDiagnostic()).find(privateExceptionMarker)
-                    == std::string::npos;
+                    sanitizedFailure).find(privateExceptionMarker) == std::string::npos;
+            const std::set<std::string> diagnosticFields{
+                "schema_id",
+                "failure_stage",
+                "failure_cause_code",
+                "public_reason_classes",
+                "raw_exception_text_exposed",
+                "private_simulator_state_exposed",
+                "rng_or_hidden_draw_order_exposed",
+                "status",
+            };
+            std::set<std::string> observedDiagnosticFields;
+            for (const auto &item : sanitizedFailure) {
+                observedDiagnosticFields.insert(item.first.cast<std::string>());
+            }
+            failureDiagnosticContainsOnlyAllowlistedFields =
+                    observedDiagnosticFields == diagnosticFields;
+            failureDiagnosticDoesNotExposePrivateData =
+                    sanitizedFailure["raw_exception_text_exposed"].cast<bool>() == false
+                    && sanitizedFailure["private_simulator_state_exposed"].cast<bool>() == false
+                    && sanitizedFailure["rng_or_hidden_draw_order_exposed"].cast<bool>() == false;
             recordT114SearchFailure(
                     T114FailureStage::REPORT_BUILD,
                     T114FailureCause::NATIVE_OPERATION_FAILED);
@@ -2884,10 +3229,10 @@ struct StepSimulator {
                     deterministicPoolReconstruction;
             result["wild_strike_random_insertion_transition_reached"] =
                     randomInsertionTransitionReached;
-            result["wild_strike_node_surface_reports_unsupported_fidelity"] =
-                    wildStrikeNodeSurfaceClassified;
-            result["wild_strike_child_surface_reports_unsupported_fidelity"] =
-                    wildStrikeChildSurfaceClassified;
+            result["wild_strike_node_surface_supports_insertion_constraints"] =
+                    wildStrikeNodeSurfaceSupported;
+            result["wild_strike_child_surface_supports_insertion_constraints"] =
+                    wildStrikeChildSurfaceSupported;
             result["failure_diagnostic_contains_only_allowlisted_fields"] =
                     failureDiagnosticContainsOnlyAllowlistedFields;
             result["failure_diagnostic_does_not_expose_private_state_rng_or_exception_text"] =
@@ -3152,6 +3497,440 @@ struct StepSimulator {
         return makeT096AnchorDistributionMetadata(gc, bc);
     }
 
+    pybind11::dict t115DrawInsertionAudit() {
+        const auto savedBattleContext = bc;
+        const auto savedBattleActive = battleActive;
+        const auto savedScreenState = gc.screenState;
+        const auto savedGameOutcome = gc.outcome;
+        const auto restore = [&]() {
+            bc = savedBattleContext;
+            battleActive = savedBattleActive;
+            gc.screenState = savedScreenState;
+            gc.outcome = savedGameOutcome;
+        };
+        try {
+            gc.screenState = ScreenState::BATTLE;
+            gc.outcome = GameOutcome::UNDECIDED;
+            const auto makeInsertedState = [&](const int uidBase,
+                    const bool reverseUnknownBaseline,
+                    const int firstInsertIndex,
+                    const int secondInsertIndex) {
+                BattleContext state;
+                state.inputState = InputState::PLAYER_NORMAL;
+                state.turn = 1;
+                state.encounter = MonsterEncounter::JAW_WORM;
+                state.cards.nextUniqueCardId = static_cast<std::int16_t>(uidBase + 20);
+                std::vector<CardInstance> baselineTopFirst{
+                    CardInstance(CardId::STRIKE_RED),
+                    CardInstance(CardId::DEFEND_RED),
+                    CardInstance(CardId::BASH),
+                    CardInstance(CardId::IRON_WAVE),
+                    CardInstance(CardId::POMMEL_STRIKE),
+                };
+                if (reverseUnknownBaseline) {
+                    std::swap(baselineTopFirst[2], baselineTopFirst[3]);
+                }
+                for (std::size_t idx = 0; idx < baselineTopFirst.size(); ++idx) {
+                    baselineTopFirst[idx].setUniqueId(uidBase + static_cast<int>(idx));
+                    state.knownGeneratedCardPublicIdentity[
+                            baselineTopFirst[idx].getUniqueId()] = true;
+                }
+                for (auto card = baselineTopFirst.rbegin();
+                        card != baselineTopFirst.rend(); ++card) {
+                    state.cards.drawPile.push_back(*card);
+                }
+                state.knownDrawTopUniqueIds = {
+                    baselineTopFirst[0].getUniqueId(),
+                    baselineTopFirst[1].getUniqueId()};
+                state.knownDrawPositionUniqueIds[4] =
+                        baselineTopFirst[4].getUniqueId();
+                const auto insertKnownCard = [&](const CardInstance &card,
+                        const int index) {
+                    const int previousSize = static_cast<int>(state.cards.drawPile.size());
+                    CardInstance inserted(card);
+                    state.knownGeneratedCardPublicIdentity[inserted.getUniqueId()] = true;
+                    state.cards.drawPile.insert(
+                            state.cards.drawPile.begin() + index, inserted);
+                    state.noteRandomDrawInsertion(
+                            state.cards.drawPile[index], previousSize, true);
+                };
+                CardInstance dazed(CardId::DAZED);
+                dazed.setUniqueId(uidBase + 10);
+                insertKnownCard(dazed, firstInsertIndex);
+                CardInstance wound(CardId::WOUND);
+                wound.setUniqueId(uidBase + 11);
+                insertKnownCard(wound, secondInsertIndex);
+                return state;
+            };
+
+            auto first = makeInsertedState(1000, false, 0, 3);
+            auto second = makeInsertedState(2000, true, 2, 5);
+            const std::vector<LightSpeedAction> noActions;
+            const auto firstProjection = makeT096PublicInformationProjection(
+                    gc, first, noActions);
+            const auto secondProjection = makeT096PublicInformationProjection(
+                    gc, second, noActions);
+            const auto firstPayload = canonicalT114PublicJson(firstProjection);
+            const auto secondPayload = canonicalT114PublicJson(secondProjection);
+            const auto firstDrawOrder = firstProjection["visibility"]
+                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+            const auto firstMembership = firstProjection["draw_pile_membership"]
+                    .cast<pybind11::dict>();
+            const auto publicCardCounts = firstMembership["multiset_counts"]
+                    .cast<pybind11::list>();
+            int multisetTotal = 0;
+            for (const auto &rowHandle : publicCardCounts) {
+                multisetTotal += rowHandle.cast<pybind11::dict>()["count"].cast<int>();
+            }
+            const bool projectionSupported =
+                    firstProjection["information_fidelity"].cast<std::string>()
+                            == "supported"
+                    && firstDrawOrder["classification"].cast<std::string>()
+                            == "random_insertion_constraints"
+                    && firstMembership.contains("multiset_counts")
+                    && multisetTotal == firstProjection["draw_pile_size"].cast<int>();
+            const bool hiddenStatesCanonicalizeTogether =
+                    firstPayload == secondPayload
+                    && hiddenFutureFingerprint(first) != hiddenFutureFingerprint(second);
+            const bool noPrivateIdentityOrInsertionOutcomeLeak =
+                    firstPayload.find("unique_id") == std::string::npos
+                    && firstPayload.find("uniqueId") == std::string::npos
+                    && firstPayload.find("actual_insertion_position") == std::string::npos
+                    && firstPayload.find("hidden_insertion_position") == std::string::npos
+                    && firstPayload.find("rng") == std::string::npos;
+            const auto firstInsertions = firstDrawOrder["inserted_card_constraints"]
+                    .cast<pybind11::list>();
+            const bool repeatedInsertionStaysModeled =
+                    first.knownDrawInsertionCards.size() == 2
+                    && firstInsertions.size() == 2
+                    && (first.knownDrawUnsupportedReasons
+                            & static_cast<std::uint8_t>(
+                                    DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)) == 0;
+
+            BattleContext multiActionState;
+            multiActionState.inputState = InputState::PLAYER_NORMAL;
+            multiActionState.turn = 1;
+            multiActionState.cardRandomRng = Random(0x54533118ULL);
+            multiActionState.cards.nextUniqueCardId = 4010;
+            for (int idx = 0; idx < 4; ++idx) {
+                CardInstance card(idx == 0 ? CardId::STRIKE_RED
+                        : idx == 1 ? CardId::DEFEND_RED
+                        : idx == 2 ? CardId::BASH : CardId::HEADBUTT);
+                card.setUniqueId(4000 + idx);
+                multiActionState.knownGeneratedCardPublicIdentity[
+                        card.getUniqueId()] = true;
+                multiActionState.cards.drawPile.push_back(card);
+            }
+            multiActionState.knownDrawTopUniqueIds = {
+                    multiActionState.cards.drawPile.back().getUniqueId()};
+            Actions::ShuffleTempCardIntoDrawPile(CardId::DAZED, 2)
+                    .actFunc(multiActionState);
+            const auto multiActionProjection = makeT096PublicInformationProjection(
+                    gc, multiActionState, noActions);
+            const auto multiActionOrder = multiActionProjection["visibility"]
+                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+            const auto multiActionConstraints = multiActionOrder[
+                    "inserted_card_constraints"].cast<pybind11::list>();
+            const bool representativeMultiCardActionSupported =
+                    multiActionState.knownDrawInsertionCards.size() == 2
+                    && knownDrawStateConsistent(multiActionState)
+                    && multiActionProjection["information_fidelity"]
+                            .cast<std::string>() == "supported"
+                    && multiActionOrder["classification"].cast<std::string>()
+                            == "random_insertion_constraints"
+                    && multiActionConstraints.size() == 1
+                    && multiActionConstraints[0].cast<pybind11::dict>()["count"]
+                            .cast<int>() == 2;
+
+            BattleContext randomizedIdentityState;
+            randomizedIdentityState.inputState = InputState::PLAYER_NORMAL;
+            randomizedIdentityState.turn = 1;
+            randomizedIdentityState.cardRandomRng = Random(0x54533119ULL);
+            randomizedIdentityState.cards.nextUniqueCardId = 4110;
+            for (int idx = 0; idx < 3; ++idx) {
+                CardInstance card(idx == 0 ? CardId::STRIKE_RED
+                        : idx == 1 ? CardId::DEFEND_RED : CardId::BASH);
+                card.setUniqueId(4100 + idx);
+                randomizedIdentityState.knownGeneratedCardPublicIdentity[
+                        card.getUniqueId()] = true;
+                randomizedIdentityState.cards.drawPile.push_back(card);
+            }
+            Actions::PutRandomCardsInDrawPile(CardType::SKILL, 1)
+                    .actFunc(randomizedIdentityState);
+            const auto randomizedIdentityProjection =
+                    makeT096PublicInformationProjection(
+                            gc, randomizedIdentityState, noActions);
+            const auto randomizedIdentityReasons = randomizedIdentityProjection[
+                    "draw_knowledge_unsupported_reasons"].cast<pybind11::list>();
+            const bool unknownGeneratedIdentityFailsClosedNarrowly =
+                    randomizedIdentityProjection["information_fidelity"]
+                            .cast<std::string>() == "unsupported_fidelity"
+                    && randomizedIdentityReasons.size() == 1
+                    && randomizedIdentityReasons[0].cast<std::string>()
+                            == "insertion_membership_unrepresented"
+                    && (randomizedIdentityState.knownDrawUnsupportedReasons
+                            & static_cast<std::uint8_t>(
+                                    DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)) == 0
+                    && !randomizedIdentityProjection["draw_pile_membership"]
+                            .cast<pybind11::dict>().contains("multiset_counts");
+
+            BattleContext sameFaceAmbiguity;
+            sameFaceAmbiguity.cards.drawPile = {
+                    CardInstance(CardId::DEFEND_RED),
+                    CardInstance(CardId::STRIKE_RED)};
+            sameFaceAmbiguity.cards.drawPile[0].setUniqueId(4200);
+            sameFaceAmbiguity.cards.drawPile[1].setUniqueId(4201);
+            sameFaceAmbiguity.knownGeneratedCardPublicIdentity[4200] = true;
+            sameFaceAmbiguity.knownGeneratedCardPublicIdentity[4201] = true;
+            CardInstance firstDazed(CardId::DAZED);
+            firstDazed.setUniqueId(4210);
+            sameFaceAmbiguity.cards.drawPile.insert(
+                    sameFaceAmbiguity.cards.drawPile.begin(), firstDazed);
+            sameFaceAmbiguity.noteRandomDrawInsertion(
+                    sameFaceAmbiguity.cards.drawPile.front(), 2, true);
+            CardInstance topPlacement(CardId::HEADBUTT);
+            topPlacement.setUniqueId(4211);
+            sameFaceAmbiguity.cards.drawPile.push_back(topPlacement);
+            sameFaceAmbiguity.noteKnownDrawTop(topPlacement);
+            CardInstance secondDazed(CardId::DAZED);
+            secondDazed.setUniqueId(4212);
+            const auto secondDazedIndex = static_cast<int>(
+                    sameFaceAmbiguity.cards.drawPile.size() - 1);
+            sameFaceAmbiguity.cards.drawPile.insert(
+                    sameFaceAmbiguity.cards.drawPile.begin() + secondDazedIndex,
+                    secondDazed);
+            sameFaceAmbiguity.noteRandomDrawInsertion(
+                    sameFaceAmbiguity.cards.drawPile[secondDazedIndex], 4, true);
+            const auto consumedTop = sameFaceAmbiguity.cards.popFromDrawPile();
+            sameFaceAmbiguity.consumeKnownDrawTop(consumedTop);
+            const auto consumedDazed = sameFaceAmbiguity.cards.popFromDrawPile();
+            sameFaceAmbiguity.consumeKnownDrawTop(consumedDazed);
+            const bool sameFaceInsertionRoleFailsClosed =
+                    (sameFaceAmbiguity.knownDrawUnsupportedReasons
+                            & static_cast<std::uint8_t>(
+                                    DrawKnowledgeUnsupportedReason::INSERTION_DRAW_IDENTITY_AMBIGUOUS))
+                            != 0
+                    && (sameFaceAmbiguity.knownDrawUnsupportedReasons
+                            & static_cast<std::uint8_t>(
+                                    DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)) == 0;
+
+            bc = first;
+            std::uint64_t sampleSeed = 0;
+            std::set<std::string> particleFingerprints;
+            bool particlePublicParity = true;
+            bool particleConstraintsSatisfied = true;
+            for (int index = 0; index < 24; ++index) {
+                auto particle = buildHiddenFutureParticle(
+                        0x54533115ULL, index, sampleSeed);
+                const auto projection = makeT096PublicInformationProjection(
+                        gc, particle, noActions);
+                particlePublicParity = particlePublicParity
+                        && canonicalT114PublicJson(projection) == firstPayload;
+                particleConstraintsSatisfied = particleConstraintsSatisfied
+                        && knownDrawStateConsistent(particle);
+                for (const auto &insertion : particle.knownDrawInsertionCards) {
+                    const auto found = std::find_if(
+                            particle.cards.drawPile.begin(),
+                            particle.cards.drawPile.end(),
+                            [&](const CardInstance &candidate) {
+                                return candidate.getUniqueId() == insertion.uniqueId;
+                            });
+                    particleConstraintsSatisfied = particleConstraintsSatisfied
+                            && found != particle.cards.drawPile.end()
+                            && static_cast<int>(particle.cards.drawPile.size() - 1)
+                                    - static_cast<int>(std::distance(
+                                            particle.cards.drawPile.begin(), found))
+                                    >= insertion.minimumPositionFromTop;
+                }
+                particleFingerprints.insert(hiddenFutureFingerprint(particle));
+            }
+            const bool jointSamplerPreservesConstraints =
+                    particlePublicParity && particleConstraintsSatisfied
+                    && particleFingerprints.size() > 1;
+
+            BattleContext emptyPile;
+            emptyPile.inputState = InputState::PLAYER_NORMAL;
+            emptyPile.turn = 1;
+            CardInstance emptyInserted(CardId::BASH);
+            emptyInserted.setUniqueId(3000);
+            emptyPile.cards.drawPile.push_back(emptyInserted);
+            emptyPile.noteRandomDrawInsertion(emptyInserted, 0, true);
+            const auto emptyProjection = makeT096PublicInformationProjection(
+                    gc, emptyPile, noActions);
+            const auto emptyOrder = emptyProjection["visibility"]
+                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+            const auto emptyPrefix = emptyOrder["known_top_prefix"].cast<pybind11::list>();
+            const bool emptyPileInsertionIsExactTop =
+                    emptyPile.knownDrawInsertionBaseSize < 0
+                    && emptyPile.knownDrawTopUniqueIds.size() == 1
+                    && emptyOrder["classification"].cast<std::string>() == "known_prefix"
+                    && emptyPrefix.size() == 1
+                    && emptyPrefix[0].cast<pybind11::dict>()["id"].cast<int>()
+                            == static_cast<int>(CardId::BASH);
+
+            BattleContext privateEmptyPile;
+            privateEmptyPile.inputState = InputState::PLAYER_NORMAL;
+            privateEmptyPile.turn = 1;
+            CardInstance privateEmptyInserted(CardId::WRAITH_FORM);
+            privateEmptyInserted.setUniqueId(3030);
+            privateEmptyPile.cards.drawPile.push_back(privateEmptyInserted);
+            privateEmptyPile.noteRandomDrawInsertion(
+                    privateEmptyInserted, 0, false);
+            const auto privateBeforeDrawProjection =
+                    makeT096PublicInformationProjection(
+                            gc, privateEmptyPile, noActions);
+            const auto privateBeforeDrawOrder = privateBeforeDrawProjection[
+                    "visibility"].cast<pybind11::dict>()["draw_order"]
+                    .cast<pybind11::dict>();
+            const auto privateBeforeDrawPayload = canonicalT114PublicJson(
+                    privateBeforeDrawProjection);
+            const auto privateEmptyCardId = static_cast<int>(
+                    privateEmptyInserted.getId());
+            const auto privateEmptyCardName = std::string(
+                    privateEmptyInserted.getName());
+            const bool unknownIdentityEmptyPileStaysPrivateBeforeDraw =
+                    privateBeforeDrawProjection["information_fidelity"]
+                                    .cast<std::string>() == "unsupported_fidelity"
+                    && privateBeforeDrawOrder["classification"]
+                                    .cast<std::string>() == "unsupported_fidelity"
+                    && !privateBeforeDrawOrder.contains("known_top_prefix")
+                    && privateBeforeDrawPayload.find(
+                            "\"id\":" + std::to_string(privateEmptyCardId))
+                            == std::string::npos
+                    && privateBeforeDrawPayload.find(
+                            "\"name\":\"" + privateEmptyCardName + "\"")
+                            == std::string::npos
+                    && !privateBeforeDrawProjection["draw_pile_membership"]
+                            .cast<pybind11::dict>().contains("multiset_counts");
+
+            privateEmptyPile.cards.draw(privateEmptyPile, 1);
+            const auto privateAfterDrawProjection =
+                    makeT096PublicInformationProjection(
+                            gc, privateEmptyPile, noActions);
+            const auto privateAfterDrawHand = privateAfterDrawProjection["hand"]
+                    .cast<pybind11::list>();
+            const auto privateAfterDrawReasons = privateAfterDrawProjection[
+                    "draw_knowledge_unsupported_reasons"].cast<pybind11::list>();
+            const bool unknownIdentityBecomesPublicAfterDraw =
+                    privateAfterDrawProjection["information_fidelity"]
+                                    .cast<std::string>() == "supported"
+                    && privateAfterDrawReasons.empty()
+                    && privateAfterDrawHand.size() == 1
+                    && privateAfterDrawHand[0].cast<pybind11::dict>()["id"]
+                                    .cast<int>() == privateEmptyCardId
+                    && privateAfterDrawHand[0].cast<pybind11::dict>()["name"]
+                                    .cast<std::string>() == privateEmptyCardName
+                    && privateEmptyPile.knownGeneratedCardPublicIdentity[
+                            privateEmptyInserted.getUniqueId()];
+
+            auto bottomState = first;
+            CardInstance knownBottom(CardId::ARMAMENTS);
+            knownBottom.setUniqueId(3010);
+            bottomState.cards.drawPile.insert(bottomState.cards.drawPile.begin(), knownBottom);
+            bottomState.noteKnownDrawBottom(knownBottom);
+            const auto bottomProjection = makeT096PublicInformationProjection(
+                    gc, bottomState, noActions);
+            const auto bottomOrder = bottomProjection["visibility"]
+                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+            const auto bottomConstraints = bottomOrder["inserted_card_constraints"]
+                    .cast<pybind11::list>();
+            bool bottomBoundPublished = false;
+            for (const auto &rowHandle : bottomConstraints) {
+                const auto row = rowHandle.cast<pybind11::dict>();
+                bottomBoundPublished = bottomBoundPublished
+                        || row.contains("before_baseline_position_from_top");
+            }
+            bc = bottomState;
+            bool bottomSamplerPreserved = true;
+            for (int index = 0; index < 8; ++index) {
+                auto particle = buildHiddenFutureParticle(
+                        0x54533116ULL, index, sampleSeed);
+                bottomSamplerPreserved = bottomSamplerPreserved
+                        && knownDrawStateConsistent(particle)
+                        && particle.cards.drawPile.front().getUniqueId()
+                                == knownBottom.getUniqueId();
+            }
+
+            auto topState = first;
+            CardInstance knownTop(CardId::HEADBUTT);
+            knownTop.setUniqueId(3020);
+            topState.cards.drawPile.push_back(knownTop);
+            topState.noteKnownDrawTop(knownTop);
+            const auto topProjection = makeT096PublicInformationProjection(
+                    gc, topState, noActions);
+            const auto topOrder = topProjection["visibility"]
+                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+            bc = topState;
+            bool topSamplerPreserved = true;
+            for (int index = 0; index < 8; ++index) {
+                auto particle = buildHiddenFutureParticle(
+                        0x54533117ULL, index, sampleSeed);
+                topSamplerPreserved = topSamplerPreserved
+                        && knownDrawStateConsistent(particle)
+                        && particle.cards.drawPile.back().getUniqueId()
+                                == knownTop.getUniqueId();
+            }
+            auto drawnState = first;
+            const auto drawnTop = drawnState.cards.popFromDrawPile();
+            drawnState.consumeKnownDrawTop(drawnTop);
+            const bool topDrawComposesWithInsertion =
+                    knownDrawStateConsistent(drawnState)
+                    && drawnState.knownDrawInsertionBaseSize >= 0
+                    && (drawnState.knownDrawUnsupportedReasons
+                            & static_cast<std::uint8_t>(
+                                    DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT)) == 0;
+            auto frozenState = first;
+            frozenState.player.setHasRelic<R::FROZEN_EYE>(true);
+            const auto frozenProjection = makeT096PublicInformationProjection(
+                    gc, frozenState, noActions);
+            const auto frozenOrder = frozenProjection["visibility"]
+                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+            const bool frozenEyeStillExact =
+                    frozenOrder["classification"].cast<std::string>()
+                            == "full_public_exact"
+                    && frozenOrder["visible_order_from_top"].cast<pybind11::list>()
+                            .size() == frozenState.cards.drawPile.size();
+
+            pybind11::dict report;
+            report["schema_id"] = "native-t115-draw-insertion-audit-v1";
+            report["synthetic_only"] = true;
+            report["ordinary_insertion_supported_with_exact_multiset"] = projectionSupported;
+            report["hidden_realizations_share_public_identity"] = hiddenStatesCanonicalizeTogether;
+            report["no_private_identity_or_insertion_outcome_leak"] =
+                    noPrivateIdentityOrInsertionOutcomeLeak;
+            report["repeated_insertions_remain_jointly_modeled"] =
+                    repeatedInsertionStaysModeled;
+            report["representative_multi_card_action_supported"] =
+                    representativeMultiCardActionSupported;
+            report["unknown_generated_identity_fails_closed_narrowly"] =
+                    unknownGeneratedIdentityFailsClosedNarrowly;
+            report["same_face_insertion_role_ambiguity_fails_closed"] =
+                    sameFaceInsertionRoleFailsClosed;
+            report["sampled_particles_preserve_public_constraints"] =
+                    jointSamplerPreservesConstraints;
+            report["empty_pile_insertion_is_exact_top"] = emptyPileInsertionIsExactTop;
+            report["known_bottom_composes_as_relative_bound"] = bottomBoundPublished
+                    && knownDrawStateConsistent(bottomState);
+            report["sampler_preserves_known_bottom_bound"] = bottomSamplerPreserved;
+            report["known_top_composes_with_insertion"] =
+                    topOrder["classification"].cast<std::string>()
+                            == "random_insertion_constraints"
+                    && topOrder.contains("known_top_prefix");
+            report["sampler_preserves_known_top"] = topSamplerPreserved;
+            report["top_draw_consumes_insertion_constraints"] =
+                    topDrawComposesWithInsertion;
+            report["unknown_identity_empty_pile_private_until_draw"] =
+                    unknownIdentityEmptyPileStaysPrivateBeforeDraw
+                    && unknownIdentityBecomesPublicAfterDraw;
+            report["frozen_eye_remains_full_order_exact"] = frozenEyeStillExact;
+            restore();
+            return report;
+        } catch (...) {
+            restore();
+            throw;
+        }
+    }
+
     pybind11::dict t096VisibilityAudit() {
         const auto savedBattleContext = bc;
         const auto savedBattleActive = battleActive;
@@ -3183,6 +3962,8 @@ struct StepSimulator {
         knownCardB.setUniqueId(103);
         bc.cards.drawPile.push_back(privateCardA);
         bc.cards.drawPile.push_back(privateCardB);
+        bc.knownGeneratedCardPublicIdentity[100] = true;
+        bc.knownGeneratedCardPublicIdentity[101] = true;
         bc.cards.discardPile.push_back(knownCardA);
         bc.cards.discardPile.push_back(knownCardB);
 
@@ -3367,10 +4148,13 @@ struct StepSimulator {
         const auto insertionProjection = t096PublicInformationProjection();
         const auto insertionDrawOrder = insertionProjection["visibility"]
                 .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
-        const bool randomInsertionReasonTyped = insertionDrawOrder["classification"]
-                .cast<std::string>() == "unsupported_fidelity"
-                && insertionDrawOrder["unsupported_reasons"].cast<pybind11::list>()[0]
-                        .cast<std::string>() == "unknown_insertion";
+        const bool randomInsertionConstraintTyped = insertionDrawOrder["classification"]
+                .cast<std::string>() == "random_insertion_constraints"
+                && insertionProjection["information_fidelity"].cast<std::string>()
+                        == "supported"
+                && (bc.knownDrawUnsupportedReasons
+                        & static_cast<std::uint8_t>(
+                                DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)) == 0;
 
         Monster book;
         book.id = MonsterId::BOOK_OF_STABBING;
@@ -3558,7 +4342,7 @@ struct StepSimulator {
         report["subset_reveal_fails_closed"] = subsetRevealFailsClosed;
         report["subset_reveal_shuffle_stays_unsupported"] = subsetRevealShuffleStaysUnsupported;
         report["subset_reveal_sampler_fails_closed"] = subsetRevealSamplerFailsClosed;
-        report["draw_knowledge_reason_typed"] = randomInsertionReasonTyped;
+        report["random_insertion_constraint_typed"] = randomInsertionConstraintTyped;
         report["frozen_eye_full_order"] = frozenDrawOrder["classification"]
                 .cast<std::string>() == "full_public_exact"
                 && frozenVisibleOrder.size() == bc.cards.drawPile.size();
@@ -3598,7 +4382,7 @@ struct StepSimulator {
             throw std::runtime_error(
                     "T096 hidden-future sampling requested outside battle");
         }
-        if (publicInformationUnsupported(bc)) {
+        if (publicInformationUnsupported(gc, bc)) {
             throw std::runtime_error(
                     "T096 hidden-future sampling unavailable: unsupported_fidelity");
         }
@@ -3977,7 +4761,7 @@ struct StepSimulator {
                     "STSRL-006 particle Search requested outside battle");
         }
         pybind11::dict anchorTrace;
-        if (publicInformationUnsupported(bc)) {
+        if (publicInformationUnsupported(gc, bc)) {
             anchorTrace = appendParticleSearchStageTraceRow(pybind11::none());
             setParticleSearchStage(anchorTrace,
                     "public_fidelity_validation", "entered");
@@ -4055,7 +4839,7 @@ struct StepSimulator {
             std::vector<LightSpeedAction> actions;
             pybind11::dict projection;
             try {
-                if (publicInformationUnsupported(particle)) {
+                if (publicInformationUnsupported(gc, particle)) {
                     throw std::runtime_error(
                             "STSRL-006 sampled particle became unsupported_fidelity");
                 }
@@ -4367,6 +5151,7 @@ struct StepSimulator {
                 CardInstance card(cardId);
                 card.setUniqueId(uniqueId);
                 bc.cards.drawPile.push_back(card);
+                bc.knownGeneratedCardPublicIdentity[card.getUniqueId()] = true;
             }
             battleActive = true;
 
@@ -4573,6 +5358,7 @@ struct StepSimulator {
                 CardInstance card(cardId);
                 card.setUniqueId(uniqueId);
                 bc.cards.drawPile.push_back(card);
+                bc.knownGeneratedCardPublicIdentity[card.getUniqueId()] = true;
             }
             battleActive = true;
 
@@ -4735,6 +5521,7 @@ struct StepSimulator {
                 CardInstance card(cardId);
                 card.setUniqueId(uniqueId);
                 bc.cards.drawPile.push_back(card);
+                bc.knownGeneratedCardPublicIdentity[card.getUniqueId()] = true;
             }
             battleActive = true;
 
@@ -5023,6 +5810,7 @@ struct StepSimulator {
                 CardInstance card(cardId);
                 card.setUniqueId(uniqueId);
                 bc.cards.drawPile.push_back(card);
+                bc.knownGeneratedCardPublicIdentity[card.getUniqueId()] = true;
             }
             bc.potionCapacity = 1;
             bc.potionCount = 1;
@@ -6214,6 +7002,7 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
         .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
         .def("t096_visibility_audit", &StepSimulator::t096VisibilityAudit)
+        .def("t115_draw_insertion_audit", &StepSimulator::t115DrawInsertionAudit)
         .def("t114_shared_public_belief_search_audit",
                 &StepSimulator::t114SharedPublicBeliefSearchAudit)
         .def("t114_prepare_shared_public_belief_particle_pool",
