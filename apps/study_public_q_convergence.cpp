@@ -990,7 +990,9 @@ int main(int argc, char **argv) {
         report["search_policy"] = "one UCT tree keyed by public state and public action/result history; selection uses only search seed, public node key, and shared node/action statistics";
         report["particle_scheduling"] = "root action is selected before any particle is sampled; each root action receives a deterministic cyclic schedule over all 32 particles, balanced to within one visit, while future action selection uses only public observations and shared tree statistics";
         report["return_definition"] = "terminal victory/loss is +1/-1; at 64 public decision steps use clamp(player_hp/max_hp - 0.5 * sum(monster_hp/max_hp), -1, 1) from the public state";
-        report["uncertainty_definition"] = "sample standard error across four independent search and sampler replicate means; top-two gap uncertainty uses paired replicate differences";
+        report["uncertainty_definition"] = "sample standard error across "
+                + std::to_string(kReplicates)
+                + " independent search and sampler replicate means; top-two gap uncertainty uses paired replicate differences";
         report["budget_schedule"] = pb::make_tuple(96, 384, 1536);
         report["budget_semantics"] = "nested cumulative prefixes of one run per anchor and replicate; each checkpoint is a fixed total simulation budget, not multiplied by particle count";
         report["particle_count"] = kParticleCount;
