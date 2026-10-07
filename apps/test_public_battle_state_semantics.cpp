@@ -606,6 +606,32 @@ void verifySamplerFailsClosedForUnrepresentedPlayerTiming() {
             });
 }
 
+void verifyHexaghostCycleCounterFailsClosed() {
+    auto earlyCycle = makePublicBattleFixture(
+            false, MonsterEncounter::HEXAGHOST);
+    auto laterCycle = earlyCycle;
+    auto &earlyHexaghost = earlyCycle.bc.monsters.arr[0];
+    auto &laterHexaghost = laterCycle.bc.monsters.arr[0];
+    earlyHexaghost.moveHistory[0] = MMID::HEXAGHOST_SEAR;
+    earlyHexaghost.moveHistory[1] = MMID::HEXAGHOST_TACKLE;
+    laterHexaghost.moveHistory[0] = MMID::HEXAGHOST_SEAR;
+    laterHexaghost.moveHistory[1] = MMID::HEXAGHOST_TACKLE;
+    earlyHexaghost.uniquePower0 = 0;
+    laterHexaghost.uniquePower0 = 5;
+
+    const auto earlyState = earlyCycle.publicBattleState();
+    const auto laterState = laterCycle.publicBattleState();
+    require(pybind11::cast<std::string>(earlyState["information_fidelity"])
+                    == "supported",
+            "Hexaghost cycle-counter fixture is not a supported public state");
+    require(earlyState.equal(laterState),
+            "Hexaghost cycle-counter fixtures do not have the same public battle state");
+    require(earlyHexaghost.uniquePower0 != laterHexaghost.uniquePower0,
+            "Hexaghost cycle-counter fixtures did not vary the hidden counter");
+    requireSamplerRejected(earlyCycle, "Hexaghost early-cycle sampler anchor");
+    requireSamplerRejected(laterCycle, "Hexaghost later-cycle sampler anchor");
+}
+
 } // namespace
 
 int main() {
@@ -623,6 +649,7 @@ int main() {
     verifySamplerFailsClosedForUnsupportedFidelity();
     verifySamplerFailsClosedForUnrepresentedMonsterFuture();
     verifySamplerFailsClosedForUnrepresentedPlayerTiming();
+    verifyHexaghostCycleCounterFailsClosed();
     std::cout << "PUBLIC_BATTLE_STATE_SEMANTICS_PASS\n";
     return 0;
 }

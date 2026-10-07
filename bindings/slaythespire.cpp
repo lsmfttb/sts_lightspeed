@@ -1168,6 +1168,12 @@ struct StepSimulator {
         }
         for (int idx = 0; idx < anchor.bc.monsters.monsterCount; ++idx) {
             const auto &monster = anchor.bc.monsters.arr[idx];
+            // Divider damage is public, but this separate Sear-cycle counter
+            // is not in the public snapshot and changes later Hexaghost moves.
+            if (monster.id == MonsterId::HEXAGHOST && monster.isAlive()) {
+                throw std::runtime_error(
+                        "public-consistent sampling cannot represent Hexaghost's hidden move-cycle counter");
+            }
             if (publicMonsterCounterKnowledge(anchor.bc, monster)
                     == PublicMonsterCounterKnowledge::PRIVATE_ONLY) {
                 throw std::runtime_error(
