@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <array>
+#include <map>
 
 #include "sts_common.h"
 
@@ -32,6 +33,32 @@ namespace sts {
         UNDECIDED=0,
         PLAYER_VICTORY,
         PLAYER_LOSS,
+    };
+
+    // Exact draw facts and unrepresented player knowledge have different
+    // lifetimes.  Keep the latter typed so a transition can clear only the
+    // reason it actually resolves (for example, shuffling exact order does
+    // not resolve subset-membership knowledge).
+    enum class DrawKnowledgeUnsupportedReason : std::uint8_t {
+        NONE = 0,
+        SUBSET_MEMBERSHIP = 1 << 0,
+        UNKNOWN_INSERTION = 1 << 1,
+        INCONSISTENT_EXACT_FACT = 1 << 2,
+        INSERTION_DRAW_IDENTITY_AMBIGUOUS = 1 << 3,
+        INSERTION_NON_TOP_DRAW_UNREPRESENTED = 1 << 4,
+        INSERTION_CONSTRAINT_INCONSISTENT = 1 << 5,
+        INSERTION_MEMBERSHIP_UNREPRESENTED = 1 << 6,
+    };
+
+    struct DrawKnowledgeAnchor {
+        std::int32_t basePositionFromTop = 0;
+        std::int16_t uniqueId = -1;
+    };
+
+    struct DrawKnowledgeInsertion {
+        std::int16_t uniqueId = -1;
+        std::int32_t minimumPositionFromTop = 1;
+        std::int16_t beforeAnchorUniqueId = -1;
     };
 
     static constexpr const char * battleOutcomeStrings[] {
@@ -82,12 +109,37 @@ namespace sts {
 
         int potionCount = 0;
         int potionCapacity = 3;
-        std::array<Potion, 5> potions;
+        std::array<Potion, 5> potions{
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT,
+            Potion::EMPTY_POTION_SLOT};
 
         int turn = 0;
         Player player;
         MonsterGroup monsters;
         CardManager cards;
+
+        // Epistemic state only.  The vector records a known top prefix,
+        // ordered from the top of the draw pile down.  The map records exact
+        // known positions from the top that are not part of that prefix (for
+        // example Forethought's known bottom placement).  Neither affects
+        // mechanics, RNG, or legal actions, and ordinary checkpoint copies
+        // retain the same current player knowledge.
+        std::vector<std::int16_t> knownDrawTopUniqueIds;
+        std::map<std::int32_t, std::int16_t> knownDrawPositionUniqueIds;
+        std::uint8_t knownDrawUnsupportedReasons = 0;
+        // A random insertion is represented as a joint constraint over a
+        // baseline draw-pile permutation and the inserted cards. Anchors keep
+        // exact facts in the baseline permutation; insertion cards retain
+        // only their public rank domain and optional bottom-anchor bound.
+        // Unique ids are runtime bookkeeping and are never serialized into a
+        // public projection or public node key.
+        std::int32_t knownDrawInsertionBaseSize = -1;
+        std::vector<DrawKnowledgeAnchor> knownDrawInsertionAnchors;
+        std::vector<DrawKnowledgeInsertion> knownDrawInsertionCards;
+        std::map<std::int16_t, bool> knownGeneratedCardPublicIdentity;
 
         CardQueueItem curCardQueueItem;
 
@@ -187,6 +239,20 @@ namespace sts {
 
         void onManualDiscard(const CardInstance &c);
         void onShuffle();
+        void clearKnownDrawOrder();
+        void noteKnownDrawTop(const CardInstance &c);
+        void noteKnownDrawBottom(const CardInstance &c);
+        void consumeKnownDrawTop(const CardInstance &c);
+        void consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c);
+        void markDrawKnowledgeUnsupported(
+                DrawKnowledgeUnsupportedReason reason =
+                        DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
+        void noteRandomDrawInsertion(
+                const CardInstance &card, int previousPileSize,
+                bool publicIdentityKnown = true);
+        void insertTempCardRandomlyIntoDrawPile(
+                const CardInstance &card, bool publicIdentityKnown = true);
+        void shuffleCardIntoDrawPile(const CardInstance &card);
         void triggerAndMoveToExhaustPile(CardInstance c);
         void mummifiedHandOnUsePower();
 

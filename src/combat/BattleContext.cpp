@@ -19,6 +19,13 @@ void BattleContext::init(const GameContext &gc) {
 }
 
 void BattleContext::init(const GameContext &gc, MonsterEncounter encounterToInit) {
+    knownDrawTopUniqueIds.clear();
+    knownDrawPositionUniqueIds.clear();
+    knownDrawUnsupportedReasons = 0;
+    knownDrawInsertionBaseSize = -1;
+    knownDrawInsertionAnchors.clear();
+    knownDrawInsertionCards.clear();
+    knownGeneratedCardPublicIdentity.clear();
     undefinedBehaviorEvoked = false;
     haveUsedDiscoveryAction = false;
     seed = gc.seed;
@@ -1997,9 +2004,10 @@ void BattleContext::onAfterUseCard() {
 
         if (rebound) { // these methods all call resetCardBeforeMoving but it looks unnecessary
             cards.moveToDrawPileTop(c);
+            noteKnownDrawTop(c);
 
         } else if (c.id == CardId::TANTRUM) {
-            cards.shuffleIntoDrawPile(cardRandomRng, c);
+            shuffleCardIntoDrawPile(c);
 
         } else {
             // The game calls OnCardDrawOrDiscard here which only does two things:
@@ -2521,7 +2529,9 @@ void BattleContext::playTopCardInDrawPile(int monsterTargetIdx, bool exhausts) {
         return;
     }
 
-    CardQueueItem item(cards.popFromDrawPile(), monsterTargetIdx, player.energy);
+    const auto card = cards.popFromDrawPile();
+    consumeKnownDrawTop(card);
+    CardQueueItem item(card, monsterTargetIdx, player.energy);
     item.exhaustOnUse = exhausts;
     item.autoplay = true;
     item.freeToPlay = true; // todo remove the autoplay boolean? added this instead
@@ -2792,7 +2802,429 @@ void BattleContext::onManualDiscard(const CardInstance &c) {
     }
 }
 
+void BattleContext::clearKnownDrawOrder() {
+    knownDrawTopUniqueIds.clear();
+    knownDrawPositionUniqueIds.clear();
+    knownDrawInsertionBaseSize = -1;
+    knownDrawInsertionAnchors.clear();
+    knownDrawInsertionCards.clear();
+    constexpr auto insertionReasons = static_cast<std::uint8_t>(
+            DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)
+            | static_cast<std::uint8_t>(
+                    DrawKnowledgeUnsupportedReason::INSERTION_DRAW_IDENTITY_AMBIGUOUS)
+            | static_cast<std::uint8_t>(
+                    DrawKnowledgeUnsupportedReason::INSERTION_NON_TOP_DRAW_UNREPRESENTED)
+            | static_cast<std::uint8_t>(
+                    DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+    knownDrawUnsupportedReasons &= static_cast<std::uint8_t>(~insertionReasons);
+    // Clearing exact order constraints is not the same as resolving an
+    // unsupported information transition.  A subset/membership reveal or an
+    // inconsistent fact can leave the hidden state under-specified even after
+    // a later shuffle, so preserve those fail-closed epistemic markers.
+}
+
+void BattleContext::noteKnownDrawTop(const CardInstance &c) {
+    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    if (knownDrawInsertionBaseSize >= 0) {
+        ++knownDrawInsertionBaseSize;
+        for (auto &anchor : knownDrawInsertionAnchors) {
+            ++anchor.basePositionFromTop;
+        }
+        knownDrawInsertionAnchors.push_back({0, c.getUniqueId()});
+        std::sort(knownDrawInsertionAnchors.begin(),
+                knownDrawInsertionAnchors.end(),
+                [](const auto &lhs, const auto &rhs) {
+                    return lhs.basePositionFromTop < rhs.basePositionFromTop;
+                });
+        for (auto &insertion : knownDrawInsertionCards) {
+            ++insertion.minimumPositionFromTop;
+        }
+        knownDrawTopUniqueIds.assign(1, c.getUniqueId());
+        knownDrawPositionUniqueIds.clear();
+        return;
+    }
+    // A visible deterministic placement (for example Headbutt or Rebound)
+    // establishes a new known top card.  Existing exact positions move one
+    // slot away from the top.
+    std::map<std::int32_t, std::int16_t> shiftedBeforeTop;
+    for (const auto &[position, uniqueId] : knownDrawPositionUniqueIds) {
+        shiftedBeforeTop[position + 1] = uniqueId;
+    }
+    knownDrawPositionUniqueIds.swap(shiftedBeforeTop);
+    knownDrawTopUniqueIds.insert(knownDrawTopUniqueIds.begin(), c.getUniqueId());
+}
+
+void BattleContext::noteKnownDrawBottom(const CardInstance &c) {
+    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    if (knownDrawInsertionBaseSize >= 0) {
+        const auto bottomPosition = knownDrawInsertionBaseSize;
+        knownDrawInsertionAnchors.push_back({bottomPosition, c.getUniqueId()});
+        ++knownDrawInsertionBaseSize;
+        for (auto &insertion : knownDrawInsertionCards) {
+            // Existing insertions precede a deterministic bottom placement.
+            // Preserve an earlier, stricter bottom bound when present.
+            if (insertion.beforeAnchorUniqueId < 0) {
+                insertion.beforeAnchorUniqueId = c.getUniqueId();
+            }
+        }
+        knownDrawPositionUniqueIds.clear();
+        return;
+    }
+    // Forethought inserts at vector index zero, i.e. the bottom of the native
+    // draw pile.  A one-card pile is both bottom- and top-known.
+    if (cards.drawPile.size() == 1) {
+        noteKnownDrawTop(c);
+        return;
+    }
+    knownDrawPositionUniqueIds[static_cast<std::int32_t>(cards.drawPile.size() - 1)]
+            = c.getUniqueId();
+}
+
+void BattleContext::consumeKnownDrawTop(const CardInstance &c) {
+    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    const bool hasUnrepresentedMembership = std::any_of(
+            cards.drawPile.begin(), cards.drawPile.end(),
+            [&](const CardInstance &candidate) {
+                const auto known = knownGeneratedCardPublicIdentity.find(
+                        candidate.getUniqueId());
+                return known != knownGeneratedCardPublicIdentity.end()
+                        && !known->second;
+            });
+    if (!hasUnrepresentedMembership) {
+        knownDrawUnsupportedReasons &= static_cast<std::uint8_t>(
+                ~static_cast<std::uint8_t>(
+                        DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED));
+    }
+    if (knownDrawInsertionBaseSize >= 0) {
+        const auto samePublicCard = [](const CardInstance &lhs, const CardInstance &rhs) {
+            return lhs.getId() == rhs.getId()
+                    && lhs.isUpgraded() == rhs.isUpgraded();
+        };
+        const auto clearInsertionModel = [this]() {
+            knownDrawTopUniqueIds.clear();
+            knownDrawPositionUniqueIds.clear();
+            knownDrawInsertionBaseSize = -1;
+            knownDrawInsertionAnchors.clear();
+            knownDrawInsertionCards.clear();
+        };
+        int matchingInsertionCount = 0;
+        for (const auto &insertion : knownDrawInsertionCards) {
+            if (insertion.uniqueId == c.getUniqueId()) {
+                ++matchingInsertionCount;
+                continue;
+            }
+            const auto insertedCard = std::find_if(
+                    cards.drawPile.begin(), cards.drawPile.end(),
+                    [&](const CardInstance &candidate) {
+                        return candidate.getUniqueId() == insertion.uniqueId;
+                    });
+            if (insertedCard != cards.drawPile.end()
+                    && samePublicCard(*insertedCard, c)) {
+                ++matchingInsertionCount;
+            }
+        }
+        int matchingPileCount = 1;
+        for (const auto &candidate : cards.drawPile) {
+            if (samePublicCard(candidate, c)) {
+                ++matchingPileCount;
+            }
+        }
+        std::vector<std::pair<std::int32_t, std::int16_t>> matchingInsertionDomains;
+        for (const auto &insertion : knownDrawInsertionCards) {
+            const CardInstance *insertedCard = nullptr;
+            if (insertion.uniqueId == c.getUniqueId()) {
+                insertedCard = &c;
+            } else {
+                const auto found = std::find_if(
+                        cards.drawPile.begin(), cards.drawPile.end(),
+                        [&](const CardInstance &candidate) {
+                            return candidate.getUniqueId() == insertion.uniqueId;
+                        });
+                if (found != cards.drawPile.end()) {
+                    insertedCard = &*found;
+                }
+            }
+            if (insertedCard == nullptr || !samePublicCard(*insertedCard, c)) {
+                continue;
+            }
+            const auto domain = std::make_pair(
+                    insertion.minimumPositionFromTop,
+                    insertion.beforeAnchorUniqueId);
+            if (std::find(matchingInsertionDomains.begin(),
+                    matchingInsertionDomains.end(), domain)
+                    == matchingInsertionDomains.end()) {
+                matchingInsertionDomains.push_back(domain);
+            }
+        }
+        if ((matchingInsertionCount > 0
+                    && matchingInsertionCount < matchingPileCount)
+                || matchingInsertionDomains.size() > 1) {
+            clearInsertionModel();
+            markDrawKnowledgeUnsupported(
+                    DrawKnowledgeUnsupportedReason::INSERTION_DRAW_IDENTITY_AMBIGUOUS);
+            return;
+        }
+
+        const bool drewInsertion = matchingInsertionCount > 0;
+        if (drewInsertion) {
+            const auto insertion = std::find_if(
+                    knownDrawInsertionCards.begin(),
+                    knownDrawInsertionCards.end(),
+                    [&](const DrawKnowledgeInsertion &candidate) {
+                        return candidate.uniqueId == c.getUniqueId();
+                    });
+            if (insertion == knownDrawInsertionCards.end()
+                    || insertion->minimumPositionFromTop != 0) {
+                clearInsertionModel();
+                markDrawKnowledgeUnsupported(
+                        DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                return;
+            }
+            knownDrawInsertionCards.erase(insertion);
+        } else {
+            --knownDrawInsertionBaseSize;
+            const auto topAnchor = std::find_if(
+                    knownDrawInsertionAnchors.begin(),
+                    knownDrawInsertionAnchors.end(),
+                    [](const DrawKnowledgeAnchor &anchor) {
+                        return anchor.basePositionFromTop == 0;
+                    });
+            if (topAnchor != knownDrawInsertionAnchors.end()) {
+                if (topAnchor->uniqueId != c.getUniqueId()) {
+                    clearInsertionModel();
+                    markDrawKnowledgeUnsupported(
+                            DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                    return;
+                }
+                const auto anchorCard = std::find_if(
+                        cards.drawPile.begin(), cards.drawPile.end(),
+                        [&](const CardInstance &candidate) {
+                            return candidate.getUniqueId() == topAnchor->uniqueId;
+                        });
+                if (anchorCard != cards.drawPile.end()
+                        && !samePublicCard(*anchorCard, c)) {
+                    clearInsertionModel();
+                    markDrawKnowledgeUnsupported(
+                            DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+                    return;
+                }
+                knownDrawInsertionAnchors.erase(topAnchor);
+            }
+            for (auto &anchor : knownDrawInsertionAnchors) {
+                --anchor.basePositionFromTop;
+            }
+        }
+        for (auto &insertion : knownDrawInsertionCards) {
+            insertion.minimumPositionFromTop = std::max(
+                    0, insertion.minimumPositionFromTop - 1);
+        }
+        knownDrawTopUniqueIds.clear();
+        knownDrawPositionUniqueIds.clear();
+
+        if (knownDrawInsertionCards.empty()) {
+            std::sort(knownDrawInsertionAnchors.begin(),
+                    knownDrawInsertionAnchors.end(),
+                    [](const auto &lhs, const auto &rhs) {
+                        return lhs.basePositionFromTop < rhs.basePositionFromTop;
+                    });
+            for (const auto &anchor : knownDrawInsertionAnchors) {
+                if (anchor.basePositionFromTop
+                        == static_cast<std::int32_t>(knownDrawTopUniqueIds.size())) {
+                    knownDrawTopUniqueIds.push_back(anchor.uniqueId);
+                } else {
+                    knownDrawPositionUniqueIds[anchor.basePositionFromTop]
+                            = anchor.uniqueId;
+                }
+            }
+            knownDrawInsertionBaseSize = -1;
+            knownDrawInsertionAnchors.clear();
+        }
+        return;
+    }
+    if (!knownDrawTopUniqueIds.empty()
+            && knownDrawTopUniqueIds.front() != c.getUniqueId()) {
+        // A transition we did not model as a deterministic public draw has
+        // occurred.  Conservatively retain no exact-order claim.
+        clearKnownDrawOrder();
+        markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
+        return;
+    }
+    const auto positionZero = knownDrawPositionUniqueIds.find(0);
+    if (positionZero != knownDrawPositionUniqueIds.end()) {
+        if (positionZero->second != c.getUniqueId()) {
+            clearKnownDrawOrder();
+            markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
+            return;
+        }
+        knownDrawPositionUniqueIds.erase(positionZero);
+    }
+    if (!knownDrawTopUniqueIds.empty()) {
+        knownDrawTopUniqueIds.erase(knownDrawTopUniqueIds.begin());
+    }
+    std::map<std::int32_t, std::int16_t> shiftedAfterTop;
+    for (const auto &[position, uniqueId] : knownDrawPositionUniqueIds) {
+        shiftedAfterTop[position - 1] = uniqueId;
+    }
+    knownDrawPositionUniqueIds.swap(shiftedAfterTop);
+    // Promote exact position facts that have become a contiguous known top
+    // prefix after consuming the previous top card.
+    while (true) {
+        const auto it = knownDrawPositionUniqueIds.find(0);
+        if (it == knownDrawPositionUniqueIds.end()) {
+            break;
+        }
+        knownDrawTopUniqueIds.push_back(it->second);
+        knownDrawPositionUniqueIds.erase(it);
+    }
+}
+
+void BattleContext::consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c) {
+    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    const bool hasOtherUnrepresentedMembership = std::any_of(
+            cards.drawPile.begin(), cards.drawPile.end(),
+            [&](const CardInstance &candidate) {
+                if (candidate.getUniqueId() == c.getUniqueId()) {
+                    return false;
+                }
+                const auto known = knownGeneratedCardPublicIdentity.find(
+                        candidate.getUniqueId());
+                return known != knownGeneratedCardPublicIdentity.end()
+                        && !known->second;
+            });
+    if (!hasOtherUnrepresentedMembership) {
+        knownDrawUnsupportedReasons &= static_cast<std::uint8_t>(
+                ~static_cast<std::uint8_t>(
+                        DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED));
+    }
+    if (knownDrawInsertionBaseSize >= 0) {
+        knownDrawTopUniqueIds.clear();
+        knownDrawPositionUniqueIds.clear();
+        knownDrawInsertionBaseSize = -1;
+        knownDrawInsertionAnchors.clear();
+        knownDrawInsertionCards.clear();
+        markDrawKnowledgeUnsupported(
+                DrawKnowledgeUnsupportedReason::INSERTION_NON_TOP_DRAW_UNREPRESENTED);
+        return;
+    }
+    const auto pileSize = static_cast<int>(cards.drawPile.size());
+    if (drawPileIdx < 0 || drawPileIdx >= pileSize) {
+        markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
+        return;
+    }
+    const auto position = pileSize - 1 - drawPileIdx;
+    if (position < static_cast<int>(knownDrawTopUniqueIds.size())) {
+        if (knownDrawTopUniqueIds[position] != c.getUniqueId()) {
+            clearKnownDrawOrder();
+            markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
+            return;
+        }
+        knownDrawTopUniqueIds.erase(knownDrawTopUniqueIds.begin() + position);
+    } else {
+        const auto it = knownDrawPositionUniqueIds.find(position);
+        if (it != knownDrawPositionUniqueIds.end()) {
+            if (it->second != c.getUniqueId()) {
+                clearKnownDrawOrder();
+                markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::INCONSISTENT_EXACT_FACT);
+                return;
+            }
+            knownDrawPositionUniqueIds.erase(it);
+        }
+    }
+    if (position < pileSize - 1) {
+        std::map<std::int32_t, std::int16_t> shifted;
+        for (const auto &[knownPosition, uniqueId] : knownDrawPositionUniqueIds) {
+            shifted[knownPosition > position ? knownPosition - 1 : knownPosition]
+                    = uniqueId;
+        }
+        knownDrawPositionUniqueIds.swap(shifted);
+    }
+}
+
+void BattleContext::markDrawKnowledgeUnsupported(
+        const DrawKnowledgeUnsupportedReason reason) {
+    knownDrawUnsupportedReasons |= static_cast<std::uint8_t>(reason);
+}
+
+void BattleContext::noteRandomDrawInsertion(
+        const CardInstance &card, const int previousPileSize,
+        const bool publicIdentityKnown) {
+    knownGeneratedCardPublicIdentity[card.getUniqueId()] = publicIdentityKnown;
+    if (!publicIdentityKnown) {
+        markDrawKnowledgeUnsupported(
+                DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED);
+    }
+    if (previousPileSize == 0) {
+        if (publicIdentityKnown) {
+            noteKnownDrawTop(card);
+        }
+        knownGeneratedCardPublicIdentity[card.getUniqueId()] = publicIdentityKnown;
+        return;
+    }
+
+    if (knownDrawInsertionBaseSize < 0) {
+        knownDrawInsertionBaseSize = previousPileSize;
+        for (std::size_t position = 0; position < knownDrawTopUniqueIds.size(); ++position) {
+            knownDrawInsertionAnchors.push_back({
+                    static_cast<std::int32_t>(position), knownDrawTopUniqueIds[position]});
+        }
+        for (const auto &[position, uniqueId] : knownDrawPositionUniqueIds) {
+            knownDrawInsertionAnchors.push_back({position, uniqueId});
+        }
+        std::sort(knownDrawInsertionAnchors.begin(),
+                knownDrawInsertionAnchors.end(),
+                [](const auto &lhs, const auto &rhs) {
+                    return lhs.basePositionFromTop < rhs.basePositionFromTop;
+                });
+    }
+
+    if (knownDrawInsertionBaseSize
+                    + static_cast<std::int32_t>(knownDrawInsertionCards.size())
+            != previousPileSize) {
+        knownDrawTopUniqueIds.clear();
+        knownDrawPositionUniqueIds.clear();
+        knownDrawInsertionBaseSize = -1;
+        knownDrawInsertionAnchors.clear();
+        knownDrawInsertionCards.clear();
+        markDrawKnowledgeUnsupported(
+                DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT);
+        return;
+    }
+
+    knownDrawInsertionCards.push_back({card.getUniqueId(), 1, -1});
+    if (knownDrawTopUniqueIds.size() > 1) {
+        knownDrawTopUniqueIds.resize(1);
+    }
+    knownDrawPositionUniqueIds.clear();
+    knownDrawUnsupportedReasons &= static_cast<std::uint8_t>(
+            ~static_cast<std::uint8_t>(DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION));
+}
+
+void BattleContext::insertTempCardRandomlyIntoDrawPile(
+        const CardInstance &card, const bool publicIdentityKnown) {
+    const auto previousPileSize = static_cast<int>(cards.drawPile.size());
+    const int index = previousPileSize == 0
+            ? 0
+            : cardRandomRng.random(previousPileSize - 1);
+    CardInstance inserted(card);
+    inserted.uniqueId = static_cast<std::int16_t>(cards.nextUniqueCardId);
+    cards.createTempCardInDrawPile(index, inserted);
+    noteRandomDrawInsertion(
+            cards.drawPile[index], previousPileSize, publicIdentityKnown);
+}
+
+void BattleContext::shuffleCardIntoDrawPile(const CardInstance &card) {
+    knownGeneratedCardPublicIdentity[card.getUniqueId()] = true;
+    const auto previousPileSize = static_cast<int>(cards.drawPile.size());
+    cards.shuffleIntoDrawPile(cardRandomRng, card);
+    if (previousPileSize == 0) {
+        noteKnownDrawTop(cards.drawPile.back());
+    } else {
+        noteRandomDrawInsertion(card, previousPileSize);
+    }
+}
+
 void BattleContext::onShuffle() {
+    clearKnownDrawOrder();
     if (player.hasRelic<R::THE_ABACUS>()) {
         addToBot( Actions::GainBlock(6) );
     }
@@ -2930,7 +3362,7 @@ void BattleContext::chooseCodexCard(CardId id) {
     CardInstance c(id);
     c.uniqueId = static_cast<std::int16_t>(cards.nextUniqueCardId++);
     cards.notifyAddCardToCombat(c);
-    cards.shuffleIntoDrawPile(cardRandomRng, c);
+    shuffleCardIntoDrawPile(c);
 }
 
 void BattleContext::chooseDualWieldCard(int handIdx) {
@@ -3033,14 +3465,17 @@ void BattleContext::chooseForethoughtCard(int handIdx) {
 
     cards.insertToDrawPile(0, cards.hand[handIdx]);
     cards.removeFromHandAtIdx(handIdx);
+    noteKnownDrawBottom(cards.drawPile.front());
 }
 
 void BattleContext::chooseHeadbuttCard(int discardIdx) {
 #ifdef sts_asserts
     assert(discardIdx >= 0 && discardIdx < cards.discardPile.size());
 #endif
-    cards.moveToDrawPileTop(cards.discardPile[discardIdx]);
+    const auto selected = cards.discardPile[discardIdx];
+    cards.moveToDrawPileTop(selected);
     cards.removeFromDiscard(discardIdx);
+    noteKnownDrawTop(selected);
 }
 
 void BattleContext::chooseRecycleCard(int handIdx) {
@@ -3051,16 +3486,26 @@ void BattleContext::chooseWarcryCard(int handIdx) {
 #ifdef sts_asserts
     assert(handIdx >= 0 && handIdx < cards.cardsInHand);
 #endif
-    cards.moveToDrawPileTop(cards.hand[handIdx]);
+    const auto selected = cards.hand[handIdx];
+    cards.moveToDrawPileTop(selected);
     cards.removeFromHandAtIdx(handIdx);
+    noteKnownDrawTop(selected);
 }
 
 void BattleContext::chooseDrawToHandCards(const int *idxs, int cardCount) {
+    const bool subsetReveal = cardSelectInfo.cardSelectTask == CardSelectTask::SECRET_TECHNIQUE
+            || cardSelectInfo.cardSelectTask == CardSelectTask::SECRET_WEAPON;
     for (int i = 0; i < cardCount; ++i) {
         const auto drawIdx = idxs[i];
         auto c = cards.drawPile[drawIdx];
+        consumeKnownDrawAtIndex(drawIdx, c);
         cards.removeFromDrawPileAtIdx(drawIdx);
         moveToHandHelper(c);
+    }
+    if (subsetReveal) {
+        // These choices reveal a subset of eligible draw-pile cards without
+        // exposing a stable order; fail closed for the exact-order sampler.
+        markDrawKnowledgeUnsupported(DrawKnowledgeUnsupportedReason::SUBSET_MEMBERSHIP);
     }
 }
 

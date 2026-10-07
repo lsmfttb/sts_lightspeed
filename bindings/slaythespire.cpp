@@ -9,17 +9,1236 @@
 
 #include <sstream>
 #include <algorithm>
+#include <chrono>
+#include <map>
+#include <stdexcept>
+#include <tuple>
 
 #include "sim/ConsoleSimulator.h"
 #include "sim/search/ScumSearchAgent2.h"
+#include "sim/search/BattleScumSearcher2.h"
 #include "sim/SimHelpers.h"
 #include "sim/PrintHelpers.h"
+#include "combat/BattleContext.h"
+#include "combat/InputState.h"
+#include "sim/search/Action.h"
+#include "sim/search/GameAction.h"
+#include "game/GameContext.h"
 #include "game/Game.h"
 
 #include "slaythespire.h"
 
 
 using namespace sts;
+
+
+
+namespace {
+
+struct LightSpeedAction {
+    std::string scope;
+    std::uint32_t bits = 0;
+    std::string kind;
+    int idx1 = 0;
+    int idx2 = 0;
+    int idx3 = 0;
+    std::string label;
+};
+
+std::string gameOutcomeLabel(const GameOutcome outcome) {
+    switch (outcome) {
+        case GameOutcome::PLAYER_LOSS:
+            return "PLAYER_LOSS";
+        case GameOutcome::UNDECIDED:
+            return "UNDECIDED";
+        case GameOutcome::PLAYER_VICTORY:
+            return "PLAYER_VICTORY";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+std::string battleOutcomeLabel(const Outcome outcome) {
+    switch (outcome) {
+        case Outcome::UNDECIDED:
+            return "UNDECIDED";
+        case Outcome::PLAYER_VICTORY:
+            return "PLAYER_VICTORY";
+        case Outcome::PLAYER_LOSS:
+            return "PLAYER_LOSS";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+std::string screenStateLabel(const ScreenState screenState) {
+    switch (screenState) {
+        case ScreenState::INVALID:
+            return "INVALID";
+        case ScreenState::EVENT_SCREEN:
+            return "EVENT_SCREEN";
+        case ScreenState::REWARDS:
+            return "REWARDS";
+        case ScreenState::BOSS_RELIC_REWARDS:
+            return "BOSS_RELIC_REWARDS";
+        case ScreenState::CARD_SELECT:
+            return "CARD_SELECT";
+        case ScreenState::MAP_SCREEN:
+            return "MAP_SCREEN";
+        case ScreenState::TREASURE_ROOM:
+            return "TREASURE_ROOM";
+        case ScreenState::REST_ROOM:
+            return "REST_ROOM";
+        case ScreenState::SHOP_ROOM:
+            return "SHOP_ROOM";
+        case ScreenState::BATTLE:
+            return "BATTLE";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+std::string inputStateLabel(const InputState inputState) {
+    switch (inputState) {
+        case InputState::EXECUTING_ACTIONS:
+            return "EXECUTING_ACTIONS";
+        case InputState::PLAYER_NORMAL:
+            return "PLAYER_NORMAL";
+        case InputState::CARD_SELECT:
+            return "CARD_SELECT";
+        default:
+            return "OTHER";
+    }
+}
+
+std::string rewardActionLabel(search::GameAction::RewardsActionType type) {
+    switch (type) {
+        case search::GameAction::RewardsActionType::CARD:
+            return "reward_card";
+        case search::GameAction::RewardsActionType::GOLD:
+            return "reward_gold";
+        case search::GameAction::RewardsActionType::KEY:
+            return "reward_key";
+        case search::GameAction::RewardsActionType::POTION:
+            return "reward_potion";
+        case search::GameAction::RewardsActionType::RELIC:
+            return "reward_relic";
+        case search::GameAction::RewardsActionType::CARD_REMOVE:
+            return "card_remove";
+        case search::GameAction::RewardsActionType::SKIP:
+            return "skip";
+        default:
+            return "reward_unknown";
+    }
+}
+
+std::string gameActionKind(const GameContext &gc, const search::GameAction &action) {
+    if (action.isPotionAction()) {
+        return action.isPotionDiscard() ? "game_potion_discard" : "game_potion_use";
+    }
+
+    switch (gc.screenState) {
+        case ScreenState::EVENT_SCREEN:
+            return "event";
+        case ScreenState::REWARDS:
+            return rewardActionLabel(action.getRewardsActionType());
+        case ScreenState::BOSS_RELIC_REWARDS:
+            return "boss_relic";
+        case ScreenState::CARD_SELECT:
+            return "card_select";
+        case ScreenState::MAP_SCREEN:
+            return "map";
+        case ScreenState::TREASURE_ROOM:
+            return action.getIdx1() == 0 ? "treasure_open" : "treasure_leave";
+        case ScreenState::REST_ROOM:
+            return "rest";
+        case ScreenState::SHOP_ROOM:
+            return "shop_" + rewardActionLabel(action.getRewardsActionType());
+        default:
+            return "game_unknown";
+    }
+}
+
+LightSpeedAction makeGameAction(const GameContext &gc, const search::GameAction &action) {
+    auto kind = gameActionKind(gc, action);
+    std::ostringstream label;
+    label
+        << "game." << kind
+        << " bits=" << action.bits
+        << " idx1=" << action.getIdx1()
+        << " idx2=" << action.getIdx2()
+        << " idx3=" << action.getIdx3();
+
+    return {
+        "game",
+        action.bits,
+        kind,
+        action.getIdx1(),
+        action.getIdx2(),
+        action.getIdx3(),
+        label.str(),
+    };
+}
+
+std::string battleActionKind(const search::Action &action) {
+    switch (action.getActionType()) {
+        case search::ActionType::CARD:
+            return "card";
+        case search::ActionType::POTION:
+            return action.getTargetIdx() > 5 ? "potion_discard" : "potion";
+        case search::ActionType::SINGLE_CARD_SELECT:
+            return "single_card_select";
+        case search::ActionType::MULTI_CARD_SELECT:
+            return "multi_card_select";
+        case search::ActionType::END_TURN:
+            return "end_turn";
+        default:
+            return "battle_unknown";
+    }
+}
+
+LightSpeedAction makeBattleAction(const BattleContext &bc, const search::Action &action) {
+    std::ostringstream label;
+    action.printDesc(label, bc);
+    if (label.tellp() <= 0) {
+        label
+            << "battle." << battleActionKind(action)
+            << " bits=" << action.bits
+            << " source=" << action.getSourceIdx()
+            << " target=" << action.getTargetIdx();
+    }
+
+    return {
+        "battle",
+        action.bits,
+        battleActionKind(action),
+        action.getSourceIdx(),
+        action.getTargetIdx(),
+        action.getSelectIdx(),
+        label.str(),
+    };
+}
+
+std::vector<search::Action> enumerateBattleActions(const BattleContext &bc) {
+    std::vector<search::Action> actions;
+    if (bc.outcome != Outcome::UNDECIDED) {
+        return actions;
+    }
+
+    if (bc.inputState == InputState::CARD_SELECT) {
+        return search::Action::enumerateCardSelectActions(bc);
+    }
+
+    if (bc.inputState != InputState::PLAYER_NORMAL) {
+        return actions;
+    }
+
+    search::Action endTurn(search::ActionType::END_TURN);
+    if (endTurn.isValidAction(bc)) {
+        actions.push_back(endTurn);
+    }
+
+    for (int source = 0; source < bc.cards.cardsInHand; ++source) {
+        const auto &card = bc.cards.hand[source];
+        if (card.requiresTarget()) {
+            for (int target = 0; target < 5; ++target) {
+                search::Action action(search::ActionType::CARD, source, target);
+                if (action.isValidAction(bc)) {
+                    actions.push_back(action);
+                }
+            }
+        } else {
+            search::Action action(search::ActionType::CARD, source, 0);
+            if (action.isValidAction(bc)) {
+                actions.push_back(action);
+            }
+        }
+    }
+
+    for (int source = 0; source < bc.potionCapacity; ++source) {
+        for (int target = 0; target < 5; ++target) {
+            search::Action action(search::ActionType::POTION, source, target);
+            if (action.isValidAction(bc)) {
+                actions.push_back(action);
+            }
+        }
+
+        search::Action discard(search::ActionType::POTION, source, 6);
+        if (discard.isValidAction(bc)) {
+            actions.push_back(discard);
+        }
+    }
+
+    return actions;
+}
+
+
+std::string cardTypeLabel(CardType type) {
+    const auto idx = static_cast<int>(type);
+    if (idx >= 0 && idx <= static_cast<int>(CardType::INVALID)) {
+        return cardTypeStrings[idx];
+    }
+    return "UNKNOWN";
+}
+
+std::string cardRarityLabel(CardRarity rarity) {
+    const auto idx = static_cast<int>(rarity);
+    if (idx >= 0 && idx <= static_cast<int>(CardRarity::INVALID)) {
+        return cardRarityStrings[idx];
+    }
+    return "UNKNOWN";
+}
+
+std::string potionLabel(Potion potion) {
+    const auto idx = static_cast<int>(potion);
+    if (idx >= 0 && idx <= static_cast<int>(Potion::WEAK_POTION)) {
+        return potionNames[idx];
+    }
+    return "UNKNOWN";
+}
+
+std::string potionIdLabel(Potion potion) {
+    const auto idx = static_cast<int>(potion);
+    if (idx >= 0 && idx <= static_cast<int>(Potion::WEAK_POTION)) {
+        return potionIds[idx];
+    }
+    return "UNKNOWN";
+}
+
+std::string monsterIdLabel(MonsterId id) {
+    const auto idx = static_cast<int>(id);
+    if (idx >= 0 && idx <= static_cast<int>(MonsterId::WRITHING_MASS)) {
+        return monsterIdStrings[idx];
+    }
+    return "UNKNOWN";
+}
+
+pybind11::dict playerSnapshot(const Player &player) {
+    pybind11::dict ret;
+    ret["current_hp"] = player.curHp;
+    ret["max_hp"] = player.maxHp;
+    ret["energy"] = player.energy;
+    ret["energy_per_turn"] = player.energyPerTurn;
+    ret["block"] = player.block;
+    ret["strength"] = player.strength;
+    ret["dexterity"] = player.dexterity;
+    ret["artifact"] = player.artifact;
+    ret["focus"] = player.focus;
+    ret["vulnerable"] = player.getStatusRuntime(PS::VULNERABLE);
+    ret["weak"] = player.getStatusRuntime(PS::WEAK);
+    ret["frail"] = player.getStatusRuntime(PS::FRAIL);
+    ret["cards_played_this_turn"] = player.cardsPlayedThisTurn;
+    ret["attacks_played_this_turn"] = player.attacksPlayedThisTurn;
+    ret["skills_played_this_turn"] = player.skillsPlayedThisTurn;
+    ret["cards_discarded_this_turn"] = player.cardsDiscardedThisTurn;
+    ret["times_damaged_this_combat"] = player.timesDamagedThisCombat;
+    return ret;
+}
+
+pybind11::dict cardSnapshot(
+        const BattleContext &bc,
+        const CardInstance &card,
+        int pileIdx,
+        bool cardIsPlayable) {
+    pybind11::dict ret;
+    ret["pile_index"] = pileIdx;
+    ret["id"] = static_cast<int>(card.getId());
+    ret["name"] = std::string(card.getName());
+    ret["type"] = cardTypeLabel(card.getType());
+    ret["cost"] = card.cost;
+    ret["cost_for_turn"] = card.costForTurn;
+    ret["upgraded"] = card.isUpgraded();
+    ret["upgrade_count"] = card.getUpgradeCount();
+    ret["requires_target"] = card.requiresTarget();
+    ret["playable"] = cardIsPlayable && card.canUseOnAnyTarget(bc);
+    ret["free_to_play_once"] = card.freeToPlayOnce;
+    ret["retain"] = card.retain;
+    ret["ethereal"] = card.isEthereal();
+    ret["exhausts"] = card.doesExhaust();
+    return ret;
+}
+
+pybind11::dict monsterSnapshot(const BattleContext &bc, int monsterIdx) {
+    const auto &monster = bc.monsters.arr[monsterIdx];
+    const auto damage = monster.getMoveBaseDamage(bc);
+
+    pybind11::dict ret;
+    ret["monster_index"] = monsterIdx;
+    ret["id"] = static_cast<int>(monster.id);
+    ret["id_label"] = monsterIdLabel(monster.id);
+    ret["name"] = std::string(monster.getName());
+    ret["current_hp"] = monster.curHp;
+    ret["max_hp"] = monster.maxHp;
+    ret["block"] = monster.block;
+    ret["alive"] = monster.isAlive();
+    ret["targetable"] = monster.isTargetable();
+    ret["attacking"] = monster.isAttacking();
+    ret["intent_category"] = monster.isAttacking() ? "ATTACK" : "NON_ATTACK";
+    ret["current_move"] = std::string(monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
+    ret["move_id"] = static_cast<int>(monster.moveHistory[0]);
+    ret["last_move_id"] = static_cast<int>(monster.moveHistory[1]);
+    ret["move_base_damage"] = damage.damage;
+    ret["move_hits"] = damage.attackCount;
+    ret["strength"] = monster.strength;
+    ret["vulnerable"] = monster.vulnerable;
+    ret["weak"] = monster.weak;
+    ret["artifact"] = monster.artifact;
+    ret["poison"] = monster.poison;
+    ret["metallicize"] = monster.metallicize;
+    ret["plated_armor"] = monster.platedArmor;
+    ret["regen"] = monster.regen;
+    ret["half_dead"] = monster.halfDead;
+    ret["misc_info"] = monster.miscInfo;
+    ret["unique_power_0"] = monster.uniquePower0;
+    ret["unique_power_1"] = monster.uniquePower1;
+    return ret;
+}
+
+pybind11::dict potionSnapshot(const BattleContext &bc, int potionIdx) {
+    const auto potion = bc.potions[potionIdx];
+    pybind11::dict ret;
+    ret["potion_index"] = potionIdx;
+    ret["id"] = static_cast<int>(potion);
+    ret["id_label"] = potionIdLabel(potion);
+    ret["name"] = potionLabel(potion);
+    return ret;
+}
+
+pybind11::dict gamePotionSnapshot(const GameContext &gc, int potionIdx) {
+    const auto potion = gc.potions[potionIdx];
+    pybind11::dict ret;
+    ret["potion_index"] = potionIdx;
+    ret["id"] = static_cast<int>(potion);
+    ret["id_label"] = potionIdLabel(potion);
+    ret["name"] = potionLabel(potion);
+    return ret;
+}
+
+pybind11::dict cardIdentitySnapshot(const Card &card, int deckIdx) {
+    pybind11::dict ret;
+    ret["deck_index"] = deckIdx;
+    ret["id"] = static_cast<int>(card.getId());
+    ret["id_label"] = std::string(getCardEnumName(card.getId()));
+    ret["name"] = std::string(card.getName());
+    ret["type"] = cardTypeLabel(card.getType());
+    ret["rarity"] = cardRarityLabel(card.getRarity());
+    ret["upgraded"] = card.isUpgraded();
+    ret["upgrade_count"] = card.getUpgraded();
+    ret["misc"] = card.misc;
+    return ret;
+}
+
+pybind11::list handSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < bc.cards.cardsInHand; ++idx) {
+        ret.append(cardSnapshot(bc, bc.cards.hand[idx], idx, true));
+    }
+    return ret;
+}
+
+template <typename Pile>
+pybind11::list pileSnapshot(const BattleContext &bc, const Pile &pile) {
+    pybind11::list ret;
+    for (int idx = 0; idx < static_cast<int>(pile.size()); ++idx) {
+        ret.append(cardSnapshot(bc, pile[idx], idx, false));
+    }
+    return ret;
+}
+
+pybind11::list monsterGroupSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
+        ret.append(monsterSnapshot(bc, idx));
+    }
+    return ret;
+}
+
+enum class PublicMonsterCounterKnowledge {
+    NONE,
+    PRIVATE_ONLY,
+    SEMANTIC,
+    MIXED_UNSUPPORTED,
+};
+
+PublicMonsterCounterKnowledge publicMonsterCounterKnowledge(const MonsterId id) {
+    switch (id) {
+        case MonsterId::GREEN_LOUSE:
+        case MonsterId::RED_LOUSE:
+        case MonsterId::DARKLING:
+            return PublicMonsterCounterKnowledge::PRIVATE_ONLY;
+        case MonsterId::RED_SLAVER:
+        case MonsterId::HEXAGHOST:
+        case MonsterId::GREMLIN_WIZARD:
+        case MonsterId::LOOTER:
+        case MonsterId::MUGGER:
+        case MonsterId::BOOK_OF_STABBING:
+        case MonsterId::THE_CHAMP:
+        case MonsterId::BRONZE_ORB:
+        case MonsterId::BRONZE_AUTOMATON:
+        case MonsterId::SPIKER:
+        case MonsterId::WRITHING_MASS:
+        case MonsterId::THE_GUARDIAN:
+        case MonsterId::TIME_EATER:
+        case MonsterId::AWAKENED_ONE:
+            return PublicMonsterCounterKnowledge::SEMANTIC;
+        default:
+            return PublicMonsterCounterKnowledge::NONE;
+    }
+}
+
+PublicMonsterCounterKnowledge publicMonsterCounterKnowledge(
+        const BattleContext &bc, const Monster &monster) {
+    const auto classification = publicMonsterCounterKnowledge(monster.id);
+    if (!bc.player.hasRelic<R::RUNIC_DOME>()
+            || classification != PublicMonsterCounterKnowledge::SEMANTIC) {
+        return classification;
+    }
+    // These counters share storage with values mutated while the hidden next
+    // intent is selected; fail closed rather than publishing hidden state.
+    switch (monster.id) {
+        case MonsterId::BOOK_OF_STABBING:
+        case MonsterId::GREMLIN_WIZARD:
+        case MonsterId::THE_CHAMP:
+            return PublicMonsterCounterKnowledge::MIXED_UNSUPPORTED;
+        default:
+            return classification;
+    }
+}
+
+pybind11::list publicMonsterStatuses(const Monster &monster) {
+    pybind11::list statuses;
+    for (int statusIdx = 0;
+            statusIdx < static_cast<int>(MonsterStatus::INVALID); ++statusIdx) {
+        const auto status = static_cast<MonsterStatus>(statusIdx);
+        const bool present = status == MS::STRENGTH
+                ? monster.strength != 0
+                : monster.hasStatusInternal(status);
+        if (!present) {
+            continue;
+        }
+        pybind11::dict statusSnapshot;
+        statusSnapshot["id"] = statusIdx;
+        statusSnapshot["name"] = std::string(enemyStatusStrings[statusIdx]);
+        statusSnapshot["value"] = monster.getStatusInternal(status);
+        statuses.append(statusSnapshot);
+    }
+    return statuses;
+}
+
+void appendPublicMonsterCounters(const Monster &monster, pybind11::dict &ret) {
+    switch (monster.id) {
+        case MonsterId::LOOTER:
+        case MonsterId::MUGGER:
+            ret["stolen_gold"] = monster.miscInfo;
+            break;
+        case MonsterId::RED_SLAVER:
+            ret["entangle_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::HEXAGHOST:
+            ret["divider_damage"] = monster.miscInfo;
+            break;
+        case MonsterId::GREMLIN_WIZARD:
+            ret["charge_count"] = monster.miscInfo;
+            break;
+        case MonsterId::BOOK_OF_STABBING:
+            ret["stabs_used"] = monster.miscInfo;
+            break;
+        case MonsterId::THE_CHAMP:
+            ret["defensive_stance_uses"] = monster.miscInfo & 0x3;
+            ret["phase_two"] = (monster.miscInfo & 0x4) != 0;
+            break;
+        case MonsterId::BRONZE_ORB:
+            ret["stasis_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::BRONZE_AUTOMATON:
+            ret["last_boost_was_flail"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::SPIKER:
+            ret["thorns_used"] = monster.miscInfo;
+            break;
+        case MonsterId::WRITHING_MASS:
+            ret["implant_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::THE_GUARDIAN:
+            ret["mode_shift"] = monster.getStatusInternal(MS::MODE_SHIFT);
+            break;
+        case MonsterId::TIME_EATER:
+            ret["haste_used"] = monster.miscInfo != 0;
+            break;
+        case MonsterId::AWAKENED_ONE:
+            ret["phase_two"] = monster.miscInfo != 0;
+            break;
+        default:
+            break;
+    }
+}
+
+pybind11::dict publicMonsterSnapshot(const BattleContext &bc, int monsterIdx) {
+    const auto &monster = bc.monsters.arr[monsterIdx];
+    const auto knowledge = publicMonsterCounterKnowledge(bc, monster);
+    const bool hideIntent = bc.player.hasRelic<R::RUNIC_DOME>();
+
+    pybind11::dict ret;
+    ret["monster_index"] = monsterIdx;
+    ret["id"] = static_cast<int>(monster.id);
+    ret["id_label"] = monsterIdLabel(monster.id);
+    ret["name"] = std::string(monster.getName());
+    ret["current_hp"] = monster.curHp;
+    ret["max_hp"] = monster.maxHp;
+    ret["block"] = monster.block;
+    ret["alive"] = monster.isAlive();
+    ret["targetable"] = monster.isTargetable();
+    ret["strength"] = monster.strength;
+    ret["vulnerable"] = monster.vulnerable;
+    ret["weak"] = monster.weak;
+    ret["artifact"] = monster.artifact;
+    ret["poison"] = monster.poison;
+    ret["metallicize"] = monster.metallicize;
+    ret["plated_armor"] = monster.platedArmor;
+    ret["regen"] = monster.regen;
+    ret["half_dead"] = monster.halfDead;
+    ret["public_statuses"] = publicMonsterStatuses(monster);
+    if (!hideIntent) {
+        const auto damage = monster.getMoveBaseDamage(bc);
+        ret["attacking"] = monster.isAttacking();
+        ret["intent_category"] = monster.isAttacking() ? "ATTACK" : "NON_ATTACK";
+        ret["current_move"] = std::string(
+                monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
+        ret["move_id"] = static_cast<int>(monster.moveHistory[0]);
+        ret["last_move_id"] = static_cast<int>(monster.moveHistory[1]);
+        ret["move_base_damage"] = damage.damage;
+        ret["move_hits"] = damage.attackCount;
+    }
+    if (knowledge != PublicMonsterCounterKnowledge::MIXED_UNSUPPORTED) {
+        appendPublicMonsterCounters(monster, ret);
+    }
+    ret["information_fidelity"] = knowledge
+            == PublicMonsterCounterKnowledge::MIXED_UNSUPPORTED
+            ? "unsupported_fidelity" : "supported";
+    return ret;
+}
+
+pybind11::list publicMonsterGroupSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < bc.monsters.monsterCount; ++idx) {
+        ret.append(publicMonsterSnapshot(bc, idx));
+    }
+    return ret;
+}
+
+pybind11::list potionListSnapshot(const BattleContext &bc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < bc.potionCapacity; ++idx) {
+        ret.append(potionSnapshot(bc, idx));
+    }
+    return ret;
+}
+
+pybind11::list gamePotionListSnapshot(const GameContext &gc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < gc.potionCapacity; ++idx) {
+        ret.append(gamePotionSnapshot(gc, idx));
+    }
+    return ret;
+}
+
+pybind11::dict relicSnapshot(const RelicInstance &relic, int relicIdx) {
+    pybind11::dict ret;
+    ret["relic_index"] = relicIdx;
+    ret["id"] = static_cast<int>(relic.id);
+    ret["id_label"] = std::string(relicIds[static_cast<int>(relic.id)]);
+    ret["name"] = std::string(getRelicName(relic.id));
+    ret["counter"] = relic.data;
+    return ret;
+}
+
+pybind11::list relicListSnapshot(const GameContext &gc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < gc.relics.size(); ++idx) {
+        ret.append(relicSnapshot(gc.relics.relics[idx], idx));
+    }
+    return ret;
+}
+
+pybind11::list deckSnapshot(const GameContext &gc) {
+    pybind11::list ret;
+    for (int idx = 0; idx < gc.deck.size(); ++idx) {
+        ret.append(cardIdentitySnapshot(gc.deck.cards[idx], idx));
+    }
+    return ret;
+}
+
+pybind11::dict keyFlagsSnapshot(const GameContext &gc) {
+    pybind11::dict ret;
+    ret["blue_key"] = gc.blueKey;
+    ret["green_key"] = gc.greenKey;
+    ret["red_key"] = gc.redKey;
+    return ret;
+}
+
+struct StepSimulatorCheckpoint {
+    GameContext gc;
+    BattleContext bc;
+    bool battleActive = false;
+};
+pybind11::dict publicProjectionAvailable(
+        const pybind11::object &value,
+        const char *source) {
+    pybind11::dict ret;
+    ret["availability"] = "available";
+    ret["source"] = source;
+    ret["value"] = value;
+    return ret;
+}
+
+pybind11::dict publicProjectionUnavailable(
+        const char *availability,
+        const char *reason) {
+    pybind11::dict ret;
+    ret["availability"] = availability;
+    ret["reason"] = reason;
+    return ret;
+}
+
+pybind11::dict publicProjectionActionSnapshot(const LightSpeedAction &action) {
+    pybind11::dict ret;
+    ret["scope"] = action.scope;
+    ret["kind"] = action.kind;
+    ret["idx1"] = action.idx1;
+    ret["idx2"] = action.idx2;
+    ret["idx3"] = action.idx3;
+    const auto bitsMarker = action.label.find("bits=");
+    if (bitsMarker == std::string::npos) {
+        ret["label"] = action.label;
+    } else {
+        std::ostringstream publicLabel;
+        publicLabel << action.scope << "." << action.kind
+                    << " idx1=" << action.idx1
+                    << " idx2=" << action.idx2
+                    << " idx3=" << action.idx3;
+        ret["label"] = publicLabel.str();
+    }
+    return ret;
+}
+
+pybind11::dict publicActionIdentity(const LightSpeedAction &action) {
+    return publicProjectionActionSnapshot(action);
+}
+
+#include "public_battle_state.h"
+
+struct StepSimulator {
+    GameContext gc;
+    BattleContext bc;
+    bool battleActive = false;
+
+    StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {}
+
+    void reset(CharacterClass cc, std::uint64_t seed, int ascension) {
+        gc = GameContext(cc, seed, ascension);
+        bc = BattleContext();
+        battleActive = false;
+    }
+
+    void ensureBattleContext() {
+        if (gc.outcome != GameOutcome::UNDECIDED) {
+            battleActive = false;
+            return;
+        }
+        if (gc.screenState == ScreenState::BATTLE && !battleActive) {
+            bc = BattleContext();
+            bc.init(gc);
+            battleActive = true;
+        }
+        if (gc.screenState != ScreenState::BATTLE) {
+            battleActive = false;
+        }
+    }
+
+    pybind11::dict snapshot() {
+        ensureBattleContext();
+        pybind11::dict ret;
+        ret["screen_state"] = screenStateLabel(gc.screenState);
+        ret["outcome"] = gameOutcomeLabel(gc.outcome);
+        ret["act"] = gc.act;
+        ret["floor_num"] = gc.floorNum;
+        ret["cur_hp"] = gc.curHp;
+        ret["max_hp"] = gc.maxHp;
+        ret["gold"] = gc.gold;
+        ret["ascension"] = gc.ascension;
+        ret["room_type"] = roomStrings[static_cast<int>(gc.curRoom)];
+        ret["potion_count"] = gc.potionCount;
+        ret["potion_capacity"] = gc.potionCapacity;
+        ret["potions"] = gamePotionListSnapshot(gc);
+        ret["deck"] = deckSnapshot(gc);
+        ret["relics"] = relicListSnapshot(gc);
+        ret["blue_key"] = gc.blueKey;
+        ret["green_key"] = gc.greenKey;
+        ret["red_key"] = gc.redKey;
+        ret["battle_active"] = battleActive;
+        if (battleActive) {
+            ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
+            ret["battle_outcome"] = battleOutcomeLabel(bc.outcome);
+            ret["battle_input_state"] = inputStateLabel(bc.inputState);
+            ret["battle_turn"] = bc.turn;
+            ret["battle_player_hp"] = bc.player.curHp;
+            ret["battle_player_energy"] = bc.player.energy;
+            ret["battle_player_block"] = bc.player.block;
+            ret["battle_player"] = playerSnapshot(bc.player);
+            ret["battle_hand_size"] = bc.cards.cardsInHand;
+            ret["battle_hand"] = handSnapshot(bc);
+            ret["battle_draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
+            ret["battle_discard_pile_size"] = static_cast<int>(bc.cards.discardPile.size());
+            ret["battle_exhaust_pile_size"] = static_cast<int>(bc.cards.exhaustPile.size());
+            ret["battle_discard_pile"] = pileSnapshot(bc, bc.cards.discardPile);
+            ret["battle_exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);
+            ret["battle_monster_count"] = bc.monsters.monsterCount;
+            ret["battle_monsters_alive"] = bc.monsters.monstersAlive;
+            ret["battle_monsters"] = monsterGroupSnapshot(bc);
+            ret["battle_potion_count"] = bc.potionCount;
+            ret["battle_potion_capacity"] = bc.potionCapacity;
+            ret["battle_potions"] = potionListSnapshot(bc);
+            ret["battle_relics"] = relicListSnapshot(gc);
+        }
+        return ret;
+    }
+
+    std::vector<int> observation() const {
+        const auto obs = NNInterface::getInstance()->getObservation(gc);
+        return {obs.begin(), obs.end()};
+    }
+
+    std::vector<LightSpeedAction> legalActions() {
+        ensureBattleContext();
+        std::vector<LightSpeedAction> result;
+        if (gc.outcome != GameOutcome::UNDECIDED) {
+            return result;
+        }
+
+        if (gc.screenState == ScreenState::BATTLE) {
+            for (const auto &action : enumerateBattleActions(bc)) {
+                result.push_back(makeBattleAction(bc, action));
+            }
+            return result;
+        }
+
+        for (const auto &action : search::GameAction::getAllActionsInState(gc)) {
+            result.push_back(makeGameAction(gc, action));
+        }
+
+        for (int idx = 0; idx < gc.potionCapacity; ++idx) {
+            const auto potionIdx = static_cast<std::uint32_t>(idx);
+            const search::GameAction useAction(0x80000000U | potionIdx);
+            if (useAction.isValidAction(gc)) {
+                result.push_back(makeGameAction(gc, useAction));
+            }
+
+            const search::GameAction discardAction(0xC0000000U | potionIdx);
+            if (discardAction.isValidAction(gc)) {
+                result.push_back(makeGameAction(gc, discardAction));
+            }
+        }
+
+        return result;
+    }
+
+    pybind11::dict battleSearchV2(
+            std::int64_t simulations, bool includePotions) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle search requested outside battle");
+        }
+        if (simulations <= 0) {
+            throw std::invalid_argument("battle search simulations must be positive");
+        }
+
+        search::BattleScumSearcher2 searcher(bc);
+        searcher.includePotions = includePotions;
+        const auto start = std::chrono::steady_clock::now();
+        searcher.search(simulations);
+        const auto finish = std::chrono::steady_clock::now();
+
+        const auto nativeActions = enumerateBattleActions(bc);
+        std::vector<bool> matchedEdges(searcher.root.edges.size(), false);
+        pybind11::list rootRows;
+        int unsearchedLegalActionCount = 0;
+        for (int legalIdx = 0;
+                legalIdx < static_cast<int>(nativeActions.size()); ++legalIdx) {
+            const auto &legalAction = nativeActions[legalIdx];
+            const search::BattleScumSearcher2::Edge *matchedEdge = nullptr;
+            int matchedEdgeIndex = -1;
+            for (int edgeIdx = 0;
+                    edgeIdx < static_cast<int>(searcher.root.edges.size());
+                    ++edgeIdx) {
+                if (searcher.root.edges[edgeIdx].action.bits != legalAction.bits) {
+                    continue;
+                }
+                if (matchedEdge != nullptr) {
+                    throw std::logic_error(
+                            "native search edge maps to multiple legal actions");
+                }
+                matchedEdge = &searcher.root.edges[edgeIdx];
+                matchedEdgeIndex = edgeIdx;
+            }
+            if (matchedEdge != nullptr) {
+                if (matchedEdges[matchedEdgeIndex]) {
+                    throw std::logic_error(
+                            "multiple legal actions map to one native search edge");
+                }
+                matchedEdges[matchedEdgeIndex] = true;
+            }
+
+            pybind11::dict row = publicProjectionActionSnapshot(
+                    makeBattleAction(bc, legalAction));
+            row["search_tree_present"] = matchedEdge != nullptr;
+            row["search_edge_index"] = matchedEdgeIndex >= 0
+                    ? pybind11::object(pybind11::int_(matchedEdgeIndex))
+                    : pybind11::object(pybind11::none());
+            if (matchedEdge == nullptr) {
+                ++unsearchedLegalActionCount;
+                row["visits"] = 0;
+                row["evaluation_sum"] = pybind11::none();
+                row["mean_value"] = pybind11::none();
+            } else {
+                const auto visits = matchedEdge->node.simulationCount;
+                row["visits"] = visits;
+                row["evaluation_sum"] = matchedEdge->node.evaluationSum;
+                row["mean_value"] = visits > 0
+                        ? pybind11::object(pybind11::float_(
+                                matchedEdge->node.evaluationSum / visits))
+                        : pybind11::object(pybind11::none());
+            }
+            rootRows.append(row);
+        }
+
+        int unmappedSearchEdgeCount = 0;
+        for (const bool matched : matchedEdges) {
+            if (!matched) {
+                ++unmappedSearchEdgeCount;
+            }
+        }
+
+        pybind11::dict ret;
+        ret["schema_id"] = "native-battle-search-root-v1";
+        ret["native_api"] = "StepSimulator.battle_search_v2";
+        ret["information_regime"] = "full_simulator_state_oracle_like";
+        ret["simulations_requested"] = simulations;
+        ret["root_visits"] = searcher.root.simulationCount;
+        ret["include_potions"] = includePotions;
+        ret["native_simulator_steps"] = searcher.actionExecutionCount;
+        ret["model_calls"] = 0;
+        ret["search_runtime_seconds"] = std::chrono::duration<double>(
+                finish - start).count();
+        ret["best_action_value"] = searcher.bestActionValue;
+        ret["min_action_value"] = searcher.minActionValue;
+        ret["outcome_player_hp"] = searcher.outcomePlayerHp;
+        ret["root_row_count"] = static_cast<int>(rootRows.size());
+        ret["search_edge_count"] = static_cast<int>(searcher.root.edges.size());
+        ret["unsearched_legal_action_count"] = unsearchedLegalActionCount;
+        ret["unmapped_search_edge_count"] = unmappedSearchEdgeCount;
+        ret["root_rows"] = rootRows;
+        return ret;
+    }
+
+    pybind11::dict publicProjection() {
+        ensureBattleContext();
+        pybind11::dict ret;
+        ret["schema_id"] = "native-public-projection-v2";
+        ret["screen_identity"] = publicProjectionAvailable(
+                pybind11::str(screenStateLabel(gc.screenState)),
+                "GameContext::screenState");
+        ret["visible_act_boss"] = publicProjectionUnavailable(
+                "unavailable",
+                "not provided by the current simulator interface");
+        ret["visible_map_graph"] = publicProjectionUnavailable(
+                "unavailable",
+                "not provided by the current simulator interface");
+        ret["current_map_node"] = publicProjectionUnavailable(
+                "unavailable",
+                "not provided by the current simulator interface");
+        ret["immediately_legal_routes"] = publicProjectionUnavailable(
+                "unavailable",
+                "not provided by the current simulator interface");
+
+        pybind11::dict resourceFields;
+        if (battleActive) {
+            resourceFields["current_hp"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.curHp), "BattleContext::player.curHp");
+            resourceFields["max_hp"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.maxHp), "BattleContext::player.maxHp");
+            resourceFields["gold"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.gold), "BattleContext::player.gold");
+            resourceFields["potion_count"] = publicProjectionAvailable(
+                    pybind11::int_(bc.potionCount), "BattleContext::potionCount");
+            resourceFields["potion_capacity"] = publicProjectionAvailable(
+                    pybind11::int_(bc.potionCapacity), "BattleContext::potionCapacity");
+        } else {
+            resourceFields["current_hp"] = publicProjectionAvailable(
+                    pybind11::int_(gc.curHp), "GameContext::curHp");
+            resourceFields["max_hp"] = publicProjectionAvailable(
+                    pybind11::int_(gc.maxHp), "GameContext::maxHp");
+            resourceFields["gold"] = publicProjectionAvailable(
+                    pybind11::int_(gc.gold), "GameContext::gold");
+            resourceFields["potion_count"] = publicProjectionAvailable(
+                    pybind11::int_(gc.potionCount), "GameContext::potionCount");
+            resourceFields["potion_capacity"] = publicProjectionAvailable(
+                    pybind11::int_(gc.potionCapacity), "GameContext::potionCapacity");
+        }
+        resourceFields["deck"] = publicProjectionAvailable(
+                deckSnapshot(gc), "GameContext::deck");
+        resourceFields["relics"] = publicProjectionAvailable(
+                relicListSnapshot(gc), "GameContext::relics");
+        resourceFields["potion_identities"] = publicProjectionAvailable(
+                battleActive ? potionListSnapshot(bc) : gamePotionListSnapshot(gc),
+                battleActive ? "BattleContext::potions" : "GameContext::potions");
+        resourceFields["keys"] = publicProjectionAvailable(
+                keyFlagsSnapshot(gc), "GameContext::keyFlags");
+        ret["persistent_resources"] = publicProjectionAvailable(
+                resourceFields, "StepSimulator::publicProjection");
+        ret["screen_payload"] = publicProjectionUnavailable(
+                "unsupported", "screen-specific payloads are not exposed by this patch");
+
+        pybind11::list candidates;
+        for (const auto &action : legalActions()) {
+            candidates.append(publicProjectionActionSnapshot(action));
+        }
+        ret["candidate_actions"] = publicProjectionAvailable(
+                candidates, "StepSimulator::legalActions");
+        return ret;
+    }
+
+    pybind11::dict publicBattleState() {
+        ensureBattleContext();
+        if (!battleActive || gc.screenState != ScreenState::BATTLE) {
+            throw std::runtime_error(
+                    "public battle state requested outside battle");
+        }
+        const auto nativeActions = enumerateBattleActions(bc);
+        std::vector<LightSpeedAction> actions;
+        actions.reserve(nativeActions.size());
+        for (const auto &action : nativeActions) {
+            actions.push_back(makeBattleAction(bc, action));
+        }
+
+        auto state = makePublicBattleState(gc, bc, actions);
+        const auto identities = state["ordered_public_legal_actions"]
+                .cast<pybind11::list>();
+        if (identities.size()
+                != static_cast<pybind11::ssize_t>(nativeActions.size())) {
+            throw std::logic_error(
+                    "public action surface length disagrees with native legal actions");
+        }
+        for (const auto &identityHandle : identities) {
+            const auto identity = identityHandle.cast<pybind11::dict>();
+            int matches = 0;
+            for (const auto &nativeAction : nativeActions) {
+                matches += identity.equal(publicActionIdentity(
+                        makeBattleAction(bc, nativeAction))) ? 1 : 0;
+            }
+            if (matches != 1) {
+                throw std::logic_error(
+                        "public action identity does not map uniquely to a legal native action");
+            }
+        }
+        return state;
+    }
+
+    pybind11::dict stepPublicAction(const pybind11::dict &identity) {
+        ensureBattleContext();
+        if (!battleActive || gc.screenState != ScreenState::BATTLE) {
+            throw std::runtime_error(
+                    "public battle action requested outside battle");
+        }
+        std::vector<search::Action> matches;
+        for (const auto &nativeAction : enumerateBattleActions(bc)) {
+            if (identity.equal(publicActionIdentity(
+                    makeBattleAction(bc, nativeAction)))) {
+                matches.push_back(nativeAction);
+            }
+        }
+        if (matches.empty()) {
+            throw std::invalid_argument(
+                    "public action is not currently legal");
+        }
+        if (matches.size() != 1) {
+            throw std::invalid_argument(
+                    "public action identity is ambiguous");
+        }
+        (void) step(makeBattleAction(bc, matches.front()));
+        pybind11::dict result;
+        result["screen_state"] = screenStateLabel(gc.screenState);
+        if (battleActive && gc.screenState == ScreenState::BATTLE) {
+            result["battle_state"] = publicBattleState();
+        }
+        return result;
+    }
+
+    pybind11::dict step(const LightSpeedAction &action) {
+        ensureBattleContext();
+        if (action.scope == "battle") {
+            if (!battleActive) {
+                throw std::runtime_error("battle action requested outside battle");
+            }
+            search::Action battleAction(action.bits);
+            if (!battleAction.isValidAction(bc)) {
+                throw std::invalid_argument("invalid battle action");
+            }
+            battleAction.execute(bc);
+            if (bc.outcome != Outcome::UNDECIDED) {
+                const auto completedBattleOutcome = battleOutcomeLabel(bc.outcome);
+                bc.exitBattle(gc);
+                battleActive = false;
+                auto result = snapshot();
+                result["completed_battle_outcome"] = completedBattleOutcome;
+                return result;
+            }
+            return snapshot();
+        }
+
+        if (action.scope == "game") {
+            if (gc.screenState == ScreenState::BATTLE) {
+                throw std::runtime_error("game action requested during battle");
+            }
+            search::GameAction gameAction(action.bits);
+            if (!gameAction.isValidAction(gc)) {
+                throw std::invalid_argument("invalid game action");
+            }
+            gameAction.execute(gc);
+            return snapshot();
+        }
+
+        throw std::invalid_argument("unknown action scope");
+    }
+
+    std::vector<MonsterEncounter> legalBattleStartEncounterValues() {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle-start encounter enumeration requested outside battle");
+        }
+
+        std::vector<MonsterEncounter> result;
+        const auto append = [&result](const MonsterEncounter *values, int count) {
+            result.insert(result.end(), values, values + count);
+        };
+        const auto contains = [](const MonsterEncounter *values, int count, MonsterEncounter value) {
+            return std::find(values, values + count, value) != values + count;
+        };
+        if (gc.act < 1 || gc.act > 3) {
+            result.push_back(bc.encounter);
+            return result;
+        }
+
+        const int actIdx = gc.act - 1;
+        switch (gc.curRoom) {
+            case Room::MONSTER: {
+                const bool weak = contains(
+                        MonsterEncounterPool::weakEnemies[actIdx],
+                        MonsterEncounterPool::weakCount[actIdx],
+                        bc.encounter);
+                const bool strong = contains(
+                        MonsterEncounterPool::strongEnemies[actIdx],
+                        MonsterEncounterPool::strongCount[actIdx],
+                        bc.encounter);
+                if (weak != strong) {
+                    if (weak) {
+                        append(
+                                MonsterEncounterPool::weakEnemies[actIdx],
+                                MonsterEncounterPool::weakCount[actIdx]);
+                    } else {
+                        append(
+                                MonsterEncounterPool::strongEnemies[actIdx],
+                                MonsterEncounterPool::strongCount[actIdx]);
+                    }
+                }
+                break;
+            }
+            case Room::ELITE:
+                append(MonsterEncounterPool::elites[actIdx], 3);
+                break;
+            default:
+                break;
+        }
+        if (result.empty()) {
+            result.push_back(bc.encounter);
+        }
+        return result;
+    }
+
+    pybind11::list legalBattleStartEncounters() {
+        pybind11::list rows;
+        for (const auto encounter : legalBattleStartEncounterValues()) {
+            pybind11::dict row;
+            row["id"] = static_cast<int>(encounter);
+            row["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(encounter)];
+            rows.append(row);
+        }
+        return rows;
+    }
+
+    pybind11::dict rebuildBattleStart(
+            int hpBonus,
+            bool addRandomPotion,
+            int targetEncounterId) {
+        ensureBattleContext();
+        if (!battleActive) {
+            throw std::runtime_error("battle-start transform requested outside battle");
+        }
+        if (hpBonus < 0) {
+            throw std::invalid_argument("battle-start HP bonus cannot be negative");
+        }
+
+        auto targetEncounter = bc.encounter;
+        if (targetEncounterId >= 0) {
+            targetEncounter = static_cast<MonsterEncounter>(targetEncounterId);
+            const auto legal = legalBattleStartEncounterValues();
+            if (std::find(legal.begin(), legal.end(), targetEncounter) == legal.end()) {
+                throw std::invalid_argument("target encounter is not a legal same-structure replacement");
+            }
+        }
+
+        bool changed = false;
+        const int transformedHp = std::min(gc.maxHp, gc.curHp + hpBonus);
+        if (transformedHp != gc.curHp) {
+            gc.curHp = transformedHp;
+            changed = true;
+        }
+        if (addRandomPotion
+                && gc.potionCount < gc.potionCapacity
+                && !gc.relics.has(RelicId::SOZU)) {
+            gc.obtainPotion(returnRandomPotion(gc.potionRng, gc.cc));
+            changed = true;
+        }
+        if (targetEncounter != bc.encounter) {
+            if (gc.curRoom == Room::BOSS) {
+                throw std::invalid_argument("Boss encounter replacement is not supported for training supplements");
+            }
+            gc.info.encounter = targetEncounter;
+            changed = true;
+        }
+        if (!changed) {
+            return snapshot();
+        }
+
+        bc = BattleContext();
+        bc.init(gc, targetEncounter);
+        battleActive = true;
+        return snapshot();
+    }
+
+    StepSimulatorCheckpoint captureCheckpoint() const {
+        return StepSimulatorCheckpoint{gc, bc, battleActive};
+    }
+
+    pybind11::dict restoreCheckpoint(const StepSimulatorCheckpoint &checkpoint) {
+        gc = checkpoint.gc;
+        bc = checkpoint.bc;
+        battleActive = checkpoint.battleActive;
+        return snapshot();
+    }
+};
+
+}
+
 
 PYBIND11_MODULE(slaythespire, m) {
     m.doc() = "pybind11 example plugin"; // optional module docstring
@@ -40,6 +1259,42 @@ PYBIND11_MODULE(slaythespire, m) {
         .def_readwrite("pause_on_card_reward", &search::ScumSearchAgent2::pauseOnCardReward, "causes the agent to pause so as to cede control to the user when it encounters a card reward choice")
         .def_readwrite("print_logs", &search::ScumSearchAgent2::printLogs, "when set to true, the agent prints state information as it makes actions")
         .def("playout", &search::ScumSearchAgent2::playout);
+
+
+    pybind11::class_<LightSpeedAction>(m, "LightSpeedAction")
+        .def_readonly("scope", &LightSpeedAction::scope)
+        .def_readonly("bits", &LightSpeedAction::bits)
+        .def_readonly("kind", &LightSpeedAction::kind)
+        .def_readonly("idx1", &LightSpeedAction::idx1)
+        .def_readonly("idx2", &LightSpeedAction::idx2)
+        .def_readonly("idx3", &LightSpeedAction::idx3)
+        .def_readonly("label", &LightSpeedAction::label)
+        .def("__repr__", [](const LightSpeedAction &action) {
+            return "<LightSpeedAction " + action.label + ">";
+        });
+
+    pybind11::class_<StepSimulatorCheckpoint>(m, "StepSimulatorCheckpoint");
+
+    pybind11::class_<StepSimulator>(m, "StepSimulator")
+        .def(pybind11::init<CharacterClass, std::uint64_t, int>())
+        .def("reset", &StepSimulator::reset)
+        .def("snapshot", &StepSimulator::snapshot)
+        .def("observation", &StepSimulator::observation)
+        .def("legal_actions", &StepSimulator::legalActions)
+        .def("public_battle_state", &StepSimulator::publicBattleState)
+        .def("step_public_action", &StepSimulator::stepPublicAction,
+                pybind11::arg("public_action_identity"))
+        .def(
+                "battle_search_v2",
+                &StepSimulator::battleSearchV2,
+                pybind11::arg("simulations"),
+                pybind11::arg("include_potions") = false)
+        .def("public_projection", &StepSimulator::publicProjection)
+        .def("legal_battle_start_encounters", &StepSimulator::legalBattleStartEncounters)
+        .def("rebuild_battle_start", &StepSimulator::rebuildBattleStart)
+        .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
+        .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
+        .def("step", &StepSimulator::step);
 
     pybind11::class_<GameContext> gameContext(m, "GameContext");
     gameContext.def(pybind11::init<CharacterClass, std::uint64_t, int>())

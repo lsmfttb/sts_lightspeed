@@ -197,6 +197,7 @@ Action Actions::ShuffleDrawPile() {
                 bc.cards.drawPile.end(),
                 java::Random(bc.shuffleRng.randomLong())
         );
+        bc.clearKnownDrawOrder();
     }};
 }
 
@@ -204,8 +205,7 @@ Action Actions::ShuffleTempCardIntoDrawPile(CardId id, int count) {
     return {[=] (BattleContext &bc) {
         CardInstance c(id);
         for (int i = 0; i < count; ++i) {
-            const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
-            bc.cards.createTempCardInDrawPile(idx, c);
+            bc.insertTempCardRandomlyIntoDrawPile(c);
         }
     }};
 }
@@ -241,8 +241,7 @@ Action Actions::MakeTempCardInDrawPile(const CardInstance &c, int amount, bool s
     return {[=](BattleContext &bc) {
         for (int i = 0; i < amount; ++i) {
             if (shuffleInto) {
-                const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
-                bc.cards.createTempCardInDrawPile(idx, c);
+                bc.insertTempCardRandomlyIntoDrawPile(c);
             }
             // todo else
         }
@@ -555,8 +554,9 @@ Action Actions::PutRandomCardsInDrawPile(CardType type, int count) {
             card.cost = 0;
             card.costForTurn = 0;
 
-            const int idx = bc.cards.drawPile.empty() ? 0 : bc.cardRandomRng.random(static_cast<int>(bc.cards.drawPile.size()-1));
-            bc.cards.createTempCardInDrawPile(idx, card);
+            // The native random card identities are not shown to the player;
+            // retain position constraints but fail closed on membership.
+            bc.insertTempCardRandomlyIntoDrawPile(card, false);
         }
     }};
 }

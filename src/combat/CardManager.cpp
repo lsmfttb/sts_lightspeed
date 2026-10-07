@@ -399,6 +399,7 @@ void CardManager::draw(BattleContext &bc, int amount) {
 
     for (int i = 0; i < amount; i++) {
         auto c = popFromDrawPile();
+        bc.consumeKnownDrawTop(c);
 
         if (bc.player.hasStatus<PS::CONFUSED>()) {
             if (c.cost >= 0) {  // todo status and curses affected by this?

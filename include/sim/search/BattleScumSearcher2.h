@@ -35,6 +35,8 @@ namespace sts::search {
         Node root;
 
         EvalFnc evalFnc;
+        bool includePotions = true;
+        std::int64_t actionExecutionCount = 0;
         double explorationParameter = 3*sqrt(2);
 
         double bestActionValue = std::numeric_limits<double>::min();

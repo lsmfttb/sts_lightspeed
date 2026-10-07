@@ -25,6 +25,7 @@ search::BattleScumSearcher2::BattleScumSearcher2(const BattleContext &bc, search
 
 void search::BattleScumSearcher2::search(int64_t simulations) {
     g_debug_scum_search = this;
+    actionExecutionCount = 0;
 
     if (isTerminalState(*rootState)) {
         auto evaluation = evaluateEndState(*rootState);
@@ -63,6 +64,7 @@ void search::BattleScumSearcher2::step() {
             auto &edgeTaken = curNode.edges[selectIdx];
 
 //            edgeTaken.action.printDesc(std::cout, curState) << std::endl;
+            ++actionExecutionCount;
             edgeTaken.action.execute(curState);
 
             actionStack.push_back(edgeTaken.action);
@@ -77,6 +79,7 @@ void search::BattleScumSearcher2::step() {
             auto &edgeTaken = curNode.edges[selectIdx];
 
 //            edgeTaken.action.printDesc(std::cout, curState) << std::endl;
+            ++actionExecutionCount;
             edgeTaken.action.execute(curState);
 
             actionStack.push_back(edgeTaken.action);
@@ -166,6 +169,7 @@ void search::BattleScumSearcher2::playoutRandom(BattleContext &state, std::vecto
         const auto action = tempNode.edges[selectedIdx].action;
 //        action.printDesc(std::cout, state) << std::endl;
         actionStack.push_back(action);
+        ++actionExecutionCount;
         action.execute(state);
 
         tempNode.edges.clear();
@@ -177,7 +181,9 @@ void search::BattleScumSearcher2::enumerateActionsForNode(search::BattleScumSear
     switch (bc.inputState) {
         case InputState::PLAYER_NORMAL:
             enumerateCardActions(node, bc);
-            enumeratePotionActions(node, bc);
+            if (includePotions) {
+                enumeratePotionActions(node, bc);
+            }
             node.edges.push_back({Action(ActionType::END_TURN)});
             break;
 
