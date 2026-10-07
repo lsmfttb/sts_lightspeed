@@ -34,3 +34,14 @@ target_link_directories(small-test PRIVATE json::nlohmann_json)
 target_include_directories(small-test PUBLIC include)
 target_include_directories(small-test PUBLIC json/include)
 target_include_directories(small-test PUBLIC bindings)
+
+add_executable(test-public-battle-state-semantics EXCLUDE_FROM_ALL
+        apps/test_public_battle_state_semantics.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(test-public-battle-state-semantics PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(test-public-battle-state-semantics PUBLIC include)
+target_include_directories(test-public-battle-state-semantics PUBLIC json/single_include)
+target_include_directories(test-public-battle-state-semantics PUBLIC bindings)
+target_link_libraries(test-public-battle-state-semantics PRIVATE pybind11::embed)

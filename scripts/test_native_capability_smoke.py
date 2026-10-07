@@ -47,8 +47,15 @@ def contains_private_identity(value: Any) -> bool:
     return False
 
 
-def reach_normal_battle(sts: Any, seed: int, ascension: int) -> Any:
-    simulator = sts.StepSimulator(sts.CharacterClass.IRONCLAD, seed, ascension)
+def reach_normal_battle(
+    sts: Any,
+    seed: int,
+    ascension: int,
+    character_class: Any | None = None,
+) -> Any:
+    if character_class is None:
+        character_class = sts.CharacterClass.IRONCLAD
+    simulator = sts.StepSimulator(character_class, seed, ascension)
     for _ in range(512):
         snapshot = simulator.snapshot()
         if (
@@ -80,6 +87,10 @@ def main() -> int:
     )
     require(state.get("information_regime") == "normal_public", "wrong information regime")
     require(not contains_private_identity(state), "public battle state exposes private identity")
+    player = state["player"]
+    require(isinstance(player.get("active_statuses"), list), "active player statuses are missing")
+    require("stance" in player and "stance_id" in player, "player stance is missing")
+    require("orb_slots" in player and "orb_state" in player, "player orb state is missing")
 
     identities = state["ordered_public_legal_actions"]
     actions = simulator.legal_actions()
@@ -143,10 +154,24 @@ def main() -> int:
     rebuilt = battle_start_simulator.rebuild_battle_start(0, True, -1)
     require(rebuilt.get("battle_active") is True, "battle-start rebuild lost active battle state")
 
+    defect_simulator = reach_normal_battle(
+        sts, args.seed, args.ascension, sts.CharacterClass.DEFECT
+    )
+    defect_state = defect_simulator.public_battle_state()
+    require(
+        defect_state.get("information_fidelity") == "unsupported_fidelity",
+        "unmodeled Defect orb state was reported as supported",
+    )
+    require(
+        defect_state["player"]["orb_state"].get("availability") == "unsupported",
+        "unmodeled Defect orb state was not identified",
+    )
+
     print("NATIVE_CAPABILITY_SMOKE_PASS")
     print(f"public_actions={len(identities)}")
     print(f"search_root_visits={search['root_visits']}")
     print(f"battle_start_encounters={len(encounters)}")
+    print("defect_orb_state=unsupported_fidelity")
     return 0
 
 

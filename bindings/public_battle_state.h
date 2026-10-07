@@ -53,15 +53,17 @@ bool drawPilePublicMembershipKnown(const GameContext &gc, const BattleContext &b
 }
 
 pybind11::list drawPilePublicMultiset(const BattleContext &bc) {
-    std::map<std::pair<int, bool>, int> counts;
+    std::map<std::tuple<int, bool, int>, int> counts;
     for (const auto &card : bc.cards.drawPile) {
-        ++counts[{static_cast<int>(card.getId()), card.isUpgraded()}];
+        ++counts[{static_cast<int>(card.getId()), card.isUpgraded(),
+                card.getUpgradeCount()}];
     }
     pybind11::list ret;
     for (const auto &[face, count] : counts) {
         pybind11::dict row;
-        row["id"] = face.first;
-        row["upgraded"] = face.second;
+        row["id"] = std::get<0>(face);
+        row["upgraded"] = std::get<1>(face);
+        row["upgrade_count"] = std::get<2>(face);
         row["count"] = count;
         ret.append(row);
     }
@@ -202,6 +204,9 @@ pybind11::list knownDrawPositionSnapshot(const BattleContext &bc) {
 }
 
 bool publicInformationUnsupported(const GameContext &gc, const BattleContext &bc) {
+    if (bc.player.cc == CharacterClass::DEFECT) {
+        return true;
+    }
     if (bc.knownDrawUnsupportedReasons != 0 || !knownDrawStateConsistent(bc)) {
         return true;
     }

@@ -98,6 +98,21 @@ std::string screenStateLabel(const ScreenState screenState) {
     }
 }
 
+const char *stanceLabel(const Stance stance) {
+    switch (stance) {
+        case Stance::NEUTRAL:
+            return "NEUTRAL";
+        case Stance::CALM:
+            return "CALM";
+        case Stance::WRATH:
+            return "WRATH";
+        case Stance::DIVINITY:
+            return "DIVINITY";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 std::string inputStateLabel(const InputState inputState) {
     switch (inputState) {
         case InputState::EXECUTING_ACTIONS:
@@ -327,6 +342,59 @@ pybind11::dict playerSnapshot(const Player &player) {
     ret["vulnerable"] = player.getStatusRuntime(PS::VULNERABLE);
     ret["weak"] = player.getStatusRuntime(PS::WEAK);
     ret["frail"] = player.getStatusRuntime(PS::FRAIL);
+    pybind11::list activeStatuses;
+    for (int statusIdx = 1;
+            statusIdx <= static_cast<int>(PS::THE_BOMB); ++statusIdx) {
+        const auto status = static_cast<PlayerStatus>(statusIdx);
+        pybind11::dict row;
+        row["id"] = statusIdx;
+        row["name"] = std::string(playerStatusEnumStrings[statusIdx]);
+        if (status == PS::THE_BOMB) {
+            if (!player.bomb1 && !player.bomb2 && !player.bomb3) {
+                continue;
+            }
+            pybind11::dict damageByTurn;
+            damageByTurn["next_turn"] = player.bomb1;
+            damageByTurn["turn_after_next"] = player.bomb2;
+            damageByTurn["third_turn"] = player.bomb3;
+            row["value"] = damageByTurn;
+        } else {
+            if (!player.hasStatusRuntime(status)) {
+                continue;
+            }
+            int value = 1;
+            switch (status) {
+                case PS::ARTIFACT:
+                case PS::DEXTERITY:
+                case PS::FOCUS:
+                case PS::STRENGTH:
+                    value = player.getStatusRuntime(status);
+                    break;
+                default: {
+                    const auto statusValue = player.statusMap.find(status);
+                    if (statusValue != player.statusMap.end()) {
+                        value = statusValue->second;
+                    }
+                    break;
+                }
+            }
+            row["value"] = value;
+        }
+        activeStatuses.append(row);
+    }
+    ret["active_statuses"] = activeStatuses;
+    ret["stance_id"] = static_cast<int>(player.stance);
+    ret["stance"] = stanceLabel(player.stance);
+    ret["orb_slots"] = player.orbSlots;
+    pybind11::dict orbState;
+    if (player.cc == CharacterClass::DEFECT) {
+        orbState["availability"] = "unsupported";
+        orbState["reason"] = "the native simulator does not track orb identities or values";
+    } else {
+        orbState["availability"] = "available";
+        orbState["current_orbs"] = pybind11::list();
+    }
+    ret["orb_state"] = orbState;
     ret["cards_played_this_turn"] = player.cardsPlayedThisTurn;
     ret["attacks_played_this_turn"] = player.attacksPlayedThisTurn;
     ret["skills_played_this_turn"] = player.skillsPlayedThisTurn;
@@ -1240,6 +1308,7 @@ struct StepSimulator {
 }
 
 
+#ifndef STS_LIGHTSPEED_NO_PYBIND_MODULE
 PYBIND11_MODULE(slaythespire, m) {
     m.doc() = "pybind11 example plugin"; // optional module docstring
     m.def("play", &sts::py::play, "play Slay the Spire Console");
@@ -2089,6 +2158,7 @@ PYBIND11_MODULE(slaythespire, m) {
     m.attr("__version__") = "dev";
 #endif
 }
+#endif
 
 // os.add_dll_directory("C:\\Program Files\\mingw-w64\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\mingw64\\bin")
 
