@@ -11,6 +11,6 @@ This is a coverage check for Issue #11, not an outcome study. The replay used th
 | 4 / Jaw Worm | 96 | 9 / 9 | Complete |
 | 4 / Jaw Worm | 384 | 11 / 11 | Complete |
 
-The previous `monster_status_timing` and `player_status_timing` failures did not recur in these six attempts. Four of six battles completed at each budget; both Small Slimes attempts later failed closed because the draw-pile insertion membership was not representable. This subset establishes re-entry past the prior status blocker, not broad coverage or a battle-strength signal.
+The previous `monster_status_timing` and `player_status_timing` failures did not recur in these six attempts. Four of six battles completed overall (two of three at each budget). Both Small Slimes attempts later failed closed because the draw-pile insertion membership was not representable. This subset establishes re-entry past the prior status blocker, not broad coverage or a battle-strength signal.
 
 Focused native verification: Release target `test-public-battle-state-semantics` built and printed `PUBLIC_BATTLE_STATE_SEMANTICS_PASS`, including Issue #9 fail-closed regressions.
