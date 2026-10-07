@@ -1,0 +1,2025 @@
+{
+  "anchors": [
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "distinct_hidden_draw_orders_in_16_samples": 16,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_fidelity": "supported",
+      "normal_public_legal_action_count": 6
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "distinct_hidden_draw_orders_in_16_samples": 16,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_fidelity": "supported",
+      "normal_public_legal_action_count": 6
+    }
+  ],
+  "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+  "conclusion": "UNSTABLE_CANARY",
+  "information_regime": "normal_public",
+  "interpretation_limit": "bounded feasibility canary only; no strength, posterior, broad A20, or online-latency claim",
+  "proposed_code_disposition": "study-only; do not promote to spire/main from this canary",
+  "runs": [
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 2,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.41109068627450984,
+          "shared_value_sum": 1.6443627450980394,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6382352941176471,
+          "shared_value_sum": 3.1911764705882355,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5409926470588236,
+          "shared_value_sum": 2.163970588235294,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5280024509803921,
+          "shared_value_sum": 2.1120098039215685,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.4009803921568627,
+          "shared_value_sum": 1.2029411764705882,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6063725490196078,
+          "shared_value_sum": 2.425490196078431,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.6382352941176471,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 0,
+        "idx2": 0,
+        "idx3": 0,
+        "kind": "card",
+        "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 2,
+        "native_action_steps": 287,
+        "shared_edges": 1087,
+        "shared_nodes": 247,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.33699563
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 2,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.49031862745098037,
+          "shared_value_sum": 1.9612745098039215,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5604166666666667,
+          "shared_value_sum": 2.2416666666666667,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5186887254901961,
+          "shared_value_sum": 2.0747549019607843,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5450367647058824,
+          "shared_value_sum": 2.1801470588235294,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6653799019607842,
+          "shared_value_sum": 2.661519607843137,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5502450980392157,
+          "shared_value_sum": 2.200980392156863,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.6653799019607842,
+      "selected_action_shared_visits": 4,
+      "selected_public_action": {
+        "idx1": 3,
+        "idx2": 0,
+        "idx3": 3,
+        "kind": "card",
+        "label": "{ use card (3) (Panacea,10,0,0) }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 2,
+        "native_action_steps": 288,
+        "shared_edges": 1084,
+        "shared_nodes": 248,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.327306909
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 4,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.612438725490196,
+          "shared_value_sum": 2.449754901960784,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.7202205882352941,
+          "shared_value_sum": 2.8808823529411764,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6208333333333333,
+          "shared_value_sum": 2.4833333333333334,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.615563725490196,
+          "shared_value_sum": 2.462254901960784,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.533639705882353,
+          "shared_value_sum": 2.134558823529412,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6332107843137255,
+          "shared_value_sum": 2.532843137254902,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.7202205882352941,
+      "selected_action_shared_visits": 4,
+      "selected_public_action": {
+        "idx1": 0,
+        "idx2": 0,
+        "idx3": 0,
+        "kind": "card",
+        "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 4,
+        "native_action_steps": 288,
+        "shared_edges": 1087,
+        "shared_nodes": 249,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.317614916
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 4,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5476102941176471,
+          "shared_value_sum": 2.1904411764705882,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.4495098039215686,
+          "shared_value_sum": 1.7980392156862743,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6302696078431372,
+          "shared_value_sum": 2.521078431372549,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6027573529411765,
+          "shared_value_sum": 2.411029411764706,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6357230392156863,
+          "shared_value_sum": 2.542892156862745,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6693627450980393,
+          "shared_value_sum": 2.677450980392157,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.6693627450980393,
+      "selected_action_shared_visits": 4,
+      "selected_public_action": {
+        "idx1": 4,
+        "idx2": 0,
+        "idx3": 4,
+        "kind": "card",
+        "label": "{ use card (4) (Defend,8,1,1) }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 4,
+        "native_action_steps": 288,
+        "shared_edges": 1095,
+        "shared_nodes": 249,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.368632891
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 8,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.4981209150326797,
+          "shared_value_sum": 1.494362745098039,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5580269607843138,
+          "shared_value_sum": 2.232107843137255,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6529411764705882,
+          "shared_value_sum": 2.611764705882353,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.710110294117647,
+          "shared_value_sum": 2.840441176470588,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6284313725490196,
+          "shared_value_sum": 2.5137254901960784,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6375980392156864,
+          "shared_value_sum": 3.187990196078432,
+          "shared_visits": 5
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.6375980392156864,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 4,
+        "idx2": 0,
+        "idx3": 4,
+        "kind": "card",
+        "label": "{ use card (4) (Defend,8,1,1) }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 8,
+        "native_action_steps": 288,
+        "shared_edges": 1067,
+        "shared_nodes": 249,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.361814165
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 8,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6518382352941177,
+          "shared_value_sum": 2.6073529411764707,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.48194444444444445,
+          "shared_value_sum": 1.4458333333333333,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.7295588235294117,
+          "shared_value_sum": 3.6477941176470585,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6610294117647058,
+          "shared_value_sum": 2.644117647058823,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5439950980392156,
+          "shared_value_sum": 2.1759803921568626,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6249387254901961,
+          "shared_value_sum": 2.4997549019607845,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.7295588235294117,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 1,
+        "kind": "card",
+        "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 8,
+        "native_action_steps": 288,
+        "shared_edges": 1103,
+        "shared_nodes": 250,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.374271541
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 16,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.4741013071895425,
+          "shared_value_sum": 1.4223039215686275,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.584375,
+          "shared_value_sum": 2.3375,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.7015196078431373,
+          "shared_value_sum": 3.5075980392156865,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.7016544117647059,
+          "shared_value_sum": 2.8066176470588236,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6284313725490196,
+          "shared_value_sum": 2.5137254901960784,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6775735294117647,
+          "shared_value_sum": 2.710294117647059,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.7015196078431373,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 1,
+        "kind": "card",
+        "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 16,
+        "native_action_steps": 288,
+        "shared_edges": 1064,
+        "shared_nodes": 249,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.327582812
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 1,
+      "information_regime": "normal_public",
+      "particle_count": 16,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5939338235294117,
+          "shared_value_sum": 2.375735294117647,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Strike,4,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.37687908496732025,
+          "shared_value_sum": 1.1306372549019608,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6542892156862745,
+          "shared_value_sum": 2.617156862745098,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5631740196078432,
+          "shared_value_sum": 2.2526960784313728,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Panacea,10,0,0) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5399509803921568,
+          "shared_value_sum": 2.1598039215686273,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6755882352941176,
+          "shared_value_sum": 3.3779411764705882,
+          "shared_visits": 5
+        }
+      ],
+      "sampler_seed": 6006002,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.6755882352941176,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 4,
+        "idx2": 0,
+        "idx3": 4,
+        "kind": "card",
+        "label": "{ use card (4) (Defend,8,1,1) }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 16,
+        "native_action_steps": 288,
+        "shared_edges": 1126,
+        "shared_nodes": 250,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.318562497
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 2,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.4107843137254902,
+          "shared_value_sum": 1.6431372549019607,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.04289215686274511,
+          "shared_value_sum": 0.08578431372549022,
+          "shared_visits": 2
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6265686274509804,
+          "shared_value_sum": 3.132843137254902,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5793504901960784,
+          "shared_value_sum": 2.3174019607843137,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.7375490196078431,
+          "shared_value_sum": 3.6877450980392155,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5579656862745097,
+          "shared_value_sum": 2.231862745098039,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.7375490196078431,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 3,
+        "idx2": 0,
+        "idx3": 3,
+        "kind": "card",
+        "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 2,
+        "native_action_steps": 288,
+        "shared_edges": 1037,
+        "shared_nodes": 248,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.29283388
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 2,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.46017156862745096,
+          "shared_value_sum": 1.8406862745098038,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5588235294117647,
+          "shared_value_sum": 2.235294117647059,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6051470588235294,
+          "shared_value_sum": 2.4205882352941175,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.3343954248366013,
+          "shared_value_sum": 1.003186274509804,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6247549019607843,
+          "shared_value_sum": 2.4990196078431373,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6198039215686274,
+          "shared_value_sum": 3.099019607843137,
+          "shared_visits": 5
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.6198039215686274,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 4,
+        "idx2": 0,
+        "idx3": 4,
+        "kind": "card",
+        "label": "{ use card (4) (Defend,5,1,1) }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 2,
+        "native_action_steps": 288,
+        "shared_edges": 1024,
+        "shared_nodes": 248,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.315580859
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 4,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.4038398692810457,
+          "shared_value_sum": 1.2115196078431372,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.04289215686274511,
+          "shared_value_sum": 0.08578431372549022,
+          "shared_visits": 2
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6431862745098039,
+          "shared_value_sum": 3.2159313725490195,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.600796568627451,
+          "shared_value_sum": 2.403186274509804,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6748529411764705,
+          "shared_value_sum": 3.3742647058823527,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5988725490196078,
+          "shared_value_sum": 2.994362745098039,
+          "shared_visits": 5
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.6748529411764705,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 3,
+        "idx2": 0,
+        "idx3": 3,
+        "kind": "card",
+        "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 4,
+        "native_action_steps": 287,
+        "shared_edges": 1032,
+        "shared_nodes": 248,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.308670719
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 4,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5663235294117647,
+          "shared_value_sum": 2.8316176470588235,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.2053104575163399,
+          "shared_value_sum": 0.6159313725490196,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5348039215686274,
+          "shared_value_sum": 2.1392156862745098,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.31462418300653594,
+          "shared_value_sum": 0.9438725490196078,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.604607843137255,
+          "shared_value_sum": 3.023039215686275,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5343137254901961,
+          "shared_value_sum": 2.1372549019607843,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.604607843137255,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 3,
+        "idx2": 0,
+        "idx3": 3,
+        "kind": "card",
+        "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 4,
+        "native_action_steps": 288,
+        "shared_edges": 1064,
+        "shared_nodes": 249,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.322017733
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 8,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.39822303921568625,
+          "shared_value_sum": 1.592892156862745,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.40138888888888885,
+          "shared_value_sum": 1.2041666666666666,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.657156862745098,
+          "shared_value_sum": 3.28578431372549,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5115808823529413,
+          "shared_value_sum": 2.046323529411765,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.474203431372549,
+          "shared_value_sum": 1.896813725490196,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5191176470588235,
+          "shared_value_sum": 2.076470588235294,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.657156862745098,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 1,
+        "kind": "card",
+        "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 8,
+        "native_action_steps": 286,
+        "shared_edges": 1071,
+        "shared_nodes": 247,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.320042356
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 8,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5559436274509804,
+          "shared_value_sum": 2.2237745098039214,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.4805759803921569,
+          "shared_value_sum": 1.9223039215686275,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5475490196078431,
+          "shared_value_sum": 2.7377450980392153,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5998161764705883,
+          "shared_value_sum": 2.399264705882353,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5751225490196078,
+          "shared_value_sum": 2.300490196078431,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.2121732026143791,
+          "shared_value_sum": 0.6365196078431373,
+          "shared_visits": 3
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.5475490196078431,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 1,
+        "kind": "card",
+        "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 8,
+        "native_action_steps": 288,
+        "shared_edges": 1075,
+        "shared_nodes": 250,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.303345546
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 16,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.48792892156862744,
+          "shared_value_sum": 1.9517156862745098,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.40825163398692815,
+          "shared_value_sum": 1.2247549019607844,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.7576960784313725,
+          "shared_value_sum": 3.788480392156863,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6006740196078431,
+          "shared_value_sum": 2.4026960784313722,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.49044117647058827,
+          "shared_value_sum": 1.961764705882353,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.48903186274509797,
+          "shared_value_sum": 1.9561274509803919,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061001,
+      "selected_action_shared_value": 0.7576960784313725,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 1,
+        "kind": "card",
+        "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 16,
+        "native_action_steps": 286,
+        "shared_edges": 1041,
+        "shared_nodes": 248,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.276215084
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "code_commit": "71b72f1ccede6c8d0f1529fe6ceaa856f3a6c896",
+      "decision_depth_cap": 12,
+      "encounter_id": "CULTIST",
+      "floor_num": 1,
+      "game_seed": 2,
+      "information_regime": "normal_public",
+      "particle_count": 16,
+      "root_shared_actions": [
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5018382352941176,
+          "shared_value_sum": 2.0073529411764706,
+          "shared_visits": 4
+        },
+        {
+          "public_action": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Defend,7,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.12810457516339868,
+          "shared_value_sum": 0.38431372549019605,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6376470588235295,
+          "shared_value_sum": 3.1882352941176473,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,0,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.6226470588235294,
+          "shared_value_sum": 3.113235294117647,
+          "shared_visits": 5
+        },
+        {
+          "public_action": {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Strike,2,1,1) -> (0) CULTIST }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.3781862745098039,
+          "shared_value_sum": 1.1345588235294117,
+          "shared_visits": 3
+        },
+        {
+          "public_action": {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Defend,5,1,1) }",
+            "scope": "battle"
+          },
+          "shared_mean_value": 0.5399509803921569,
+          "shared_value_sum": 2.1598039215686278,
+          "shared_visits": 4
+        }
+      ],
+      "sampler_seed": 6006003,
+      "search_seed": 8061002,
+      "selected_action_shared_value": 0.6376470588235295,
+      "selected_action_shared_visits": 5,
+      "selected_public_action": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 1,
+        "kind": "card",
+        "label": "{ use card (1) (Bash,9,2,2) -> (0) CULTIST }",
+        "scope": "battle"
+      },
+      "semantic_checks": {
+        "all_root_actions_received_shared_visits": true,
+        "budget_fixed_independent_of_particle_count": true,
+        "normal_public_information_regime": true,
+        "particle_identity_excluded_from_action_selection_and_node_key": true,
+        "root_public_state_and_ordered_actions_shared": true,
+        "selected_action_executed_via_public_action_surface": true,
+        "single_shared_root_node_across_particles": true
+      },
+      "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+      "total_simulation_budget": 24,
+      "work": {
+        "distinct_particles_used": 16,
+        "native_action_steps": 288,
+        "shared_edges": 1060,
+        "shared_nodes": 249,
+        "total_simulations": 24,
+        "wall_time_seconds": 0.267393616
+      },
+      "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+    }
+  ],
+  "sampler_interpretation": "reproducible proposal distribution; not an exact posterior",
+  "schema_id": "shared-public-search-canary-v1",
+  "search_policy": "one UCT tree keyed by public state and public action/result history; tie selection uses only search seed, public node key, and shared visits",
+  "semantic_preflight": [
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "ordered_public_actions_identical_for_16_particles": true,
+      "root_public_state_identical_for_16_particles": true,
+      "same_root_edge_visits_from_particle_sources": 16,
+      "shared_root_visits_from_particle_sources": 16,
+      "single_shared_root_node_count": 1,
+      "tree_key_source": "public_battle_state plus ordered public action/result history"
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "ordered_public_actions_identical_for_16_particles": true,
+      "root_public_state_identical_for_16_particles": true,
+      "same_root_edge_visits_from_particle_sources": 16,
+      "shared_root_visits_from_particle_sources": 16,
+      "single_shared_root_node_count": 1,
+      "tree_key_source": "public_battle_state plus ordered public action/result history"
+    }
+  ],
+  "simulator_base": "origin/spire/main@f6279292f685026f05d57cda9140650185d76043",
+  "skipped_anchors": [],
+  "stability": [
+    {
+      "anchor_id": "ironclad-a0-seed-1-floor-1-CULTIST",
+      "selected_action_agreement_fraction": 0.375,
+      "selected_action_value_range": 0.09196078431372534,
+      "settings": 8,
+      "stable_under_declared_criterion": false
+    },
+    {
+      "anchor_id": "ironclad-a0-seed-2-floor-1-CULTIST",
+      "selected_action_agreement_fraction": 0.5,
+      "selected_action_value_range": 0.21014705882352946,
+      "settings": 8,
+      "stable_under_declared_criterion": false
+    }
+  ],
+  "stability_criterion": "per anchor, all 8 particle-count/search-seed settings select the same action and the selected action value range is <= 0.25",
+  "truncated_leaf_evaluation": "clamp(player_hp/max_hp - 0.5 * sum(monster_hp/max_hp), -1, 1); terminal win/loss is +1/-1",
+  "work_counter_definition": "native_action_steps counts calls to step_public_action during searched trajectories; simulator-internal queue steps are not separately instrumented"
+}
