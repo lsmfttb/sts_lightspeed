@@ -45,3 +45,14 @@ target_include_directories(test-public-battle-state-semantics PUBLIC include)
 target_include_directories(test-public-battle-state-semantics PUBLIC json/single_include)
 target_include_directories(test-public-battle-state-semantics PUBLIC bindings)
 target_link_libraries(test-public-battle-state-semantics PRIVATE pybind11::embed)
+
+add_executable(study-shared-public-search-canary EXCLUDE_FROM_ALL
+        apps/study_shared_public_search_canary.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(study-shared-public-search-canary PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(study-shared-public-search-canary PUBLIC include)
+target_include_directories(study-shared-public-search-canary PUBLIC json/single_include)
+target_include_directories(study-shared-public-search-canary PUBLIC bindings)
+target_link_libraries(study-shared-public-search-canary PRIVATE pybind11::embed)
