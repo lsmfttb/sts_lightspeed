@@ -32,6 +32,7 @@ pybind11::dict publicDrawCardFace(const CardInstance &card) {
     ret["type"] = cardTypeLabel(card.getType());
     ret["upgraded"] = card.isUpgraded();
     ret["upgrade_count"] = card.getUpgradeCount();
+    addPublicCardSpecialData(ret, card);
     return ret;
 }
 
@@ -53,10 +54,13 @@ bool drawPilePublicMembershipKnown(const GameContext &gc, const BattleContext &b
 }
 
 pybind11::list drawPilePublicMultiset(const BattleContext &bc) {
-    std::map<std::tuple<int, bool, int>, int> counts;
+    using DrawPileFace = std::tuple<int, bool, int, bool, int>;
+    std::map<DrawPileFace, int> counts;
     for (const auto &card : bc.cards.drawPile) {
+        const bool hasSpecialData = card.usesSpecialData();
         ++counts[{static_cast<int>(card.getId()), card.isUpgraded(),
-                card.getUpgradeCount()}];
+                card.getUpgradeCount(), hasSpecialData,
+                hasSpecialData ? card.specialData : 0}];
     }
     pybind11::list ret;
     for (const auto &[face, count] : counts) {
@@ -64,6 +68,9 @@ pybind11::list drawPilePublicMultiset(const BattleContext &bc) {
         row["id"] = std::get<0>(face);
         row["upgraded"] = std::get<1>(face);
         row["upgrade_count"] = std::get<2>(face);
+        if (std::get<3>(face)) {
+            row["special_data"] = std::get<4>(face);
+        }
         row["count"] = count;
         ret.append(row);
     }
@@ -341,7 +348,8 @@ pybind11::dict makePublicBattleState(
             baselineAnchors.append(fact);
         }
         drawOrder["baseline_order_anchors"] = baselineAnchors;
-        std::map<std::tuple<int, bool, int, int>, int> groupedInsertions;
+        using InsertionFace = std::tuple<int, bool, int, bool, int, int, int>;
+        std::map<InsertionFace, int> groupedInsertions;
         for (const auto &insertion : bc.knownDrawInsertionCards) {
             const auto card = std::find_if(
                     bc.cards.drawPile.begin(), bc.cards.drawPile.end(),
@@ -364,9 +372,11 @@ pybind11::dict makePublicBattleState(
                     beforeAnchorPosition = anchor->basePositionFromTop;
                 }
             }
+            const bool hasSpecialData = card->usesSpecialData();
             ++groupedInsertions[{static_cast<int>(card->getId()),
-                    card->isUpgraded(), insertion.minimumPositionFromTop,
-                    beforeAnchorPosition}];
+                    card->isUpgraded(), card->getUpgradeCount(), hasSpecialData,
+                    hasSpecialData ? card->specialData : 0,
+                    insertion.minimumPositionFromTop, beforeAnchorPosition}];
         }
         pybind11::list insertionConstraints;
         for (const auto &[key, count] : groupedInsertions) {
@@ -374,11 +384,15 @@ pybind11::dict makePublicBattleState(
             pybind11::dict cardFace;
             cardFace["id"] = std::get<0>(key);
             cardFace["upgraded"] = std::get<1>(key);
+            cardFace["upgrade_count"] = std::get<2>(key);
+            if (std::get<3>(key)) {
+                cardFace["special_data"] = std::get<4>(key);
+            }
             constraint["card"] = cardFace;
             constraint["count"] = count;
-            constraint["minimum_position_from_top"] = std::get<2>(key);
-            if (std::get<3>(key) >= 0) {
-                constraint["before_baseline_position_from_top"] = std::get<3>(key);
+            constraint["minimum_position_from_top"] = std::get<5>(key);
+            if (std::get<6>(key) >= 0) {
+                constraint["before_baseline_position_from_top"] = std::get<6>(key);
             }
             insertionConstraints.append(constraint);
         }

@@ -3,6 +3,7 @@
 #include "../bindings/slaythespire.cpp"
 
 #include <map>
+#include <array>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -81,9 +82,65 @@ void verifySearingBlowUpgradeCountsRemainDistinct() {
         const auto row = pybind11::cast<pybind11::dict>(item);
         countsByUpgrade[pybind11::cast<int>(row["upgrade_count"])] =
                 pybind11::cast<int>(row["count"]);
+        require(pybind11::cast<int>(row["special_data"])
+                        == pybind11::cast<int>(row["upgrade_count"]),
+                "Searing Blow special data diverged from its upgrade count");
     }
     require(countsByUpgrade.size() == 2 && countsByUpgrade[1] == 1 && countsByUpgrade[3] == 1,
             "draw-pile multiset did not preserve Searing Blow +N identity");
+}
+
+void verifySpecialDataCardFacesAndMembership() {
+    BattleContext battle;
+    CardInstance rampage(CardId::RAMPAGE);
+    rampage.specialData = 8;
+    CardInstance geneticAlgorithm(CardId::GENETIC_ALGORITHM);
+    geneticAlgorithm.specialData = 17;
+    CardInstance ritualDagger(CardId::RITUAL_DAGGER);
+    ritualDagger.specialData = 23;
+    CardInstance searingBlow(CardId::SEARING_BLOW);
+    searingBlow.upgraded = true;
+    searingBlow.specialData = 4;
+
+    const std::array<CardInstance, 4> specialCards{
+            rampage, geneticAlgorithm, ritualDagger, searingBlow};
+    for (const auto &card : specialCards) {
+        const auto snapshot = cardSnapshot(battle, card, 0, false);
+        const auto drawFace = publicDrawCardFace(card);
+        require(snapshot.contains("special_data"),
+                "visible card snapshot omitted applicable special data");
+        require(drawFace.contains("special_data"),
+                "known draw-order face omitted applicable special data");
+        require(pybind11::cast<int>(snapshot["special_data"]) == card.specialData,
+                "visible card snapshot changed special data");
+        require(pybind11::cast<int>(drawFace["special_data"]) == card.specialData,
+                "known draw-order face changed special data");
+    }
+
+    CardInstance ordinaryStrike(CardId::STRIKE_RED);
+    require(!cardSnapshot(battle, ordinaryStrike, 0, false).contains("special_data"),
+            "ordinary card exposed an inapplicable special-data field");
+    require(!publicDrawCardFace(ordinaryStrike).contains("special_data"),
+            "ordinary draw face exposed an inapplicable special-data field");
+
+    CardInstance unscaledRampage(CardId::RAMPAGE);
+    CardInstance scaledRampage(CardId::RAMPAGE);
+    scaledRampage.specialData = 8;
+    battle.cards.drawPile.push_back(unscaledRampage);
+    battle.cards.drawPile.push_back(scaledRampage);
+    const auto multiset = drawPilePublicMultiset(battle);
+    require(multiset.size() == 2,
+            "different Rampage damage values were merged in draw-pile membership");
+    std::map<int, int> countsBySpecialData;
+    for (const auto &item : multiset) {
+        const auto row = pybind11::cast<pybind11::dict>(item);
+        countsBySpecialData[pybind11::cast<int>(row["special_data"])] =
+                pybind11::cast<int>(row["count"]);
+    }
+    require(countsBySpecialData.size() == 2
+                    && countsBySpecialData[0] == 1
+                    && countsBySpecialData[8] == 1,
+            "draw-pile membership did not preserve Rampage damage values");
 }
 
 } // namespace
@@ -93,6 +150,7 @@ int main() {
     verifyPublicPlayerStatusesAndStance();
     verifyDefectOrbStateIsExplicitlyUnsupported();
     verifySearingBlowUpgradeCountsRemainDistinct();
+    verifySpecialDataCardFacesAndMembership();
     std::cout << "PUBLIC_BATTLE_STATE_SEMANTICS_PASS\n";
     return 0;
 }

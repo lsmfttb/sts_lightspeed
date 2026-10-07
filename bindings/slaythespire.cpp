@@ -403,6 +403,12 @@ pybind11::dict playerSnapshot(const Player &player) {
     return ret;
 }
 
+void addPublicCardSpecialData(pybind11::dict &snapshot, const CardInstance &card) {
+    if (card.usesSpecialData()) {
+        snapshot["special_data"] = card.specialData;
+    }
+}
+
 pybind11::dict cardSnapshot(
         const BattleContext &bc,
         const CardInstance &card,
@@ -417,6 +423,7 @@ pybind11::dict cardSnapshot(
     ret["cost_for_turn"] = card.costForTurn;
     ret["upgraded"] = card.isUpgraded();
     ret["upgrade_count"] = card.getUpgradeCount();
+    addPublicCardSpecialData(ret, card);
     ret["requires_target"] = card.requiresTarget();
     ret["playable"] = cardIsPlayable && card.canUseOnAnyTarget(bc);
     ret["free_to_play_once"] = card.freeToPlayOnce;
