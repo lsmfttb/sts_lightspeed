@@ -45,3 +45,14 @@ target_include_directories(test-public-battle-state-semantics PUBLIC include)
 target_include_directories(test-public-battle-state-semantics PUBLIC json/single_include)
 target_include_directories(test-public-battle-state-semantics PUBLIC bindings)
 target_link_libraries(test-public-battle-state-semantics PRIVATE pybind11::embed)
+
+add_executable(study-end-to-end-public-battle EXCLUDE_FROM_ALL
+        apps/study_end_to_end_public_battle.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(study-end-to-end-public-battle PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(study-end-to-end-public-battle PUBLIC include)
+target_include_directories(study-end-to-end-public-battle PUBLIC json/single_include)
+target_include_directories(study-end-to-end-public-battle PUBLIC bindings)
+target_link_libraries(study-end-to-end-public-battle PRIVATE pybind11::embed)
