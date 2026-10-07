@@ -1162,6 +1162,27 @@ struct StepSimulator {
             throw std::runtime_error(
                     "public-consistent sampling requires supported public fidelity");
         }
+        if (anchor.bc.player.hasRelic<R::RUNIC_DOME>()) {
+            throw std::runtime_error(
+                    "public-consistent sampling cannot represent Runic Dome's hidden monster intents");
+        }
+        for (int idx = 0; idx < anchor.bc.monsters.monsterCount; ++idx) {
+            const auto &monster = anchor.bc.monsters.arr[idx];
+            if (publicMonsterCounterKnowledge(anchor.bc, monster)
+                    == PublicMonsterCounterKnowledge::PRIVATE_ONLY) {
+                throw std::runtime_error(
+                        "public-consistent sampling cannot represent private monster future counters");
+            }
+            // These statuses have unprojected just-applied timing bits. Reject
+            // by the visible status itself so public-equivalent anchors make
+            // the same fail-closed decision regardless of those hidden bits.
+            if (monster.hasStatus<MS::RITUAL>()
+                    || monster.hasStatus<MS::WEAK>()
+                    || monster.hasStatus<MS::VULNERABLE>()) {
+                throw std::runtime_error(
+                        "public-consistent sampling cannot represent hidden monster status timing");
+            }
+        }
 
         StepSimulator particle = anchor;
         const auto particleSeed = publicFutureParticleSeed(

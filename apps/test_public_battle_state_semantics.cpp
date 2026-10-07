@@ -53,12 +53,14 @@ bool containsPrivatePublicStateKey(pybind11::handle value) {
     return false;
 }
 
-StepSimulator makePublicBattleFixture(bool withRunicDome = false) {
+StepSimulator makePublicBattleFixture(
+        bool withRunicDome = false,
+        MonsterEncounter encounter = MonsterEncounter::JAW_WORM) {
     StepSimulator simulator(CharacterClass::IRONCLAD, 101, 0);
     if (withRunicDome) {
         simulator.gc.relics.add({R::RUNIC_DOME, 0});
     }
-    simulator.bc.init(simulator.gc, MonsterEncounter::JAW_WORM);
+    simulator.bc.init(simulator.gc, encounter);
     simulator.battleActive = true;
     simulator.gc.screenState = ScreenState::BATTLE;
     return simulator;
@@ -356,6 +358,18 @@ void requirePublicConsistentSample(
             caseName + " emitted private sampled details in the public state");
 }
 
+void requireSamplerRejected(
+        StepSimulator &anchor,
+        const std::string &caseName) {
+    bool rejected = false;
+    try {
+        (void) anchor.samplePublicConsistentHiddenFuture(900, 0);
+    } catch (const std::runtime_error &) {
+        rejected = true;
+    }
+    require(rejected, caseName + " did not fail closed");
+}
+
 void verifyPublicConsistentSamplerDiversityAndReproducibility() {
     auto anchor = makePublicBattleFixture();
     const auto anchorState = anchor.publicBattleState();
@@ -441,18 +455,12 @@ void verifySamplerPreservesKnownDrawConstraints() {
 
     auto runicDome = makePublicBattleFixture(true);
     const auto domeState = runicDome.publicBattleState();
-    for (std::uint64_t index = 0; index < 4; ++index) {
-        auto particle = runicDome.samplePublicConsistentHiddenFuture(708, index);
-        requirePublicConsistentSample(runicDome, particle, "Runic Dome sample");
-        const auto state = particle.publicBattleState();
-        const auto visibility = pybind11::cast<pybind11::dict>(state["visibility"]);
-        const auto intent = pybind11::cast<pybind11::dict>(visibility["enemy_intent"]);
-        require(pybind11::cast<std::string>(intent["classification"]) == "hidden",
-                "Runic Dome sample changed the anchor's hidden-intent visibility");
-        require(state["ordered_public_legal_actions"].equal(
-                        domeState["ordered_public_legal_actions"]),
-                "Runic Dome sample changed public legal-action identities");
-    }
+    const auto domeVisibility = pybind11::cast<pybind11::dict>(domeState["visibility"]);
+    const auto domeIntent = pybind11::cast<pybind11::dict>(
+            domeVisibility["enemy_intent"]);
+    require(pybind11::cast<std::string>(domeIntent["classification"]) == "hidden",
+            "Runic Dome did not preserve its public hidden-intent classification");
+    requireSamplerRejected(runicDome, "Runic Dome sampler");
 
     auto inserted = makePublicBattleFixture();
     const auto baselineSize = inserted.bc.cards.drawPile.size();
@@ -505,6 +513,51 @@ void verifySamplerFailsClosedForUnsupportedFidelity() {
             "sampler did not fail closed for an unsupported-fidelity anchor");
 }
 
+void verifySamplerFailsClosedForUnrepresentedMonsterFuture() {
+    auto domeChomp = makePublicBattleFixture(true);
+    auto domeThrash = domeChomp;
+    domeChomp.bc.monsters.arr[0].moveHistory[0] = MMID::JAW_WORM_CHOMP;
+    domeThrash.bc.monsters.arr[0].moveHistory[0] = MMID::JAW_WORM_THRASH;
+    const auto domeChompState = domeChomp.publicBattleState();
+    const auto domeThrashState = domeThrash.publicBattleState();
+    require(pybind11::cast<std::string>(domeChompState["information_fidelity"])
+                    == "supported",
+            "Runic Dome intent regression fixture is not a supported public state");
+    require(domeChompState.equal(domeThrashState),
+            "Runic Dome intent fixtures do not have the same public battle state");
+    require(domeChomp.bc.monsters.arr[0].moveHistory[0]
+                    != domeThrash.bc.monsters.arr[0].moveHistory[0],
+            "Runic Dome intent fixtures did not vary the hidden current move");
+    requireSamplerRejected(domeChomp, "Runic Dome sampler anchor");
+    requireSamplerRejected(domeThrash, "Runic Dome alternate-intent anchor");
+
+    auto louseFirst = makePublicBattleFixture(false, MonsterEncounter::TWO_LOUSE);
+    auto louseSecond = louseFirst;
+    auto &firstLouse = louseFirst.bc.monsters.arr[0];
+    auto &secondLouse = louseSecond.bc.monsters.arr[0];
+    const auto nonAttackMove = firstLouse.id == MonsterId::GREEN_LOUSE
+            ? MMID::GREEN_LOUSE_SPIT_WEB : MMID::RED_LOUSE_GROW;
+    firstLouse.moveHistory[0] = nonAttackMove;
+    secondLouse.moveHistory[0] = nonAttackMove;
+    firstLouse.miscInfo = 5;
+    secondLouse.miscInfo = 7;
+    require(louseFirst.publicBattleState().equal(louseSecond.publicBattleState()),
+            "private louse-future fixtures do not have the same public battle state");
+    requireSamplerRejected(louseFirst, "private louse-future sampler anchor");
+    requireSamplerRejected(louseSecond, "alternate private louse-future sampler anchor");
+
+    auto weakApplied = makePublicBattleFixture();
+    auto weakExpired = weakApplied;
+    weakApplied.bc.monsters.arr[0].addDebuff<MS::WEAK>(2, false);
+    weakExpired.bc.monsters.arr[0].addDebuff<MS::WEAK>(2, false);
+    weakApplied.bc.monsters.arr[0].setJustApplied<MS::WEAK>(true);
+    weakExpired.bc.monsters.arr[0].setJustApplied<MS::WEAK>(false);
+    require(weakApplied.publicBattleState().equal(weakExpired.publicBattleState()),
+            "monster status-timing fixtures do not have the same public battle state");
+    requireSamplerRejected(weakApplied, "newly applied monster Weak sampler anchor");
+    requireSamplerRejected(weakExpired, "existing monster Weak sampler anchor");
+}
+
 } // namespace
 
 int main() {
@@ -520,6 +573,7 @@ int main() {
     verifyPublicConsistentSamplerDiversityAndReproducibility();
     verifySamplerPreservesKnownDrawConstraints();
     verifySamplerFailsClosedForUnsupportedFidelity();
+    verifySamplerFailsClosedForUnrepresentedMonsterFuture();
     std::cout << "PUBLIC_BATTLE_STATE_SEMANTICS_PASS\n";
     return 0;
 }
