@@ -278,7 +278,7 @@ pybind11::dict makePublicBattleState(
     ret["turn"] = bc.turn;
     ret["input_state"] = inputStateLabel(bc.inputState);
     ret["battle_outcome"] = battleOutcomeLabel(bc.outcome);
-    ret["player"] = playerSnapshot(bc.player);
+    ret["player"] = playerSnapshot(bc.player, true);
     ret["hand"] = handSnapshot(bc);
     ret["discard_pile"] = pileSnapshot(bc, bc.cards.discardPile);
     ret["exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);

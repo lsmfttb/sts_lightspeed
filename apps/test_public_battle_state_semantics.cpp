@@ -81,6 +81,74 @@ pybind11::dict statusByName(const pybind11::list &statuses) {
     return result;
 }
 
+pybind11::dict statusRowByName(
+        const pybind11::list &statuses,
+        const std::string &name) {
+    for (const auto &item : statuses) {
+        const auto row = pybind11::cast<pybind11::dict>(item);
+        if (pybind11::cast<std::string>(row["name"]) == name) {
+            return row;
+        }
+    }
+    throw std::runtime_error("public status row is missing: " + name);
+}
+
+pybind11::dict publicPlayerStatusTiming(
+        const pybind11::dict &publicState,
+        const std::string &statusName) {
+    const auto player = pybind11::cast<pybind11::dict>(publicState["player"]);
+    const auto statuses = pybind11::cast<pybind11::list>(player["active_statuses"]);
+    const auto row = statusRowByName(statuses, statusName);
+    require(row.contains(pybind11::str("timing")),
+            "public player status timing is missing for " + statusName);
+    return pybind11::cast<pybind11::dict>(row["timing"]);
+}
+
+int publicPlayerStatusValue(
+        const pybind11::dict &publicState,
+        const std::string &statusName) {
+    const auto player = pybind11::cast<pybind11::dict>(publicState["player"]);
+    const auto statuses = pybind11::cast<pybind11::list>(player["active_statuses"]);
+    return pybind11::cast<int>(statusRowByName(statuses, statusName)["value"]);
+}
+
+pybind11::dict publicMonsterStatusTiming(
+        const pybind11::dict &publicState,
+        const std::string &statusName) {
+    const auto monsters = pybind11::cast<pybind11::list>(publicState["monsters"]);
+    const auto monster = pybind11::cast<pybind11::dict>(monsters[0]);
+    const auto statuses = pybind11::cast<pybind11::list>(monster["public_statuses"]);
+    const auto row = statusRowByName(statuses, statusName);
+    require(row.contains(pybind11::str("timing")),
+            "public monster status timing is missing for " + statusName);
+    return pybind11::cast<pybind11::dict>(row["timing"]);
+}
+
+int publicMonsterStatusValue(
+        const pybind11::dict &publicState,
+        const std::string &statusName) {
+    const auto monsters = pybind11::cast<pybind11::list>(publicState["monsters"]);
+    const auto monster = pybind11::cast<pybind11::dict>(monsters[0]);
+    const auto statuses = pybind11::cast<pybind11::list>(monster["public_statuses"]);
+    return pybind11::cast<int>(statusRowByName(statuses, statusName)["value"]);
+}
+
+void requirePublicTiming(
+        const pybind11::dict &timing,
+        const std::string &boundary,
+        const std::string &effect,
+        bool scheduled,
+        const std::string &caseName) {
+    require(pybind11::cast<std::string>(timing["next_boundary"]) == boundary,
+            caseName + " reported the wrong next boundary");
+    require(pybind11::cast<std::string>(timing["effect"]) == effect,
+            caseName + " reported the wrong scheduled effect");
+    require(pybind11::cast<bool>(timing["scheduled"]) == scheduled,
+            caseName + " reported the wrong schedule");
+    require(!timing.contains(pybind11::str("just_applied")),
+            caseName + " exposed the simulator's raw just-applied bit");
+}
+
 void verifyPublicPlayerStatusesAndStance() {
     Player player;
     player.cc = CharacterClass::IRONCLAD;
@@ -371,8 +439,11 @@ void requireSamplerRejected(
 }
 
 template <PlayerStatus Status, typename ApplyStatus>
-void verifyPlayerTimingStateFailsClosed(
+void verifyPublicPlayerStatusTiming(
         const std::string &caseName,
+        const std::string &statusName,
+        const std::string &boundary,
+        const std::string &effect,
         ApplyStatus applyStatus) {
     auto justApplied = makePublicBattleFixture();
     auto alreadyApplied = justApplied;
@@ -385,14 +456,74 @@ void verifyPlayerTimingStateFailsClosed(
     const auto alreadyAppliedState = alreadyApplied.publicBattleState();
     require(pybind11::cast<std::string>(justAppliedState["information_fidelity"])
                     == "supported",
-            caseName + " fixture is not a supported public state");
-    require(justAppliedState.equal(alreadyAppliedState),
-            caseName + " timing fixtures do not have the same public battle state");
+            caseName + " just-applied fixture is not supported");
+    require(pybind11::cast<std::string>(alreadyAppliedState["information_fidelity"])
+                    == "supported",
+            caseName + " ticking fixture is not supported");
+    require(!justAppliedState.equal(alreadyAppliedState),
+            caseName + " public state collapsed different known timing");
     require(justApplied.bc.player.template wasJustApplied<Status>()
                     != alreadyApplied.bc.player.template wasJustApplied<Status>(),
-            caseName + " fixtures did not vary the hidden timing bit");
-    requireSamplerRejected(justApplied, caseName + " just-applied sampler anchor");
-    requireSamplerRejected(alreadyApplied, caseName + " existing-status sampler anchor");
+            caseName + " fixtures did not vary native timing mechanics");
+
+    const auto justRow = statusRowByName(
+            pybind11::cast<pybind11::list>(
+                    pybind11::cast<pybind11::dict>(justAppliedState["player"])
+                            ["active_statuses"]),
+            statusName);
+    const auto tickingRow = statusRowByName(
+            pybind11::cast<pybind11::list>(
+                    pybind11::cast<pybind11::dict>(alreadyAppliedState["player"])
+                            ["active_statuses"]),
+            statusName);
+    require(pybind11::cast<int>(justRow["value"])
+                    == pybind11::cast<int>(tickingRow["value"]),
+            caseName + " fixtures do not have the same visible status amount");
+    requirePublicTiming(publicPlayerStatusTiming(
+                                justAppliedState, statusName),
+            boundary, effect, false, caseName + " just-applied state");
+    requirePublicTiming(publicPlayerStatusTiming(
+                                alreadyAppliedState, statusName),
+            boundary, effect, true, caseName + " ticking state");
+
+    auto privateFutureAnchor = justApplied;
+    changeRandomFuture(privateFutureAnchor.gc.cardRandomRng, 0x11a7ULL);
+    changeRandomFuture(privateFutureAnchor.bc.aiRng, 0x22b9ULL);
+    require(justAppliedState.equal(privateFutureAnchor.publicBattleState()),
+            caseName + " private-future anchor changed public timing");
+    auto sampled = justApplied.samplePublicConsistentHiddenFuture(901, 4);
+    auto sampledAlternate = privateFutureAnchor.samplePublicConsistentHiddenFuture(901, 4);
+    requirePublicConsistentSample(justApplied, sampled, caseName + " sampled particle");
+    requirePublicConsistentSample(
+            privateFutureAnchor, sampledAlternate,
+            caseName + " equivalent-anchor sampled particle");
+    require(sampled.publicBattleState().equal(sampledAlternate.publicBattleState()),
+            caseName + " sampler output depends on an equivalent private-future anchor");
+    requirePublicTiming(publicPlayerStatusTiming(
+                                sampled.publicBattleState(), statusName),
+            boundary, effect, false, caseName + " sampled state");
+
+    if constexpr (Status == PS::DRAW_REDUCTION) {
+        auto skipExpiry = justApplied.samplePublicConsistentHiddenFuture(902, 0);
+        auto expire = alreadyApplied.samplePublicConsistentHiddenFuture(902, 0);
+        skipExpiry.bc.afterMonsterTurns();
+        expire.bc.afterMonsterTurns();
+        require(skipExpiry.bc.player.hasStatus<Status>()
+                        && skipExpiry.bc.player.cardDrawPerTurn == 4,
+                caseName + " changed before the just-applied next-draw boundary");
+        require(!expire.bc.player.hasStatus<Status>()
+                        && expire.bc.player.cardDrawPerTurn == 5,
+                caseName + " did not expire at the scheduled next-draw boundary");
+    } else {
+        auto skipDecrement = justApplied.samplePublicConsistentHiddenFuture(902, 0);
+        auto decrement = alreadyApplied.samplePublicConsistentHiddenFuture(902, 0);
+        skipDecrement.bc.player.applyAtEndOfRoundPowers();
+        decrement.bc.player.applyAtEndOfRoundPowers();
+        require(skipDecrement.bc.player.getStatusRuntime(Status) == 2,
+                caseName + " decremented at a boundary where its timing skips");
+        require(decrement.bc.player.getStatusRuntime(Status) == 1,
+                caseName + " failed to decrement at its scheduled boundary");
+    }
 }
 
 void verifyPublicConsistentSamplerDiversityAndReproducibility() {
@@ -538,7 +669,77 @@ void verifySamplerFailsClosedForUnsupportedFidelity() {
             "sampler did not fail closed for an unsupported-fidelity anchor");
 }
 
-void verifySamplerFailsClosedForUnrepresentedMonsterFuture() {
+template <MonsterStatus Status, typename ApplyStatus>
+void verifyPublicMonsterStatusTiming(
+        const std::string &caseName,
+        const std::string &statusName,
+        const std::string &effect,
+        ApplyStatus applyStatus) {
+    auto justApplied = makePublicBattleFixture();
+    auto ticking = justApplied;
+    applyStatus(justApplied.bc.monsters.arr[0]);
+    applyStatus(ticking.bc.monsters.arr[0]);
+    justApplied.bc.monsters.arr[0].setJustApplied<Status>(true);
+    ticking.bc.monsters.arr[0].setJustApplied<Status>(false);
+
+    const auto justAppliedState = justApplied.publicBattleState();
+    const auto tickingState = ticking.publicBattleState();
+    require(pybind11::cast<std::string>(justAppliedState["information_fidelity"])
+                    == "supported"
+                    && pybind11::cast<std::string>(tickingState["information_fidelity"])
+                            == "supported",
+            caseName + " status made supported public fidelity fail");
+    require(!justAppliedState.equal(tickingState),
+            caseName + " public state collapsed different known timing");
+    require(publicMonsterStatusValue(justAppliedState, statusName)
+                    == publicMonsterStatusValue(tickingState, statusName),
+            caseName + " fixtures do not have the same visible status amount");
+    requirePublicTiming(publicMonsterStatusTiming(
+                                justAppliedState, statusName),
+            "end_of_round", effect, false, caseName + " just-applied state");
+    requirePublicTiming(publicMonsterStatusTiming(
+                                tickingState, statusName),
+            "end_of_round", effect, true, caseName + " ticking state");
+
+    auto privateFutureAnchor = justApplied;
+    changeRandomFuture(privateFutureAnchor.gc.cardRandomRng, 0x3311ULL);
+    changeRandomFuture(privateFutureAnchor.bc.aiRng, 0x4423ULL);
+    require(justAppliedState.equal(privateFutureAnchor.publicBattleState()),
+            caseName + " private-future anchor changed public timing");
+    auto sampled = justApplied.samplePublicConsistentHiddenFuture(903, 5);
+    auto sampledAlternate = privateFutureAnchor.samplePublicConsistentHiddenFuture(903, 5);
+    requirePublicConsistentSample(justApplied, sampled, caseName + " sampled particle");
+    requirePublicConsistentSample(
+            privateFutureAnchor, sampledAlternate,
+            caseName + " equivalent-anchor sampled particle");
+    require(sampled.publicBattleState().equal(sampledAlternate.publicBattleState()),
+            caseName + " sampler output depends on an equivalent private-future anchor");
+    requirePublicTiming(publicMonsterStatusTiming(
+                                sampled.publicBattleState(), statusName),
+            "end_of_round", effect, false, caseName + " sampled state");
+
+    auto skipEffect = justApplied.samplePublicConsistentHiddenFuture(904, 0);
+    auto applyEffect = ticking.samplePublicConsistentHiddenFuture(904, 0);
+    auto &skipMonster = skipEffect.bc.monsters.arr[0];
+    auto &applyMonster = applyEffect.bc.monsters.arr[0];
+    const auto strengthBeforeSkip = skipMonster.strength;
+    const auto strengthBeforeApply = applyMonster.strength;
+    skipMonster.applyEndOfRoundPowers(skipEffect.bc);
+    applyMonster.applyEndOfRoundPowers(applyEffect.bc);
+    if constexpr (Status == MS::RITUAL) {
+        require(skipMonster.strength == strengthBeforeSkip,
+                caseName + " triggered before its scheduled end-of-round boundary");
+        require(applyMonster.strength == strengthBeforeApply + 2,
+                caseName + " missed its scheduled end-of-round trigger");
+    } else {
+        require(publicMonsterStatusValue(skipEffect.publicBattleState(), statusName) == 2,
+                caseName + " decremented at a boundary where its timing skips");
+        require(publicMonsterStatusValue(applyEffect.publicBattleState(), statusName) == 1,
+                caseName + " failed to decrement at its scheduled boundary");
+    }
+}
+
+void verifyPrivateMonsterFutureStillFailsClosed() {
     auto domeChomp = makePublicBattleFixture(true);
     auto domeThrash = domeChomp;
     domeChomp.bc.monsters.arr[0].moveHistory[0] = MMID::JAW_WORM_CHOMP;
@@ -570,40 +771,107 @@ void verifySamplerFailsClosedForUnrepresentedMonsterFuture() {
             "private louse-future fixtures do not have the same public battle state");
     requireSamplerRejected(louseFirst, "private louse-future sampler anchor");
     requireSamplerRejected(louseSecond, "alternate private louse-future sampler anchor");
-
-    auto weakApplied = makePublicBattleFixture();
-    auto weakExpired = weakApplied;
-    weakApplied.bc.monsters.arr[0].addDebuff<MS::WEAK>(2, false);
-    weakExpired.bc.monsters.arr[0].addDebuff<MS::WEAK>(2, false);
-    weakApplied.bc.monsters.arr[0].setJustApplied<MS::WEAK>(true);
-    weakExpired.bc.monsters.arr[0].setJustApplied<MS::WEAK>(false);
-    require(weakApplied.publicBattleState().equal(weakExpired.publicBattleState()),
-            "monster status-timing fixtures do not have the same public battle state");
-    requireSamplerRejected(weakApplied, "newly applied monster Weak sampler anchor");
-    requireSamplerRejected(weakExpired, "existing monster Weak sampler anchor");
 }
 
-void verifySamplerFailsClosedForUnrepresentedPlayerTiming() {
-    verifyPlayerTimingStateFailsClosed<PS::WEAK>(
-            "player Weak", [](Player &player) {
+void verifyPublicStatusTimingSemantics() {
+    verifyPublicMonsterStatusTiming<MS::RITUAL>(
+            "monster Ritual", "Ritual", "trigger_strength_gain",
+            [](Monster &monster) { monster.buff<MS::RITUAL>(2); });
+    verifyPublicMonsterStatusTiming<MS::WEAK>(
+            "monster Weak", "Weak", "decrement_duration",
+            [](Monster &monster) { monster.addDebuff<MS::WEAK>(2, false); });
+    verifyPublicMonsterStatusTiming<MS::VULNERABLE>(
+            "monster Vulnerable", "Vulnerable", "decrement_duration",
+            [](Monster &monster) { monster.addDebuff<MS::VULNERABLE>(2, false); });
+
+    verifyPublicPlayerStatusTiming<PS::WEAK>(
+            "player Weak", "WEAK", "end_of_round", "decrement_duration",
+            [](Player &player) {
                 player.debuff<PS::WEAK>(2, false);
             });
-    verifyPlayerTimingStateFailsClosed<PS::VULNERABLE>(
-            "player Vulnerable", [](Player &player) {
+    verifyPublicPlayerStatusTiming<PS::VULNERABLE>(
+            "player Vulnerable", "VULNERABLE", "end_of_round", "decrement_duration",
+            [](Player &player) {
                 player.debuff<PS::VULNERABLE>(2, false);
             });
-    verifyPlayerTimingStateFailsClosed<PS::FRAIL>(
-            "player Frail", [](Player &player) {
+    verifyPublicPlayerStatusTiming<PS::FRAIL>(
+            "player Frail", "FRAIL", "end_of_round", "decrement_duration",
+            [](Player &player) {
                 player.debuff<PS::FRAIL>(2, false);
             });
-    verifyPlayerTimingStateFailsClosed<PS::DOUBLE_DAMAGE>(
-            "player Double Damage", [](Player &player) {
+    verifyPublicPlayerStatusTiming<PS::DOUBLE_DAMAGE>(
+            "player Double Damage", "DOUBLE_DAMAGE", "end_of_round", "decrement_duration",
+            [](Player &player) {
                 player.buff<PS::DOUBLE_DAMAGE>(2);
             });
-    verifyPlayerTimingStateFailsClosed<PS::DRAW_REDUCTION>(
-            "player Draw Reduction", [](Player &player) {
+    verifyPublicPlayerStatusTiming<PS::DRAW_REDUCTION>(
+            "player Draw Reduction", "DRAW_REDUCTION",
+            "player_start_after_draw", "expire",
+            [](Player &player) {
                 player.debuff<PS::DRAW_REDUCTION>(1, false);
             });
+}
+
+void verifyPublicStatusTimingStackingAndReapplication() {
+    auto monsterWeak = makePublicBattleFixture();
+    monsterWeak.bc.monsters.arr[0].addDebuff<MS::WEAK>(2, false);
+    monsterWeak.bc.monsters.arr[0].setJustApplied<MS::WEAK>(false);
+    requirePublicTiming(publicMonsterStatusTiming(
+                                monsterWeak.publicBattleState(), "Weak"),
+            "end_of_round", "decrement_duration", true,
+            "monster Weak before enemy reapplication");
+    monsterWeak.bc.monsters.arr[0].addDebuff<MS::WEAK>(1, true);
+    require(publicMonsterStatusValue(monsterWeak.publicBattleState(), "Weak") == 3,
+            "monster Weak reapplication did not stack its duration");
+    requirePublicTiming(publicMonsterStatusTiming(
+                                monsterWeak.publicBattleState(), "Weak"),
+            "end_of_round", "decrement_duration", false,
+            "monster Weak after enemy reapplication");
+
+    auto playerWeak = makePublicBattleFixture();
+    playerWeak.bc.player.debuff<PS::WEAK>(2, false);
+    playerWeak.bc.player.setJustApplied<PS::WEAK>(false);
+    playerWeak.bc.player.debuff<PS::WEAK>(1, true);
+    require(publicPlayerStatusValue(playerWeak.publicBattleState(), "WEAK") == 3,
+            "player Weak reapplication did not stack its duration");
+    requirePublicTiming(publicPlayerStatusTiming(
+                                playerWeak.publicBattleState(), "WEAK"),
+            "end_of_round", "decrement_duration", true,
+            "player Weak after monster reapplication");
+
+    auto ritual = makePublicBattleFixture();
+    ritual.bc.monsters.arr[0].buff<MS::RITUAL>(2);
+    ritual.bc.monsters.arr[0].setJustApplied<MS::RITUAL>(false);
+    ritual.bc.monsters.arr[0].buff<MS::RITUAL>(1);
+    require(publicMonsterStatusValue(ritual.publicBattleState(), "Ritual") == 3,
+            "monster Ritual reapplication did not stack its amount");
+    requirePublicTiming(publicMonsterStatusTiming(
+                                ritual.publicBattleState(), "Ritual"),
+            "end_of_round", "trigger_strength_gain", false,
+            "monster Ritual after reapplication");
+
+    auto doubleDamage = makePublicBattleFixture();
+    doubleDamage.bc.player.buff<PS::DOUBLE_DAMAGE>(1);
+    doubleDamage.bc.player.setJustApplied<PS::DOUBLE_DAMAGE>(false);
+    doubleDamage.bc.player.buff<PS::DOUBLE_DAMAGE>(1);
+    require(publicPlayerStatusValue(
+                    doubleDamage.publicBattleState(), "DOUBLE_DAMAGE") == 2,
+            "player Double Damage reapplication did not stack its amount");
+    requirePublicTiming(publicPlayerStatusTiming(
+                                doubleDamage.publicBattleState(), "DOUBLE_DAMAGE"),
+            "end_of_round", "decrement_duration", false,
+            "player Double Damage after reapplication");
+
+    auto drawReduction = makePublicBattleFixture();
+    drawReduction.bc.player.debuff<PS::DRAW_REDUCTION>(1, false);
+    drawReduction.bc.player.setJustApplied<PS::DRAW_REDUCTION>(false);
+    drawReduction.bc.player.debuff<PS::DRAW_REDUCTION>(1, false);
+    require(drawReduction.bc.player.cardDrawPerTurn == 3,
+            "player Draw Reduction reapplication did not preserve both draw penalties");
+    requirePublicTiming(publicPlayerStatusTiming(
+                                drawReduction.publicBattleState(), "DRAW_REDUCTION"),
+            "player_start_after_draw", "expire", false,
+            "player Draw Reduction after reapplication");
 }
 
 void verifyHexaghostCycleCounterFailsClosed() {
@@ -647,8 +915,9 @@ int main() {
     verifyPublicConsistentSamplerDiversityAndReproducibility();
     verifySamplerPreservesKnownDrawConstraints();
     verifySamplerFailsClosedForUnsupportedFidelity();
-    verifySamplerFailsClosedForUnrepresentedMonsterFuture();
-    verifySamplerFailsClosedForUnrepresentedPlayerTiming();
+    verifyPrivateMonsterFutureStillFailsClosed();
+    verifyPublicStatusTimingSemantics();
+    verifyPublicStatusTimingStackingAndReapplication();
     verifyHexaghostCycleCounterFailsClosed();
     std::cout << "PUBLIC_BATTLE_STATE_SEMANTICS_PASS\n";
     return 0;

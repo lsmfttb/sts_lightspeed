@@ -328,7 +328,56 @@ std::string monsterIdLabel(MonsterId id) {
     return "UNKNOWN";
 }
 
-pybind11::dict playerSnapshot(const Player &player) {
+pybind11::dict publicStatusTimingSnapshot(
+        const char *boundary,
+        const char *effect,
+        bool scheduled) {
+    // Publish the next native game-rule effect, not its just-applied bookkeeping bit.
+    pybind11::dict ret;
+    ret["next_boundary"] = boundary;
+    ret["effect"] = effect;
+    ret["scheduled"] = scheduled;
+    return ret;
+}
+
+void appendPublicPlayerStatusTiming(
+        pybind11::dict &statusSnapshot,
+        const Player &player,
+        PlayerStatus status) {
+    switch (status) {
+        case PS::WEAK:
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "end_of_round", "decrement_duration",
+                    !player.wasJustApplied<PS::WEAK>());
+            break;
+        case PS::VULNERABLE:
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "end_of_round", "decrement_duration",
+                    !player.wasJustApplied<PS::VULNERABLE>());
+            break;
+        case PS::FRAIL:
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "end_of_round", "decrement_duration",
+                    !player.wasJustApplied<PS::FRAIL>());
+            break;
+        case PS::DOUBLE_DAMAGE:
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "end_of_round", "decrement_duration",
+                    !player.wasJustApplied<PS::DOUBLE_DAMAGE>());
+            break;
+        case PS::DRAW_REDUCTION:
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "player_start_after_draw", "expire",
+                    !player.wasJustApplied<PS::DRAW_REDUCTION>());
+            break;
+        default:
+            break;
+    }
+}
+
+pybind11::dict playerSnapshot(
+        const Player &player,
+        bool includePublicStatusTiming = false) {
     pybind11::dict ret;
     ret["current_hp"] = player.curHp;
     ret["max_hp"] = player.maxHp;
@@ -379,6 +428,9 @@ pybind11::dict playerSnapshot(const Player &player) {
                 }
             }
             row["value"] = value;
+        }
+        if (includePublicStatusTiming) {
+            appendPublicPlayerStatusTiming(row, player, status);
         }
         activeStatuses.append(row);
     }
@@ -595,6 +647,19 @@ pybind11::list publicMonsterStatuses(const Monster &monster) {
         statusSnapshot["id"] = statusIdx;
         statusSnapshot["name"] = std::string(enemyStatusStrings[statusIdx]);
         statusSnapshot["value"] = monster.getStatusInternal(status);
+        if (status == MS::RITUAL) {
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "end_of_round", "trigger_strength_gain",
+                    !monster.wasJustApplied<MS::RITUAL>());
+        } else if (status == MS::WEAK) {
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "end_of_round", "decrement_duration",
+                    !monster.wasJustApplied<MS::WEAK>());
+        } else if (status == MS::VULNERABLE) {
+            statusSnapshot["timing"] = publicStatusTimingSnapshot(
+                    "end_of_round", "decrement_duration",
+                    !monster.wasJustApplied<MS::VULNERABLE>());
+        }
         statuses.append(statusSnapshot);
     }
     return statuses;
@@ -1179,27 +1244,6 @@ struct StepSimulator {
                 throw std::runtime_error(
                         "public-consistent sampling cannot represent private monster future counters");
             }
-            // These statuses have unprojected just-applied timing bits. Reject
-            // by the visible status itself so public-equivalent anchors make
-            // the same fail-closed decision regardless of those hidden bits.
-            if (monster.hasStatus<MS::RITUAL>()
-                    || monster.hasStatus<MS::WEAK>()
-                    || monster.hasStatus<MS::VULNERABLE>()) {
-                throw std::runtime_error(
-                        "public-consistent sampling cannot represent hidden monster status timing");
-            }
-        }
-        const auto &player = anchor.bc.player;
-        // Player status durations also have unprojected just-applied bits.
-        // Reject by the public status presence so equivalent anchors make
-        // the same fail-closed decision regardless of those hidden bits.
-        if (player.hasStatus<PS::WEAK>()
-                || player.hasStatus<PS::VULNERABLE>()
-                || player.hasStatus<PS::FRAIL>()
-                || player.hasStatus<PS::DOUBLE_DAMAGE>()
-                || player.hasStatus<PS::DRAW_REDUCTION>()) {
-            throw std::runtime_error(
-                    "public-consistent sampling cannot represent hidden player status timing");
         }
 
         StepSimulator particle = anchor;
