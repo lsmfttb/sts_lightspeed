@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -327,6 +329,182 @@ void verifyPublicActionIdentitiesExecute() {
     }
 }
 
+std::vector<std::int16_t> drawOrderIdentity(const BattleContext &battle) {
+    std::vector<std::int16_t> identity;
+    identity.reserve(battle.cards.drawPile.size());
+    for (const auto &card : battle.cards.drawPile) {
+        identity.push_back(card.getUniqueId());
+    }
+    return identity;
+}
+
+bool sameRandomState(const Random &lhs, const Random &rhs) {
+    return lhs.counter == rhs.counter
+            && lhs.seed0 == rhs.seed0
+            && lhs.seed1 == rhs.seed1;
+}
+
+void requirePublicConsistentSample(
+        StepSimulator &anchor,
+        StepSimulator &particle,
+        const std::string &caseName) {
+    const auto anchorState = anchor.publicBattleState();
+    const auto particleState = particle.publicBattleState();
+    require(anchorState.equal(particleState),
+            caseName + " changed the public battle state or legal-action surface");
+    require(!containsPrivatePublicStateKey(particleState),
+            caseName + " emitted private sampled details in the public state");
+}
+
+void verifyPublicConsistentSamplerDiversityAndReproducibility() {
+    auto anchor = makePublicBattleFixture();
+    const auto anchorState = anchor.publicBattleState();
+    require(pybind11::cast<std::string>(anchorState["information_fidelity"])
+                    == "supported",
+            "sampler diversity fixture is not supported");
+    const auto anchorActions = pybind11::cast<pybind11::list>(
+            anchorState["ordered_public_legal_actions"]);
+    const auto anchorOrder = drawOrderIdentity(anchor.bc);
+
+    std::set<std::vector<std::int16_t>> sampledOrders;
+    for (std::uint64_t particleIndex = 0; particleIndex < 24; ++particleIndex) {
+        auto particle = anchor.samplePublicConsistentHiddenFuture(701, particleIndex);
+        requirePublicConsistentSample(anchor, particle, "ordinary hidden-future sample");
+        const auto particleState = particle.publicBattleState();
+        require(pybind11::cast<pybind11::list>(
+                        particleState["ordered_public_legal_actions"]).equal(anchorActions),
+                "sampled public legal-action identities differ from the anchor");
+        sampledOrders.insert(drawOrderIdentity(particle.bc));
+    }
+    require(sampledOrders.size() > 1,
+            "ordinary hidden-future samples did not vary the hidden draw order");
+
+    auto first = anchor.samplePublicConsistentHiddenFuture(702, 9);
+    auto repeated = anchor.samplePublicConsistentHiddenFuture(702, 9);
+    auto neighboringIndex = anchor.samplePublicConsistentHiddenFuture(702, 10);
+    require(drawOrderIdentity(first.bc) == drawOrderIdentity(repeated.bc)
+                    && sameRandomState(first.gc.cardRandomRng,
+                            repeated.gc.cardRandomRng)
+                    && sameRandomState(first.bc.aiRng, repeated.bc.aiRng)
+                    && sameRandomState(first.bc.shuffleRng, repeated.bc.shuffleRng),
+            "same sampler seed/index did not reproduce the same hidden sample");
+    require(!sameRandomState(first.bc.aiRng, neighboringIndex.bc.aiRng),
+            "different particle indices did not address distinct RNG futures");
+    require(drawOrderIdentity(anchor.bc) == anchorOrder,
+            "sampling mutated the anchor simulator");
+}
+
+void verifySamplerPreservesKnownDrawConstraints() {
+    auto headbutt = makePublicBattleFixture();
+    headbutt.bc.cards.discardPile.clear();
+    CardInstance selected(CardId::RAMPAGE);
+    selected.setUniqueId(headbutt.bc.cards.nextUniqueCardId++);
+    selected.specialData = 8;
+    headbutt.bc.cards.discardPile.push_back(selected);
+    headbutt.bc.chooseHeadbuttCard(0);
+    const auto knownTop = headbutt.bc.knownDrawTopUniqueIds;
+    for (std::uint64_t index = 0; index < 8; ++index) {
+        auto particle = headbutt.samplePublicConsistentHiddenFuture(703, index);
+        requirePublicConsistentSample(headbutt, particle, "Headbutt sample");
+        require(particle.bc.knownDrawTopUniqueIds == knownTop
+                        && particle.bc.cards.drawPile.back().getUniqueId()
+                                == selected.getUniqueId(),
+                "sampler changed Headbutt's known top card");
+    }
+
+    auto positioned = makePublicBattleFixture();
+    const auto position = static_cast<std::int32_t>(2);
+    require(position < static_cast<std::int32_t>(positioned.bc.cards.drawPile.size()),
+            "known-position fixture has too few draw cards");
+    const auto positionedId = positioned.bc.cards.drawPile[
+            positioned.bc.cards.drawPile.size() - 1 - position].getUniqueId();
+    positioned.bc.knownDrawPositionUniqueIds[position] = positionedId;
+    for (std::uint64_t index = 0; index < 8; ++index) {
+        auto particle = positioned.samplePublicConsistentHiddenFuture(704, index);
+        requirePublicConsistentSample(positioned, particle, "known-position sample");
+        require(particle.bc.cards.drawPile[
+                        particle.bc.cards.drawPile.size() - 1 - position].getUniqueId()
+                        == positionedId,
+                "sampler changed an exact known draw position");
+    }
+
+    auto frozenEye = makePublicBattleFixture();
+    frozenEye.gc.relics.add({R::FROZEN_EYE, 0});
+    frozenEye.bc.player.setHasRelic<R::FROZEN_EYE>(true);
+    const auto frozenOrder = drawOrderIdentity(frozenEye.bc);
+    for (std::uint64_t index = 0; index < 8; ++index) {
+        auto particle = frozenEye.samplePublicConsistentHiddenFuture(705, index);
+        requirePublicConsistentSample(frozenEye, particle, "Frozen Eye sample");
+        require(drawOrderIdentity(particle.bc) == frozenOrder,
+                "sampler changed Frozen Eye's fully visible draw order");
+    }
+
+    auto runicDome = makePublicBattleFixture(true);
+    const auto domeState = runicDome.publicBattleState();
+    for (std::uint64_t index = 0; index < 4; ++index) {
+        auto particle = runicDome.samplePublicConsistentHiddenFuture(708, index);
+        requirePublicConsistentSample(runicDome, particle, "Runic Dome sample");
+        const auto state = particle.publicBattleState();
+        const auto visibility = pybind11::cast<pybind11::dict>(state["visibility"]);
+        const auto intent = pybind11::cast<pybind11::dict>(visibility["enemy_intent"]);
+        require(pybind11::cast<std::string>(intent["classification"]) == "hidden",
+                "Runic Dome sample changed the anchor's hidden-intent visibility");
+        require(state["ordered_public_legal_actions"].equal(
+                        domeState["ordered_public_legal_actions"]),
+                "Runic Dome sample changed public legal-action identities");
+    }
+
+    auto inserted = makePublicBattleFixture();
+    const auto baselineSize = inserted.bc.cards.drawPile.size();
+    const std::int32_t minimumPosition = 2;
+    CardInstance generated(CardId::RAMPAGE);
+    generated.setUniqueId(inserted.bc.cards.nextUniqueCardId++);
+    generated.specialData = 11;
+    const auto insertionIdx = baselineSize - minimumPosition;
+    inserted.bc.cards.drawPile.insert(
+            inserted.bc.cards.drawPile.begin() + insertionIdx, generated);
+    inserted.bc.knownGeneratedCardPublicIdentity[generated.getUniqueId()] = true;
+    inserted.bc.knownDrawInsertionBaseSize = static_cast<std::int32_t>(baselineSize);
+    inserted.bc.knownDrawInsertionCards.push_back(
+            {generated.getUniqueId(), minimumPosition, -1});
+    require(knownDrawStateConsistent(inserted.bc),
+            "random-insertion fixture is internally inconsistent");
+    for (std::uint64_t index = 0; index < 8; ++index) {
+        auto particle = inserted.samplePublicConsistentHiddenFuture(706, index);
+        requirePublicConsistentSample(inserted, particle, "random-insertion sample");
+        const auto card = std::find_if(
+                particle.bc.cards.drawPile.begin(),
+                particle.bc.cards.drawPile.end(),
+                [&](const CardInstance &candidate) {
+                    return candidate.getUniqueId() == generated.getUniqueId();
+                });
+        require(card != particle.bc.cards.drawPile.end()
+                        && knownDrawStateConsistent(particle.bc)
+                        && static_cast<std::int32_t>(particle.bc.cards.drawPile.size() - 1
+                                - std::distance(particle.bc.cards.drawPile.begin(), card))
+                                >= minimumPosition,
+                "sampler violated a known random-insertion constraint");
+    }
+}
+
+void verifySamplerFailsClosedForUnsupportedFidelity() {
+    auto unsupported = makePublicBattleFixture();
+    unsupported.bc.player.cc = CharacterClass::DEFECT;
+    unsupported.bc.player.orbSlots = 3;
+    const auto state = unsupported.publicBattleState();
+    require(pybind11::cast<std::string>(state["information_fidelity"])
+                    == "unsupported_fidelity",
+            "Defect fixture did not report unsupported public fidelity");
+    bool rejected = false;
+    try {
+        (void) unsupported.samplePublicConsistentHiddenFuture(707, 0);
+    } catch (const std::runtime_error &) {
+        rejected = true;
+    }
+    require(rejected,
+            "sampler did not fail closed for an unsupported-fidelity anchor");
+}
+
 } // namespace
 
 int main() {
@@ -339,6 +517,9 @@ int main() {
     verifyHeadbuttAndFrozenEyeExposeOnlyKnownOrder();
     verifyRunicDomeSuppressesMonsterIntent();
     verifyPublicActionIdentitiesExecute();
+    verifyPublicConsistentSamplerDiversityAndReproducibility();
+    verifySamplerPreservesKnownDrawConstraints();
+    verifySamplerFailsClosedForUnsupportedFidelity();
     std::cout << "PUBLIC_BATTLE_STATE_SEMANTICS_PASS\n";
     return 0;
 }

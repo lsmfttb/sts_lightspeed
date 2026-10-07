@@ -802,6 +802,33 @@ pybind11::dict publicActionIdentity(const LightSpeedAction &action) {
 
 #include "public_battle_state.h"
 
+std::uint64_t splitMix64(std::uint64_t value) {
+    value += 0x9E3779B97F4A7C15ULL;
+    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27)) * 0x94D049BB133111EBULL;
+    return value ^ (value >> 31);
+}
+
+std::uint64_t publicFutureParticleSeed(
+        const std::uint64_t samplerSeed,
+        const std::uint64_t particleIndex) {
+    // Each particle is independently addressable, so sharding a range does
+    // not change the sample assigned to any seed/index pair.
+    return splitMix64(samplerSeed ^ splitMix64(particleIndex));
+}
+
+template <typename... RandomStreams>
+void reseedHiddenRandomStreams(
+        const std::uint64_t particleSeed,
+        const std::uint64_t domain,
+        RandomStreams &... streams) {
+    std::uint64_t streamIndex = 0;
+    ((streams = Random(
+              splitMix64(particleSeed ^ domain
+                      ^ (0x9E3779B97F4A7C15ULL * ++streamIndex)),
+              std::max(0, streams.counter))), ...);
+}
+
 struct StepSimulator {
     GameContext gc;
     BattleContext bc;
@@ -1116,6 +1143,138 @@ struct StepSimulator {
             }
         }
         return state;
+    }
+
+    StepSimulator samplePublicConsistentHiddenFuture(
+            const std::uint64_t samplerSeed,
+            const std::uint64_t particleIndex) const {
+        // This returns a full hidden simulator state to native callers only.
+        // Do not expose it through pybind as an ordinary public observation.
+        auto anchor = *this;
+        anchor.ensureBattleContext();
+        if (!anchor.battleActive || anchor.gc.screenState != ScreenState::BATTLE) {
+            throw std::invalid_argument(
+                    "public-consistent sampling requires an active battle anchor");
+        }
+        const auto anchorPublicState = anchor.publicBattleState();
+        if (anchorPublicState["information_fidelity"].cast<std::string>()
+                != "supported") {
+            throw std::runtime_error(
+                    "public-consistent sampling requires supported public fidelity");
+        }
+
+        StepSimulator particle = anchor;
+        const auto particleSeed = publicFutureParticleSeed(
+                samplerSeed, particleIndex);
+        // This is a reproducible proposal distribution, not an exact posterior.
+        java::Random drawOrderRandom(splitMix64(
+                particleSeed ^ 0x647261772d6f7264ULL));
+        const bool frozenEye = particle.bc.player.hasRelic<R::FROZEN_EYE>();
+        if (!frozenEye && particle.bc.knownDrawInsertionBaseSize < 0) {
+            const auto drawSize = particle.bc.cards.drawPile.size();
+            std::vector<bool> fixed(drawSize, false);
+            const auto knownTop = knownDrawTopCount(particle.bc);
+            for (std::size_t position = 0; position < knownTop; ++position) {
+                fixed[drawSize - 1 - position] = true;
+            }
+            for (const auto &[position, uniqueId]
+                    : particle.bc.knownDrawPositionUniqueIds) {
+                if (position < 0 || static_cast<std::size_t>(position) >= drawSize) {
+                    throw std::logic_error(
+                            "supported anchor has an invalid known draw position");
+                }
+                const auto drawIdx = drawSize - 1
+                        - static_cast<std::size_t>(position);
+                if (particle.bc.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
+                    throw std::logic_error(
+                            "supported anchor disagrees with a known draw position");
+                }
+                fixed[drawIdx] = true;
+            }
+            std::vector<std::size_t> freeIndices;
+            std::vector<CardInstance> freeCards;
+            for (std::size_t drawIdx = 0; drawIdx < drawSize; ++drawIdx) {
+                if (!fixed[drawIdx]) {
+                    freeIndices.push_back(drawIdx);
+                    freeCards.push_back(particle.bc.cards.drawPile[drawIdx]);
+                }
+            }
+            java::Collections::shuffle(
+                    freeCards.begin(), freeCards.end(), drawOrderRandom);
+            for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
+                particle.bc.cards.drawPile[freeIndices[idx]] = freeCards[idx];
+            }
+        } else if (!frozenEye && particle.bc.knownDrawInsertionBaseSize >= 0) {
+            // Random insertion records define a joint constraint over the
+            // hidden baseline order and inserted-card positions. Use valid
+            // transposition proposals so every accepted move remains inside
+            // that represented public-information set.
+            const auto drawSize = particle.bc.cards.drawPile.size();
+            std::vector<bool> fixed(drawSize, false);
+            const auto knownTop = knownDrawTopCount(particle.bc);
+            for (std::size_t position = 0; position < knownTop; ++position) {
+                fixed[drawSize - 1 - position] = true;
+            }
+            for (const auto &[position, uniqueId]
+                    : particle.bc.knownDrawPositionUniqueIds) {
+                if (position < 0 || static_cast<std::size_t>(position) >= drawSize) {
+                    throw std::logic_error(
+                            "supported insertion anchor has an invalid known position");
+                }
+                const auto drawIdx = drawSize - 1
+                        - static_cast<std::size_t>(position);
+                if (particle.bc.cards.drawPile[drawIdx].getUniqueId() != uniqueId) {
+                    throw std::logic_error(
+                            "supported insertion anchor disagrees with a known position");
+                }
+                fixed[drawIdx] = true;
+            }
+            if (drawSize > 1) {
+                const auto proposalCount = std::max<std::size_t>(
+                        64, drawSize * drawSize * 12);
+                for (std::size_t proposal = 0; proposal < proposalCount; ++proposal) {
+                    const auto first = static_cast<std::size_t>(
+                            drawOrderRandom.nextInt(static_cast<int>(drawSize)));
+                    const auto second = static_cast<std::size_t>(
+                            drawOrderRandom.nextInt(static_cast<int>(drawSize)));
+                    if (first == second || fixed[first] || fixed[second]) {
+                        continue;
+                    }
+                    std::swap(particle.bc.cards.drawPile[first],
+                            particle.bc.cards.drawPile[second]);
+                    if (!knownDrawStateConsistent(particle.bc)) {
+                        std::swap(particle.bc.cards.drawPile[first],
+                                particle.bc.cards.drawPile[second]);
+                    }
+                }
+            }
+        }
+        if (!knownDrawStateConsistent(particle.bc)) {
+            throw std::logic_error(
+                    "sampled draw order violates the anchor's public constraints");
+        }
+
+        reseedHiddenRandomStreams(
+                particleSeed, 0x67616d652d726e67ULL,
+                particle.gc.aiRng, particle.gc.cardRandomRng,
+                particle.gc.cardRng, particle.gc.eventRng,
+                particle.gc.mathUtilRng, particle.gc.merchantRng,
+                particle.gc.miscRng, particle.gc.monsterHpRng,
+                particle.gc.monsterRng, particle.gc.neowRng,
+                particle.gc.potionRng, particle.gc.relicRng,
+                particle.gc.shuffleRng, particle.gc.treasureRng);
+        reseedHiddenRandomStreams(
+                particleSeed, 0x626174746c652d72ULL,
+                particle.bc.aiRng, particle.bc.cardRandomRng,
+                particle.bc.miscRng, particle.bc.monsterHpRng,
+                particle.bc.potionRng, particle.bc.shuffleRng);
+
+        const auto particlePublicState = particle.publicBattleState();
+        if (!anchorPublicState.equal(particlePublicState)) {
+            throw std::logic_error(
+                    "sampled hidden future changed the anchor's public battle state");
+        }
+        return particle;
     }
 
     pybind11::dict stepPublicAction(const pybind11::dict &identity) {
