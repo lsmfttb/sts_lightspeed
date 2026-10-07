@@ -31,7 +31,7 @@ def main() -> int:
     audit = simulator.t114_shared_public_belief_search_audit()
     required = (
         "synthetic_only",
-        "exact_T096_root_projection_parity",
+        "exact_public_battle_state_root_parity",
         "hidden_particle_diversity_private_only",
         "same_public_projection_shares_node_identity",
         "prepared_pool_prefixes_2_4_8_16_are_nested",

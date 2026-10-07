@@ -530,7 +530,7 @@ pybind11::dict monsterSnapshot(const BattleContext &bc, int monsterIdx) {
     // This is the long-standing native snapshot contract consumed by
     // StepSimulator.snapshot(), battle-search snapshots, and completed-battle
     // snapshots.  Keep the raw fields and semantics unchanged; the
-    // T096-specific semantic projection below is intentionally separate.
+    // Battle-state projection is the normal-public decision surface.
     ret["misc_info"] = monster.miscInfo;
     ret["unique_power_0"] = monster.uniquePower0;
     ret["unique_power_1"] = monster.uniquePower1;
@@ -746,7 +746,7 @@ pybind11::dict publicProjectionActionSnapshot(const LightSpeedAction &action) {
     return ret;
 }
 
-pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
+pybind11::dict publicActionIdentity(const LightSpeedAction &action) {
     pybind11::dict ret;
     // Native action bits are replay identity, not normal-information input.
     // Keep the visible action description and public parameters only.
@@ -760,7 +760,7 @@ pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
         ret["label"] = action.label;
     } else {
         std::ostringstream publicLabel;
-        publicLabel << "battle." << action.kind
+        publicLabel << action.scope << "." << action.kind
                     << " idx1=" << action.idx1
                     << " idx2=" << action.idx2
                     << " idx3=" << action.idx3;
@@ -771,100 +771,6 @@ pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
 
 std::size_t knownDrawTopCount(const BattleContext &bc);
 bool knownDrawStateConsistent(const BattleContext &bc);
-
-pybind11::dict makeT096AnchorDistributionMetadata(
-        const GameContext &gc,
-        const BattleContext &bc) {
-    pybind11::dict ret;
-    const bool firstOrdinaryPlayerDecision =
-            bc.turn == 0 && bc.inputState == InputState::PLAYER_NORMAL
-            && bc.outcome == Outcome::UNDECIDED;
-    const bool discardEmpty = bc.cards.discardPile.empty();
-    const bool exhaustEmpty = bc.cards.exhaustPile.empty();
-    ret["schema_id"] = "native-battle-anchor-distribution-audit-v1";
-    ret["first_ordinary_player_decision"] = firstOrdinaryPlayerDecision;
-    const bool frozenEye = bc.player.hasRelic<R::FROZEN_EYE>();
-    const auto knownTopCount = frozenEye ? bc.cards.drawPile.size() : knownDrawTopCount(bc);
-    const bool knownStateConsistent = knownDrawStateConsistent(bc);
-    const bool knownPositions = knownStateConsistent
-            && !bc.knownDrawPositionUniqueIds.empty();
-    ret["draw_order_visibility"] = bc.knownDrawUnsupportedReasons != 0
-            || !knownStateConsistent
-            ? "unsupported_fidelity" : frozenEye ? "full_public_exact"
-            : knownPositions ? "known_positions"
-            : knownTopCount > 0 ? "known_prefix" : "hidden";
-    ret["stronger_draw_constraint"] = bc.knownDrawUnsupportedReasons == 0
-            && knownStateConsistent
-            && (frozenEye || knownTopCount > 0 || knownPositions);
-    ret["draw_knowledge_fidelity"] = bc.knownDrawUnsupportedReasons != 0
-            || !knownStateConsistent
-            ? "unsupported_fidelity" : "native-current-information-v3";
-    ret["discard_empty"] = discardEmpty;
-    ret["exhaust_empty"] = exhaustEmpty;
-    ret["deck_size"] = gc.deck.size();
-    ret["hand_size"] = bc.cards.cardsInHand;
-    ret["draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
-
-    std::vector<int> seen(gc.deck.size(), 0);
-    std::map<int, int> unseenCountMap;
-    bool allPersistentInstances = true;
-    bool noTemporaryGeneratedInserted = true;
-    bool unionMultisetExact = true;
-    const auto inspectCard = [&](const CardInstance &card, bool unseen) {
-        const auto uniqueId = static_cast<int>(card.getUniqueId());
-        const bool persistent = uniqueId >= 0
-                && uniqueId < gc.deck.size()
-                && card.getId() == gc.deck.cards[uniqueId].getId();
-        allPersistentInstances = allPersistentInstances && persistent;
-        noTemporaryGeneratedInserted = noTemporaryGeneratedInserted && persistent;
-        if (!persistent) {
-            return;
-        }
-        ++seen[uniqueId];
-        if (unseen) {
-            const auto id = static_cast<int>(card.getId());
-            ++unseenCountMap[id];
-        }
-    };
-    for (int idx = 0; idx < bc.cards.cardsInHand; ++idx) {
-        inspectCard(bc.cards.hand[idx], false);
-    }
-    for (const auto &card : bc.cards.drawPile) {
-        inspectCard(card, true);
-    }
-    if (!bc.cards.discardPile.empty() || !bc.cards.exhaustPile.empty()) {
-        unionMultisetExact = false;
-    }
-    for (const auto count : seen) {
-        if (count != 1) {
-            unionMultisetExact = false;
-            break;
-        }
-    }
-    const auto seenCardCount = std::accumulate(seen.begin(), seen.end(), 0);
-    unionMultisetExact = unionMultisetExact && seenCardCount == gc.deck.size();
-    ret["all_cards_persistent_deck_instances"] = allPersistentInstances;
-    ret["no_temporary_generated_inserted_cards"] = noTemporaryGeneratedInserted;
-    ret["multiset_union_exact"] = unionMultisetExact;
-    pybind11::dict unseenCounts;
-    for (const auto &[id, count] : unseenCountMap) {
-        unseenCounts[pybind11::int_(id)] = count;
-    }
-    ret["remaining_unseen_card_counts"] = unseenCounts;
-    ret["remaining_unseen_card_identity_count"] =
-            static_cast<int>(unseenCounts.size());
-    ret["remaining_unseen_nonempty"] = !unseenCounts.empty();
-    ret["eligible"] = firstOrdinaryPlayerDecision
-            && discardEmpty
-            && exhaustEmpty
-            && allPersistentInstances
-            && noTemporaryGeneratedInserted
-            && unionMultisetExact
-            && !unseenCounts.empty()
-            && unseenCounts.size() >= 2
-            && unseenCounts.size() <= 32;
-    return ret;
-}
 
 void appendRandomState(std::ostringstream &out, const char *name, const Random &rng) {
     out << name << ':' << rng.counter << ':' << rng.seed0 << ':' << rng.seed1 << ';';
@@ -1155,7 +1061,7 @@ pybind11::list drawKnowledgeUnsupportedReasonSnapshot(const std::uint8_t reasons
     return ret;
 }
 
-pybind11::dict makeT096PublicInformationProjection(
+pybind11::dict makePublicBattleState(
         const GameContext &gc,
         const BattleContext &bc,
         const std::vector<LightSpeedAction> &actions) {
@@ -1169,8 +1075,8 @@ pybind11::dict makeT096PublicInformationProjection(
                 DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED);
     }
     pybind11::dict ret;
-    ret["schema_id"] = "native-battle-public-information-v3";
-    ret["information_regime"] = "normal_information";
+    ret["schema_id"] = "native-public-battle-state-v1";
+    ret["information_regime"] = "normal_public";
     ret["screen_identity"] = "BATTLE";
     ret["act"] = gc.act;
     ret["floor_num"] = gc.floorNum;
@@ -1325,7 +1231,7 @@ pybind11::dict makeT096PublicInformationProjection(
 
     pybind11::list publicActions;
     for (const auto &action : actions) {
-        publicActions.append(publicInformationActionIdentity(action));
+        publicActions.append(publicActionIdentity(action));
     }
     ret["ordered_public_legal_actions"] = publicActions;
     pybind11::dict membership;
@@ -1769,7 +1675,7 @@ struct StepSimulator {
     static std::uint64_t hiddenParticleSeed(
             const std::uint64_t samplerSeed,
             const int particleIndex) {
-        // Keep this domain separation exactly aligned with the T096 sampler.
+        // Keep this domain separation exactly aligned with hidden-future sampling.
         // The bridge must not introduce a second particle distribution.
         std::uint64_t particleSeed = samplerSeed
                 + 0x9E3779B97F4A7C15ULL
@@ -1962,7 +1868,7 @@ struct StepSimulator {
         return actions;
     }
 
-    static std::string canonicalT114PublicJson(const pybind11::object &value) {
+    static std::string canonicalPublicJson(const pybind11::object &value) {
         const auto json = pybind11::module_::import("json");
         const auto separators = pybind11::make_tuple(",", ":");
         return json.attr("dumps")(
@@ -1995,7 +1901,7 @@ struct StepSimulator {
         }
         T114ActionSurface surface;
         surface.publicActions = publicBattleActions(state);
-        surface.projection = makeT096PublicInformationProjection(
+        surface.projection = makePublicBattleState(
                 gc, state, surface.publicActions);
         if (surface.projection["information_fidelity"].cast<std::string>()
                 != "supported") {
@@ -2004,7 +1910,7 @@ struct StepSimulator {
                     T114FailureCause::UNSUPPORTED_FIDELITY,
                     t114UnsupportedReasonClasses(gc, state));
         }
-        surface.projectionPayload = canonicalT114PublicJson(surface.projection);
+        surface.projectionPayload = canonicalPublicJson(surface.projection);
 
         search::BattleScumSearcher2 searcher(state);
         searcher.includePotions = false;
@@ -2037,8 +1943,8 @@ struct StepSimulator {
         surface.identities.reserve(searcher.root.edges.size());
         for (const auto &edge : searcher.root.edges) {
             auto action = makeBattleAction(state, edge.action);
-            auto identity = publicInformationActionIdentity(action);
-            auto key = canonicalT114PublicJson(identity);
+            auto identity = publicActionIdentity(action);
+            auto key = canonicalPublicJson(identity);
             if (std::find(surface.actionKeys.begin(), surface.actionKeys.end(), key)
                     != surface.actionKeys.end()) {
                 throw T114SearchFailure(
@@ -2250,7 +2156,7 @@ struct StepSimulator {
             if (!surface.projection.equal(anchorSurface.projection)
                     || surface.projectionPayload != anchorSurface.projectionPayload) {
                 throw std::runtime_error(
-                        "T114 sampled particle failed exact T096 root public-projection parity");
+                        "sampled particle failed public battle-state parity");
             }
             validatePublicActionSurface(
                     anchorSurface.publicActions, surface.publicActions);
@@ -2488,7 +2394,7 @@ struct StepSimulator {
         pybind11::dict actionClassCounts;
         int bestSelectedEdge = -1;
         for (std::size_t legalIdx = 0; legalIdx < rootLegalActions.size(); ++legalIdx) {
-            const auto identity = publicInformationActionIdentity(
+            const auto identity = publicActionIdentity(
                     makeBattleAction(bc, rootLegalActions[legalIdx]));
             const auto actionKind = identity["kind"].cast<std::string>();
             const auto actionKindKey = pybind11::str(actionKind);
@@ -2575,7 +2481,7 @@ struct StepSimulator {
         report["private_particle_states_exposed"] = false;
         report["per_particle_values_exposed"] = false;
         report["independent_particle_root_searches"] = 0;
-        report["node_identity"] = "exact_T096_public_projection_plus_public_progression";
+        report["node_identity"] = "exact_public_battle_state_plus_public_progression";
         report["node_collision_check"] = "exact_canonical_payload_equality";
         report["selected_root_action"] = selectedAction.empty()
                 ? pybind11::object(pybind11::none())
@@ -2583,10 +2489,10 @@ struct StepSimulator {
         report["action_rows"] = actionRows;
         report["action_class_counts"] = actionClassCounts;
         pybind11::dict publicAudit;
-        publicAudit["t096_projection_schema"] =
+        publicAudit["public_battle_state_schema"] =
                 rootSurface.projection["schema_id"];
         publicAudit["node_identity_inputs"] = pybind11::make_tuple(
-                "exact_canonical_T096_public_projection",
+                "exact_canonical_public_battle_state",
                 "ordered_public_action_and_observation_progression");
         publicAudit["private_particle_state_or_rng_used_as_identity"] = false;
         publicAudit["search_policy_or_leaf_models_used"] = false;
@@ -2953,7 +2859,7 @@ struct StepSimulator {
                 }
                 const int edgeIdx = row["shared_edge_index"].cast<int>();
                 const auto edgeIdentity = row["shared_edge_action"].cast<pybind11::dict>();
-                const auto identityPayload = canonicalT114PublicJson(edgeIdentity);
+            const auto identityPayload = canonicalPublicJson(edgeIdentity);
                 const auto [identityIt, identityInserted] = sharedClassIdentityByIndex.emplace(
                         edgeIdx, identityPayload);
                 everySearchedOccurrenceMapsToItsSharedClass =
@@ -3101,7 +3007,7 @@ struct StepSimulator {
                 recordUnhandledT114SearchFailure(T114FailureStage::ROLLOUT);
             }
             const auto sanitizedFailure = t114LastSearchFailureDiagnostic();
-            arbitraryExceptionTextNotExported = canonicalT114PublicJson(
+            arbitraryExceptionTextNotExported = canonicalPublicJson(
                     sanitizedFailure).find(privateExceptionMarker) == std::string::npos;
             const std::set<std::string> diagnosticFields{
                 "schema_id",
@@ -3137,7 +3043,7 @@ struct StepSimulator {
                 pybind11::dict identity;
                 identity["kind"] = "synthetic_public_action";
                 identity["public_ordinal"] = idx;
-                const auto actionKey = canonicalT114PublicJson(identity);
+                const auto actionKey = canonicalPublicJson(identity);
                 selectionNode.actionKeys.push_back(actionKey);
                 selectionNode.edges.push_back(T114SharedEdge{
                         actionKey, identity, 0, 0.0});
@@ -3161,7 +3067,7 @@ struct StepSimulator {
                 pybind11::dict identity;
                 identity["kind"] = "synthetic_public_action";
                 identity["public_ordinal"] = ordinal;
-                const auto actionKey = canonicalT114PublicJson(identity);
+                const auto actionKey = canonicalPublicJson(identity);
                 allEdgeNode.actionKeys.push_back(actionKey);
                 allEdgeNode.edges.push_back(T114SharedEdge{
                         actionKey, identity, 0, 0.0});
@@ -3189,7 +3095,7 @@ struct StepSimulator {
             result["synthetic_only"] = true;
             result["real_scientific_state_invoked"] = false;
             result["prepared_particle_count"] = static_cast<int>(firstParticleFingerprints.size());
-            result["exact_T096_root_projection_parity"] = sameProjectionAcrossPool;
+            result["exact_public_battle_state_root_parity"] = sameProjectionAcrossPool;
             result["hidden_particle_diversity_private_only"] = hiddenParticleDiversity;
             result["same_public_projection_shares_node_identity"] =
                     samePublicNodeIdentityAcrossHiddenParticles;
@@ -3409,7 +3315,7 @@ struct StepSimulator {
     pybind11::dict publicProjection() {
         ensureBattleContext();
         pybind11::dict ret;
-        ret["schema_id"] = "native-public-projection-v1";
+        ret["schema_id"] = "native-public-projection-v2";
         ret["external_base_commit"] = "7476a81";
         ret["patch_identity"] = "sts_lightspeed_public_projection.patch";
         ret["screen_identity"] = publicProjectionAvailable(
@@ -3468,33 +3374,75 @@ struct StepSimulator {
 
         pybind11::list candidates;
         for (const auto &action : legalActions()) {
-            candidates.append(publicProjectionActionSnapshot(action));
+            candidates.append(publicActionIdentity(action));
         }
         ret["candidate_actions"] = publicProjectionAvailable(
                 candidates, "StepSimulator::legalActions");
         return ret;
     }
 
-    pybind11::dict t096PublicInformationProjection() {
+    pybind11::dict publicBattleState() {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error(
-                    "T096 public-information projection requested outside battle");
+                    "public battle state requested outside battle");
         }
-        std::vector<LightSpeedAction> actions;
-        for (const auto &action : enumerateBattleActions(bc)) {
-            actions.push_back(makeBattleAction(bc, action));
+        const auto nativeActions = enumerateBattleActions(bc);
+        const auto actions = publicBattleActions(bc);
+        auto state = makePublicBattleState(gc, bc, actions);
+        const auto identities = state["ordered_public_legal_actions"]
+                .cast<pybind11::list>();
+        if (identities.size() != static_cast<pybind11::ssize_t>(nativeActions.size())) {
+            throw std::logic_error(
+                    "public battle action surface does not match native legal actions");
         }
-        return makeT096PublicInformationProjection(gc, bc, actions);
+        for (const auto &identityHandle : identities) {
+            const auto identity = identityHandle.cast<pybind11::dict>();
+            int matches = 0;
+            for (const auto &nativeAction : nativeActions) {
+                const auto candidate = publicActionIdentity(
+                        makeBattleAction(bc, nativeAction));
+                matches += identity.equal(candidate) ? 1 : 0;
+            }
+            if (matches != 1) {
+                throw std::logic_error(
+                        "public battle action identity does not map uniquely to a native legal action");
+            }
+        }
+        return state;
     }
 
-    pybind11::dict t096AnchorDistributionMetadata() {
+    pybind11::dict stepPublicAction(const pybind11::dict &identity) {
         ensureBattleContext();
-        if (!battleActive) {
+        if (!battleActive || gc.screenState != ScreenState::BATTLE) {
             throw std::runtime_error(
-                    "T096 anchor distribution metadata requested outside battle");
+                    "public battle action requested outside battle");
         }
-        return makeT096AnchorDistributionMetadata(gc, bc);
+        std::vector<search::Action> matches;
+        for (const auto &nativeAction : enumerateBattleActions(bc)) {
+            const auto candidate = publicActionIdentity(
+                    makeBattleAction(bc, nativeAction));
+            if (identity.equal(candidate)) {
+                matches.push_back(nativeAction);
+            }
+        }
+        if (matches.empty()) {
+            throw std::invalid_argument(
+                    "public battle action is not currently legal");
+        }
+        if (matches.size() != 1) {
+            throw std::invalid_argument(
+                    "public battle action identity is ambiguous");
+        }
+        (void) step(makeBattleAction(bc, matches.front()));
+        pybind11::dict result;
+        result["screen_state"] = screenStateLabel(gc.screenState);
+        const bool battleStillActive =
+                battleActive && gc.screenState == ScreenState::BATTLE;
+        if (battleStillActive) {
+            result["battle_state"] = publicBattleState();
+        }
+        return result;
     }
 
     pybind11::dict t115DrawInsertionAudit() {
@@ -3566,14 +3514,14 @@ struct StepSimulator {
             auto first = makeInsertedState(1000, false, 0, 3);
             auto second = makeInsertedState(2000, true, 2, 5);
             const std::vector<LightSpeedAction> noActions;
-            const auto firstProjection = makeT096PublicInformationProjection(
+            const auto firstProjection = makePublicBattleState(
                     gc, first, noActions);
-            const auto secondProjection = makeT096PublicInformationProjection(
+            const auto secondProjection = makePublicBattleState(
                     gc, second, noActions);
-            const auto firstPayload = canonicalT114PublicJson(firstProjection);
-            const auto secondPayload = canonicalT114PublicJson(secondProjection);
+            const auto firstPayload = canonicalPublicJson(firstProjection);
+            const auto secondPayload = canonicalPublicJson(secondProjection);
             BattleContext defaultContext;
-            const auto defaultContextProjection = makeT096PublicInformationProjection(
+            const auto defaultContextProjection = makePublicBattleState(
                     gc, defaultContext, noActions);
             const auto defaultPotionRows = defaultContextProjection[
                     "persistent_resources"].cast<pybind11::dict>()["potions"]
@@ -3641,7 +3589,7 @@ struct StepSimulator {
                     multiActionState.cards.drawPile.back().getUniqueId()};
             Actions::ShuffleTempCardIntoDrawPile(CardId::DAZED, 2)
                     .actFunc(multiActionState);
-            const auto multiActionProjection = makeT096PublicInformationProjection(
+            const auto multiActionProjection = makePublicBattleState(
                     gc, multiActionState, noActions);
             const auto multiActionOrder = multiActionProjection["visibility"]
                     .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
@@ -3674,7 +3622,7 @@ struct StepSimulator {
             Actions::PutRandomCardsInDrawPile(CardType::SKILL, 1)
                     .actFunc(randomizedIdentityState);
             const auto randomizedIdentityProjection =
-                    makeT096PublicInformationProjection(
+                    makePublicBattleState(
                             gc, randomizedIdentityState, noActions);
             const auto randomizedIdentityReasons = randomizedIdentityProjection[
                     "draw_knowledge_unsupported_reasons"].cast<pybind11::list>();
@@ -3738,10 +3686,10 @@ struct StepSimulator {
             for (int index = 0; index < 24; ++index) {
                 auto particle = buildHiddenFutureParticle(
                         0x54533115ULL, index, sampleSeed);
-                const auto projection = makeT096PublicInformationProjection(
+                const auto projection = makePublicBattleState(
                         gc, particle, noActions);
                 particlePublicParity = particlePublicParity
-                        && canonicalT114PublicJson(projection) == firstPayload;
+                        && canonicalPublicJson(projection) == firstPayload;
                 particleConstraintsSatisfied = particleConstraintsSatisfied
                         && knownDrawStateConsistent(particle);
                 for (const auto &insertion : particle.knownDrawInsertionCards) {
@@ -3771,7 +3719,7 @@ struct StepSimulator {
             emptyInserted.setUniqueId(3000);
             emptyPile.cards.drawPile.push_back(emptyInserted);
             emptyPile.noteRandomDrawInsertion(emptyInserted, 0, true);
-            const auto emptyProjection = makeT096PublicInformationProjection(
+            const auto emptyProjection = makePublicBattleState(
                     gc, emptyPile, noActions);
             const auto emptyOrder = emptyProjection["visibility"]
                     .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
@@ -3793,12 +3741,12 @@ struct StepSimulator {
             privateEmptyPile.noteRandomDrawInsertion(
                     privateEmptyInserted, 0, false);
             const auto privateBeforeDrawProjection =
-                    makeT096PublicInformationProjection(
+                    makePublicBattleState(
                             gc, privateEmptyPile, noActions);
             const auto privateBeforeDrawOrder = privateBeforeDrawProjection[
                     "visibility"].cast<pybind11::dict>()["draw_order"]
                     .cast<pybind11::dict>();
-            const auto privateBeforeDrawPayload = canonicalT114PublicJson(
+            const auto privateBeforeDrawPayload = canonicalPublicJson(
                     privateBeforeDrawProjection);
             const auto privateEmptyCardId = static_cast<int>(
                     privateEmptyInserted.getId());
@@ -3821,7 +3769,7 @@ struct StepSimulator {
 
             privateEmptyPile.cards.draw(privateEmptyPile, 1);
             const auto privateAfterDrawProjection =
-                    makeT096PublicInformationProjection(
+                    makePublicBattleState(
                             gc, privateEmptyPile, noActions);
             const auto privateAfterDrawHand = privateAfterDrawProjection["hand"]
                     .cast<pybind11::list>();
@@ -3844,7 +3792,7 @@ struct StepSimulator {
             knownBottom.setUniqueId(3010);
             bottomState.cards.drawPile.insert(bottomState.cards.drawPile.begin(), knownBottom);
             bottomState.noteKnownDrawBottom(knownBottom);
-            const auto bottomProjection = makeT096PublicInformationProjection(
+            const auto bottomProjection = makePublicBattleState(
                     gc, bottomState, noActions);
             const auto bottomOrder = bottomProjection["visibility"]
                     .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
@@ -3872,7 +3820,7 @@ struct StepSimulator {
             knownTop.setUniqueId(3020);
             topState.cards.drawPile.push_back(knownTop);
             topState.noteKnownDrawTop(knownTop);
-            const auto topProjection = makeT096PublicInformationProjection(
+            const auto topProjection = makePublicBattleState(
                     gc, topState, noActions);
             const auto topOrder = topProjection["visibility"]
                     .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
@@ -3897,7 +3845,7 @@ struct StepSimulator {
                                     DrawKnowledgeUnsupportedReason::INSERTION_CONSTRAINT_INCONSISTENT)) == 0;
             auto frozenState = first;
             frozenState.player.setHasRelic<R::FROZEN_EYE>(true);
-            const auto frozenProjection = makeT096PublicInformationProjection(
+            const auto frozenProjection = makePublicBattleState(
                     gc, frozenState, noActions);
             const auto frozenOrder = frozenProjection["visibility"]
                     .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
@@ -3949,231 +3897,141 @@ struct StepSimulator {
         }
     }
 
-    pybind11::dict t096VisibilityAudit() {
-        const auto savedBattleContext = bc;
-        const auto savedBattleActive = battleActive;
-        const auto savedScreenState = gc.screenState;
-        const auto savedGameOutcome = gc.outcome;
+    pybind11::dict publicBattleStateSemanticChecks() {
+        GameContext testGame = gc;
+        testGame.screenState = ScreenState::BATTLE;
+        testGame.outcome = GameOutcome::UNDECIDED;
 
-        gc.screenState = ScreenState::BATTLE;
-        gc.outcome = GameOutcome::UNDECIDED;
-        bc = BattleContext();
-        bc.inputState = InputState::PLAYER_NORMAL;
-        bc.turn = 1;
-        bc.monsters.monsterCount = 1;
-        bc.monsters.monstersAlive = 1;
-        auto &monster = bc.monsters.arr[0];
-        monster.idx = 0;
-        monster.id = MonsterId::JAW_WORM;
-        monster.curHp = 30;
-        monster.maxHp = 30;
-        monster.moveHistory[0] = MMID::JAW_WORM_BELLOW;
-        monster.moveHistory[1] = MMID::JAW_WORM_CHOMP;
+        BattleContext hidden;
+        hidden.inputState = InputState::PLAYER_NORMAL;
+        hidden.outcome = Outcome::UNDECIDED;
+        hidden.turn = 1;
+        hidden.encounter = MonsterEncounter::JAW_WORM;
+        hidden.monsters.monsterCount = 1;
+        hidden.monsters.monstersAlive = 1;
+        auto &jawWorm = hidden.monsters.arr[0];
+        jawWorm.idx = 0;
+        jawWorm.id = MonsterId::JAW_WORM;
+        jawWorm.curHp = 30;
+        jawWorm.maxHp = 30;
+        jawWorm.moveHistory[0] = MMID::JAW_WORM_BELLOW;
+        jawWorm.moveHistory[1] = MMID::JAW_WORM_CHOMP;
 
-        CardInstance privateCardA(CardId::STRIKE_RED);
-        privateCardA.setUniqueId(100);
-        CardInstance privateCardB(CardId::DEFEND_RED);
-        privateCardB.setUniqueId(101);
-        CardInstance knownCardA(CardId::BASH);
-        knownCardA.setUniqueId(102);
-        CardInstance knownCardB(CardId::HEADBUTT);
-        knownCardB.setUniqueId(103);
-        bc.cards.drawPile.push_back(privateCardA);
-        bc.cards.drawPile.push_back(privateCardB);
-        bc.knownGeneratedCardPublicIdentity[100] = true;
-        bc.knownGeneratedCardPublicIdentity[101] = true;
-        bc.cards.discardPile.push_back(knownCardA);
-        bc.cards.discardPile.push_back(knownCardB);
+        CardInstance hiddenStrike(CardId::STRIKE_RED);
+        hiddenStrike.setUniqueId(100);
+        CardInstance hiddenDefend(CardId::DEFEND_RED);
+        hiddenDefend.setUniqueId(101);
+        hidden.cards.drawPile = {hiddenStrike, hiddenDefend};
+        hidden.knownGeneratedCardPublicIdentity[100] = true;
+        hidden.knownGeneratedCardPublicIdentity[101] = true;
+        hidden.aiRng = Random(11);
+        hidden.cardRandomRng = Random(12);
+        hidden.shuffleRng = Random(13);
 
-        // Headbutt is the native deterministic public placement used by the
-        // issue contract.  Two placements establish a top-first known prefix.
-        bc.chooseHeadbuttCard(0);
-        bc.chooseHeadbuttCard(0);
-        battleActive = true;
+        CardInstance handStrike(CardId::STRIKE_RED);
+        handStrike.setUniqueId(102);
+        CardInstance handDefend(CardId::DEFEND_RED);
+        handDefend.setUniqueId(103);
+        hidden.cards.cardsInHand = 2;
+        hidden.cards.hand[0] = handStrike;
+        hidden.cards.hand[1] = handDefend;
+        hidden.player.energy = 3;
 
-        const auto projection = t096PublicInformationProjection();
-        const auto projectionVisibility = projection["visibility"].cast<pybind11::dict>();
-        const auto projectionDrawOrder = projectionVisibility["draw_order"].cast<pybind11::dict>();
-        const bool projectionKnownPrefix = projectionDrawOrder["classification"]
-                .cast<std::string>() == "known_prefix"
-                && projectionDrawOrder["known_top_prefix"].cast<pybind11::list>().size() == 2;
-        const auto checkpoint = bc;
-        const auto nativeMonsterRows = monsterGroupSnapshot(checkpoint);
-        const auto publicMonsterRows = publicInformationMonsterGroupSnapshot(checkpoint);
-        const auto nativeMonster = nativeMonsterRows[0].cast<pybind11::dict>();
-        const auto publicMonster = publicMonsterRows[0].cast<pybind11::dict>();
-        const bool nativeSnapshotContract = nativeMonster.contains("misc_info")
-                && nativeMonster.contains("unique_power_0")
-                && nativeMonster.contains("unique_power_1")
-                && !publicMonster.contains("misc_info")
-                && !publicMonster.contains("unique_power_0")
-                && !publicMonster.contains("unique_power_1")
-                && publicMonster.contains("public_statuses")
-                && publicMonster.contains("information_fidelity");
-        const bool checkpointPreserves = checkpoint.knownDrawTopUniqueIds
-                == bc.knownDrawTopUniqueIds
-                && checkpoint.knownDrawPositionUniqueIds
-                        == bc.knownDrawPositionUniqueIds
-                && checkpoint.knownDrawUnsupportedReasons
-                        == bc.knownDrawUnsupportedReasons;
-        const auto knownTopCount = knownDrawTopCount(bc);
-        const auto anchorPublicActions = projection["ordered_public_legal_actions"]
+        const auto nativeActions = enumerateBattleActions(hidden);
+        const auto actions = publicBattleActions(hidden);
+        const auto projection = makePublicBattleState(testGame, hidden, actions);
+
+        BattleContext hiddenVariant = hidden;
+        std::reverse(hiddenVariant.cards.drawPile.begin(), hiddenVariant.cards.drawPile.end());
+        hiddenVariant.aiRng = Random(21);
+        hiddenVariant.cardRandomRng = Random(22);
+        hiddenVariant.shuffleRng = Random(23);
+        GameContext hiddenGameVariant = testGame;
+        hiddenGameVariant.cardRng = Random(24);
+        hiddenGameVariant.aiRng = Random(25);
+        hiddenGameVariant.monsterRng = Random(26);
+        const auto hiddenVariantProjection = makePublicBattleState(
+                hiddenGameVariant,
+                hiddenVariant,
+                publicBattleActions(hiddenVariant));
+
+        const auto containsPrivateField = [](const pybind11::handle value,
+                                                 const auto &self) -> bool {
+            if (pybind11::isinstance<pybind11::dict>(value)) {
+                for (const auto item : pybind11::reinterpret_borrow<pybind11::dict>(value)) {
+                    const auto key = pybind11::str(item.first).cast<std::string>();
+                    if (key == "bits" || key == "rng" || key == "seed"
+                            || key == "unique_id"
+                            || key.find("_rng") != std::string::npos
+                            || key.find("hidden_future") != std::string::npos) {
+                        return true;
+                    }
+                    if (self(item.second, self)) {
+                        return true;
+                    }
+                }
+            } else if (pybind11::isinstance<pybind11::list>(value)
+                    || pybind11::isinstance<pybind11::tuple>(value)) {
+                const auto sequence =
+                        pybind11::reinterpret_borrow<pybind11::iterable>(value);
+                for (const auto item : sequence) {
+                    if (self(item, self)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        const auto drawOrder = projection["visibility"].cast<pybind11::dict>()
+                ["draw_order"].cast<pybind11::dict>();
+        const bool hiddenDrawAndRngAbsent =
+                drawOrder["classification"].cast<std::string>() == "hidden"
+                && !drawOrder.contains("known_top_prefix")
+                && !drawOrder.contains("visible_order_from_top")
+                && !containsPrivateField(projection, containsPrivateField);
+
+        const auto headbuttState = [&]() {
+            BattleContext state = hidden;
+            CardInstance bash(CardId::BASH);
+            bash.setUniqueId(104);
+            CardInstance headbutt(CardId::HEADBUTT);
+            headbutt.setUniqueId(105);
+            state.cards.discardPile = {bash, headbutt};
+            state.knownGeneratedCardPublicIdentity[104] = true;
+            state.knownGeneratedCardPublicIdentity[105] = true;
+            state.chooseHeadbuttCard(0);
+            state.chooseHeadbuttCard(0);
+            return state;
+        }();
+        const auto headbuttProjection = makePublicBattleState(
+                testGame, headbuttState, publicBattleActions(headbuttState));
+        const auto headbuttDrawOrder = headbuttProjection["visibility"]
+                .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
+        const auto knownTop = headbuttDrawOrder["known_top_prefix"]
                 .cast<pybind11::list>();
+        const bool headbuttKnownTopPrefix =
+                headbuttDrawOrder["classification"].cast<std::string>() == "known_prefix"
+                && knownTop.size() == 2
+                && knownTop[0].cast<pybind11::dict>()["id"].cast<int>()
+                        == static_cast<int>(CardId::HEADBUTT)
+                && knownTop[1].cast<pybind11::dict>()["id"].cast<int>()
+                        == static_cast<int>(CardId::BASH);
 
-        const auto particles = sampleHiddenFutureParticles(0x12345678ULL, 0, 8);
-        bool particlePrefixPreserved = true;
-        bool samplerPublicInformationInvariant = true;
-        std::set<std::string> particleFingerprints;
-        for (const auto &particleHandle : particles) {
-            const auto particle = particleHandle.cast<pybind11::dict>();
-            particleFingerprints.insert(
-                    particle["hidden_future_fingerprint"].cast<std::string>());
-            const auto particleProjection = particle["public_information_projection"]
-                    .cast<pybind11::dict>();
-            samplerPublicInformationInvariant = samplerPublicInformationInvariant
-                    && particleProjection.equal(projection)
-                    && particleProjection["ordered_public_legal_actions"]
-                            .cast<pybind11::list>().equal(anchorPublicActions);
-            const auto visibility = particleProjection["visibility"].cast<pybind11::dict>();
-            const auto drawOrder = visibility["draw_order"].cast<pybind11::dict>();
-            const auto prefix = drawOrder["known_top_prefix"].cast<pybind11::list>();
-            particlePrefixPreserved = particlePrefixPreserved && prefix.size() == 2;
-            if (prefix.size() == 2) {
-                particlePrefixPreserved = particlePrefixPreserved
-                        && prefix[0].cast<pybind11::dict>()["id"].cast<int>()
-                                == static_cast<int>(CardId::HEADBUTT)
-                        && prefix[1].cast<pybind11::dict>()["id"].cast<int>()
-                                == static_cast<int>(CardId::BASH);
-            }
-        }
-
-        bc = checkpoint;
-        bc.playTopCardInDrawPile(0, false); // Havoc consumes knownCardB.
-        const bool havocConsumesTopPreservesSuffix = knownDrawTopCount(bc) == 1
-                && bc.knownDrawTopUniqueIds.size() == 1
-                && bc.knownDrawTopUniqueIds.front() == knownCardA.getUniqueId();
-
-        bc = checkpoint;
-        bc.knownDrawTopUniqueIds.clear();
-        CardInstance reboundCard(CardId::STRIKE_RED);
-        reboundCard.setUniqueId(104);
-        bc.curCardQueueItem = CardQueueItem(reboundCard, 0, 0);
-        bc.curCardQueueItem.triggerOnUse = false;
-        bc.player.setHasStatus<PS::REBOUND>(true);
-        bc.player.setStatusValueNoChecks<PS::REBOUND>(1);
-        bc.onAfterUseCard();
-        const auto reboundProjection = t096PublicInformationProjection();
-        const auto reboundVisibility = reboundProjection["visibility"].cast<pybind11::dict>();
-        const auto reboundDrawOrder = reboundVisibility["draw_order"].cast<pybind11::dict>();
-        bool reboundParticlesPreserved = reboundDrawOrder.contains("known_top_prefix");
-        if (reboundParticlesPreserved) {
-            const auto reboundPrefix = reboundDrawOrder["known_top_prefix"].cast<pybind11::list>();
-            reboundParticlesPreserved = reboundPrefix.size() == 1
-                    && reboundPrefix[0].cast<pybind11::dict>()["id"].cast<int>()
-                            == static_cast<int>(CardId::STRIKE_RED);
-        }
-        const auto reboundParticles = sampleHiddenFutureParticles(0x13579BDFULL, 0, 4);
-        for (const auto &particleHandle : reboundParticles) {
-            const auto particle = particleHandle.cast<pybind11::dict>();
-            const auto particleProjection = particle["public_information_projection"]
-                    .cast<pybind11::dict>();
-            const auto particleVisibility = particleProjection["visibility"]
-                    .cast<pybind11::dict>();
-            const auto particleDrawOrder = particleVisibility["draw_order"]
-                    .cast<pybind11::dict>();
-            if (!particleDrawOrder.contains("known_top_prefix")) {
-                reboundParticlesPreserved = false;
-            } else {
-                const auto particlePrefix = particleDrawOrder["known_top_prefix"]
-                        .cast<pybind11::list>();
-                reboundParticlesPreserved = reboundParticlesPreserved
-                        && particlePrefix.size() == 1
-                        && particlePrefix[0].cast<pybind11::dict>()["id"].cast<int>()
-                                == static_cast<int>(CardId::STRIKE_RED);
-            }
-        }
-
-        bc = checkpoint;
-        bc.knownDrawTopUniqueIds.clear();
-        bc.knownDrawPositionUniqueIds.clear();
-        CardInstance forethoughtCard(CardId::DEFEND_RED);
-        forethoughtCard.setUniqueId(105);
-        bc.cards.cardsInHand = 1;
-        bc.cards.hand[0] = forethoughtCard;
-        bc.chooseForethoughtCard(0);
-        const auto forethoughtProjection = t096PublicInformationProjection();
-        const auto forethoughtVisibility = forethoughtProjection["visibility"]
-                .cast<pybind11::dict>();
-        const auto forethoughtDrawOrder = forethoughtVisibility["draw_order"]
-                .cast<pybind11::dict>();
-        bool forethoughtPositionPreserved =
-                forethoughtDrawOrder["classification"].cast<std::string>()
-                        == "known_positions"
-                && forethoughtDrawOrder.contains("known_positions");
-        if (forethoughtPositionPreserved) {
-            const auto positions = forethoughtDrawOrder["known_positions"]
-                    .cast<pybind11::list>();
-            forethoughtPositionPreserved = positions.size() == 1
-                    && positions[0].cast<pybind11::dict>()["position_from_top"]
-                            .cast<int>() == static_cast<int>(bc.cards.drawPile.size() - 1)
-                    && positions[0].cast<pybind11::dict>()["card"].cast<pybind11::dict>()
-                            ["id"].cast<int>() == static_cast<int>(CardId::DEFEND_RED);
-        }
-        const auto forethoughtParticles = sampleHiddenFutureParticles(0x2468ACE0ULL, 0, 4);
-        for (const auto &particleHandle : forethoughtParticles) {
-            const auto particle = particleHandle.cast<pybind11::dict>();
-            const auto particleProjection = particle["public_information_projection"]
-                    .cast<pybind11::dict>();
-            const auto particleDrawOrder = particleProjection["visibility"]
-                    .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
-            forethoughtPositionPreserved = forethoughtPositionPreserved
-                    && particleDrawOrder["classification"].cast<std::string>()
-                            == "known_positions"
-                    && particleDrawOrder.contains("known_positions");
-        }
-
-        bc = checkpoint;
-        bc.cardSelectInfo.cardSelectTask = CardSelectTask::SECRET_TECHNIQUE;
-        const int subsetRevealIdx = 0;
-        bc.chooseDrawToHandCards(&subsetRevealIdx, 1);
-        const auto subsetRevealProjection = t096PublicInformationProjection();
-        const auto subsetRevealDrawOrder = subsetRevealProjection["visibility"]
+        BattleContext frozen = hidden;
+        frozen.player.setHasRelic<R::FROZEN_EYE>(true);
+        const auto frozenProjection = makePublicBattleState(
+                testGame, frozen, publicBattleActions(frozen));
+        const auto frozenDrawOrder = frozenProjection["visibility"]
                 .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
-        const bool subsetRevealFailsClosed = subsetRevealDrawOrder["classification"]
-                .cast<std::string>() == "unsupported_fidelity"
-                && subsetRevealProjection["information_fidelity"].cast<std::string>()
-                        == "unsupported_fidelity";
-        Actions::ShuffleDrawPile().actFunc(bc);
-        const auto subsetRevealShuffleProjection = t096PublicInformationProjection();
-        const auto subsetRevealShuffleDrawOrder = subsetRevealShuffleProjection["visibility"]
-                .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
-        const bool subsetRevealShuffleStaysUnsupported = subsetRevealShuffleDrawOrder[
-                "classification"].cast<std::string>() == "unsupported_fidelity"
-                && subsetRevealShuffleProjection["information_fidelity"].cast<std::string>()
-                        == "unsupported_fidelity"
-                && subsetRevealShuffleDrawOrder["unsupported_reasons"]
-                        .cast<pybind11::list>()[0].cast<std::string>()
-                                == "subset_membership";
-        bool subsetRevealSamplerFailsClosed = false;
-        try {
-            (void) sampleHiddenFutureParticles(0x10203040ULL, 0, 1);
-        } catch (const std::runtime_error &) {
-            subsetRevealSamplerFailsClosed = true;
-        }
+        const bool frozenEyeShowsFullOrder =
+                frozenDrawOrder["classification"].cast<std::string>()
+                        == "full_public_exact"
+                && frozenDrawOrder["visible_order_from_top"]
+                        .cast<pybind11::list>().size()
+                        == frozen.cards.drawPile.size();
 
-        bc = checkpoint;
-        Actions::ShuffleTempCardIntoDrawPile(CardId::BURN, 1).actFunc(bc);
-        const auto insertionProjection = t096PublicInformationProjection();
-        const auto insertionDrawOrder = insertionProjection["visibility"]
-                .cast<pybind11::dict>()["draw_order"].cast<pybind11::dict>();
-        const bool randomInsertionConstraintTyped = insertionDrawOrder["classification"]
-                .cast<std::string>() == "random_insertion_constraints"
-                && insertionProjection["information_fidelity"].cast<std::string>()
-                        == "supported"
-                && (bc.knownDrawUnsupportedReasons
-                        & static_cast<std::uint8_t>(
-                                DrawKnowledgeUnsupportedReason::UNKNOWN_INSERTION)) == 0;
-
+        BattleContext dome = hidden;
         Monster book;
         book.id = MonsterId::BOOK_OF_STABBING;
         book.idx = 0;
@@ -4181,216 +4039,93 @@ struct StepSimulator {
         book.maxHp = 100;
         book.miscInfo = 1;
         book.moveHistory[0] = MMID::BOOK_OF_STABBING_SINGLE_STAB;
-        bool bookRollMutatesMisc = false;
-        for (std::uint64_t seed = 1; seed <= 10000 && !bookRollMutatesMisc; ++seed) {
-            Monster candidate = book;
-            BattleContext rollContext = checkpoint;
-            rollContext.aiRng = Random(seed);
-            candidate.rollMove(rollContext);
-            if (candidate.miscInfo != book.miscInfo) {
-                book = candidate;
-                bookRollMutatesMisc = true;
-            }
-        }
-
-        bc = checkpoint;
-        bc.player.setHasRelic<R::FROZEN_EYE>(true);
-        const auto frozenProjection = t096PublicInformationProjection();
-        const auto frozenVisibility = frozenProjection["visibility"].cast<pybind11::dict>();
-        const auto frozenDrawOrder = frozenVisibility["draw_order"].cast<pybind11::dict>();
-        const auto frozenVisibleOrder = frozenDrawOrder["visible_order_from_top"].cast<pybind11::list>();
-        const auto frozenParticles = sampleHiddenFutureParticles(0x87654321ULL, 0, 4);
-        bool frozenParticlesPreserved = true;
-        for (const auto &particleHandle : frozenParticles) {
-            const auto particle = particleHandle.cast<pybind11::dict>();
-            frozenParticlesPreserved = frozenParticlesPreserved
-                    && particle["public_information_projection"].cast<pybind11::dict>()
-                            .equal(frozenProjection);
-        }
-
-        bc = checkpoint;
-        bc.monsters.arr[0] = book;
-        bc.player.setHasRelic<R::RUNIC_DOME>(true);
-        const auto domeProjection = t096PublicInformationProjection();
-        const auto domeMonsters = domeProjection["monsters"].cast<pybind11::list>();
-        const auto domeMonster = domeMonsters[0].cast<pybind11::dict>();
-        const bool domeHidesCurrentIntent = !domeMonster.contains("attacking")
+        book.moveHistory[1] = MMID::BOOK_OF_STABBING_SINGLE_STAB;
+        dome.monsters.arr[0] = book;
+        dome.player.setHasRelic<R::RUNIC_DOME>(true);
+        const auto domeProjection = makePublicBattleState(
+                testGame, dome, publicBattleActions(dome));
+        const auto domeMonster = domeProjection["monsters"]
+                .cast<pybind11::list>()[0].cast<pybind11::dict>();
+        const auto enemyIntent = domeProjection["visibility"]
+                .cast<pybind11::dict>()["enemy_intent"].cast<pybind11::dict>();
+        const bool runicDomeHidesIntent =
+                enemyIntent["classification"].cast<std::string>() == "hidden"
+                && !domeMonster.contains("attacking")
                 && !domeMonster.contains("intent_category")
                 && !domeMonster.contains("current_move")
                 && !domeMonster.contains("move_id")
                 && !domeMonster.contains("move_base_damage")
                 && !domeMonster.contains("move_hits");
-        const bool domePreservesPreviousMove = domeMonster.contains("last_move_id")
-                && domeMonster["last_move_id"].cast<int>()
-                        == static_cast<int>(MMID::BOOK_OF_STABBING_SINGLE_STAB);
-        const bool domeSanitizesRollMisc = bookRollMutatesMisc
-                && !domeMonster.contains("misc_info")
-                && !domeMonster.contains("unique_power_0")
-                && !domeMonster.contains("unique_power_1")
-                && !domeMonster.contains("stabs_used")
-                && domeMonster["information_fidelity"].cast<std::string>()
-                        == "unsupported_fidelity"
-                && domeProjection["information_fidelity"].cast<std::string>()
-                        == "unsupported_fidelity";
+        Monster hiddenCounterVariant = book;
+        hiddenCounterVariant.miscInfo += 3;
+        BattleContext domeVariant = dome;
+        domeVariant.monsters.arr[0] = hiddenCounterVariant;
+        const auto domeVariantProjection = makePublicBattleState(
+                testGame, domeVariant, publicBattleActions(domeVariant));
 
-        Monster bookWithDifferentHiddenCounter = book;
-        bookWithDifferentHiddenCounter.miscInfo = book.miscInfo + 3;
-        bc = checkpoint;
-        bc.monsters.arr[0] = bookWithDifferentHiddenCounter;
-        bc.player.setHasRelic<R::RUNIC_DOME>(true);
-        const auto domeCounterVariantProjection = t096PublicInformationProjection();
-        const bool hiddenCounterTimingInvariant = domeProjection.equal(
-                domeCounterVariantProjection);
-        bool mixedDomeSamplerFailsClosed = false;
-        try {
-            (void) sampleHiddenFutureParticles(0x31415926ULL, 0, 1);
-        } catch (const std::runtime_error &) {
-            mixedDomeSamplerFailsClosed = true;
-        }
-
-        Monster louse;
-        louse.id = MonsterId::GREEN_LOUSE;
-        louse.idx = 0;
-        louse.curHp = 20;
-        louse.maxHp = 20;
-        louse.miscInfo = 7;
-        louse.moveHistory[0] = MMID::GREEN_LOUSE_BITE;
-        bc = checkpoint;
-        bc.monsters.arr[0] = louse;
-        bc.player.setHasRelic<R::RUNIC_DOME>(true);
-        const auto louseProjection = t096PublicInformationProjection();
-        const auto louseMonster = louseProjection["monsters"].cast<pybind11::list>()[0]
-                .cast<pybind11::dict>();
-        const bool hiddenMiscNotProjected = !louseMonster.contains("misc_info")
-                && louseMonster["information_fidelity"].cast<std::string>()
-                        == "supported"
-                && louseProjection["information_fidelity"].cast<std::string>()
-                        == "supported";
-        Monster louseWithDifferentPrivateState = louse;
-        louseWithDifferentPrivateState.miscInfo = louse.miscInfo + 4;
-        bc = checkpoint;
-        bc.monsters.arr[0] = louseWithDifferentPrivateState;
-        bc.player.setHasRelic<R::RUNIC_DOME>(true);
-        const auto lousePrivateVariantProjection = t096PublicInformationProjection();
-        const bool privateHiddenStateProjectionInvariant = lousePrivateVariantProjection
-                .equal(louseProjection);
-        bool privateHiddenMiscSamplerSupported = true;
-        try {
-            (void) sampleHiddenFutureParticles(0x50607080ULL, 0, 1);
-        } catch (const std::runtime_error &) {
-            privateHiddenMiscSamplerSupported = false;
-        }
-
-        Monster looter;
-        looter.id = MonsterId::LOOTER;
-        looter.idx = 0;
-        looter.curHp = 40;
-        looter.maxHp = 40;
-        looter.miscInfo = 17; // cumulative stolen gold, not a safe public raw field
-        looter.moveHistory[0] = MMID::LOOTER_MUG;
-        bc = checkpoint;
-        bc.monsters.arr[0] = looter;
-        bc.player.setHasRelic<R::RUNIC_DOME>(true);
-        const auto looterProjection = t096PublicInformationProjection();
-        const auto looterMonster = looterProjection["monsters"].cast<pybind11::list>()[0]
-                .cast<pybind11::dict>();
-        const bool looterPublicCounterPreserved = !looterMonster.contains("misc_info")
-                && !looterMonster.contains("unique_power_0")
-                && !looterMonster.contains("unique_power_1")
-                && looterMonster.contains("stolen_gold")
-                && looterMonster["stolen_gold"].cast<int>() == looter.miscInfo
-                && looterMonster["information_fidelity"].cast<std::string>()
-                        == "supported"
-                && looterProjection["information_fidelity"].cast<std::string>()
-                        == "supported";
-
-        Monster visiblePower = louse;
-        visiblePower.id = MonsterId::JAW_WORM;
-        visiblePower.miscInfo = 0;
-        visiblePower.setHasStatus<MS::TIME_WARP>(true);
-        visiblePower.setStatus<MS::TIME_WARP>(3);
-        bc.monsters.arr[0] = visiblePower;
-        const auto visiblePowerProjection = t096PublicInformationProjection();
-        const auto visiblePowerMonster = visiblePowerProjection["monsters"]
-                .cast<pybind11::list>()[0].cast<pybind11::dict>();
-        bool visiblePowerRetained = false;
-        for (const auto &statusHandle : visiblePowerMonster["public_statuses"]
-                .cast<pybind11::list>()) {
-            const auto status = statusHandle.cast<pybind11::dict>();
-            if (status["name"].cast<std::string>() == "Time Warp"
-                    && status["value"].cast<int>() == 3) {
-                visiblePowerRetained = true;
+        const auto publicActionRows = projection["ordered_public_legal_actions"]
+                .cast<pybind11::list>();
+        bool publicActionsMapUniquely = nativeActions.size() == publicActionRows.size();
+        for (std::size_t index = 0;
+                index < static_cast<std::size_t>(publicActionRows.size()); ++index) {
+            const auto identity = publicActionRows[index].cast<pybind11::dict>();
+            if (identity.contains("bits")
+                    || identity["label"].cast<std::string>().find("bits=")
+                            != std::string::npos) {
+                publicActionsMapUniquely = false;
+            }
+            int matchingNativeActions = 0;
+            for (const auto &nativeAction : nativeActions) {
+                const auto candidate = publicActionIdentity(
+                        makeBattleAction(hidden, nativeAction));
+                if (identity.equal(candidate)) {
+                    ++matchingNativeActions;
+                }
+            }
+            if (matchingNativeActions != 1) {
+                publicActionsMapUniquely = false;
+            }
+            for (std::size_t prior = 0; prior < index; ++prior) {
+                if (identity.equal(publicActionRows[prior].cast<pybind11::dict>())) {
+                    publicActionsMapUniquely = false;
+                }
             }
         }
 
-        Monster wizard;
-        wizard.id = MonsterId::GREMLIN_WIZARD;
-        wizard.idx = 0;
-        wizard.curHp = 50;
-        wizard.maxHp = 50;
-        wizard.miscInfo = 2;
-        wizard.moveHistory[0] = MMID::GREMLIN_WIZARD_CHARGING;
-        BattleContext wizardContext = checkpoint;
-        wizard.takeTurn(wizardContext);
-        bc = checkpoint;
-        bc.monsters.arr[0] = wizard;
-        bc.player.setHasRelic<R::RUNIC_DOME>(true);
-        const auto wizardProjection = t096PublicInformationProjection();
-        const auto wizardMonster = wizardProjection["monsters"].cast<pybind11::list>()[0]
+        const auto normalMonster = projection["monsters"]
+                .cast<pybind11::list>()[0].cast<pybind11::dict>();
+        const auto normalIntent = projection["visibility"]
+                .cast<pybind11::dict>()["enemy_intent"].cast<pybind11::dict>();
+        const auto resources = projection["persistent_resources"]
                 .cast<pybind11::dict>();
-        const bool directSetMiscFailClosed = !wizardMonster.contains("misc_info")
-                && !wizardMonster.contains("charge_count")
-                && wizardMonster["information_fidelity"].cast<std::string>()
-                        == "unsupported_fidelity"
-                && wizardProjection["information_fidelity"].cast<std::string>()
-                        == "unsupported_fidelity"
-                && !wizardMonster.contains("current_move");
+        const bool stateHasDecisionSurface =
+                projection.contains("player")
+                && projection.contains("hand")
+                && projection.contains("discard_pile")
+                && projection.contains("exhaust_pile")
+                && projection.contains("draw_pile_membership")
+                && projection.contains("monsters")
+                && resources.contains("relics")
+                && resources.contains("potions")
+                && projection.contains("ordered_public_legal_actions");
 
-        pybind11::dict report;
-        report["schema_id"] = "native-battle-visibility-audit-v1";
-        report["headbutt_known_prefix"] = knownTopCount == 2 && projectionKnownPrefix;
-        report["native_snapshot_contract"] = nativeSnapshotContract;
-        report["checkpoint_preserves_known_prefix"] = checkpointPreserves;
-        report["sampler_preserves_known_prefix"] = particlePrefixPreserved;
-        report["sampler_public_information_invariant"] = samplerPublicInformationInvariant;
-        report["sampler_private_remainder_diverse"] = particleFingerprints.size() > 1;
-        report["havoc_consumes_top_preserves_suffix"] = havocConsumesTopPreservesSuffix;
-        report["rebound_establishes_known_top"] = reboundParticlesPreserved;
-        report["forethought_known_position_preserved"] = forethoughtPositionPreserved;
-        report["subset_reveal_fails_closed"] = subsetRevealFailsClosed;
-        report["subset_reveal_shuffle_stays_unsupported"] = subsetRevealShuffleStaysUnsupported;
-        report["subset_reveal_sampler_fails_closed"] = subsetRevealSamplerFailsClosed;
-        report["random_insertion_constraint_typed"] = randomInsertionConstraintTyped;
-        report["frozen_eye_full_order"] = frozenDrawOrder["classification"]
-                .cast<std::string>() == "full_public_exact"
-                && frozenVisibleOrder.size() == bc.cards.drawPile.size();
-        report["frozen_eye_sampler_preserves_order"] = frozenParticlesPreserved;
-        report["runic_dome_hides_current_intent"] = domeHidesCurrentIntent;
-        report["runic_dome_preserves_previous_move"] = domePreservesPreviousMove;
-        report["runic_dome_sanitizes_roll_misc"] = domeSanitizesRollMisc;
-        report["runic_dome_hidden_counter_timing_invariant"] =
-                hiddenCounterTimingInvariant;
-        report["runic_dome_mixed_counter_sampler_fails_closed"] =
-                mixedDomeSamplerFailsClosed;
-        report["runic_dome_hides_louse_misc"] = hiddenMiscNotProjected;
-        report["private_hidden_state_projection_invariant"] =
-                privateHiddenStateProjectionInvariant;
-        report["runic_dome_looter_public_counter_preserved"] =
-                looterPublicCounterPreserved;
-        // Keep the historical audit key for downstream consumers while the
-        // value now asserts the supported semantic counter contract.
-        report["runic_dome_looter_misc_fails_closed"] = looterPublicCounterPreserved;
-        report["private_hidden_misc_sampler_supported"] = privateHiddenMiscSamplerSupported;
-        report["runic_dome_retains_visible_power"] = visiblePowerRetained;
-        report["runic_dome_direct_misc_fail_closed"] = directSetMiscFailClosed;
-
-        bc = savedBattleContext;
-        battleActive = savedBattleActive;
-        gc.screenState = savedScreenState;
-        gc.outcome = savedGameOutcome;
-        return report;
+        pybind11::dict result;
+        result["hidden_future_projection_invariant"] =
+                projection.equal(hiddenVariantProjection);
+        result["hidden_draw_order_and_rng_absent"] = hiddenDrawAndRngAbsent;
+        result["headbutt_known_top_prefix"] = headbuttKnownTopPrefix;
+        result["frozen_eye_full_visible_order"] = frozenEyeShowsFullOrder;
+        result["runic_dome_hides_intent"] = runicDomeHidesIntent;
+        result["runic_dome_hidden_counter_invariant"] =
+                domeProjection.equal(domeVariantProjection);
+        result["public_actions_map_uniquely_without_native_bits"] =
+                publicActionsMapUniquely;
+        result["intent_visible_without_runic_dome"] =
+                normalIntent["classification"].cast<std::string>() == "public_exact"
+                && normalMonster.contains("current_move");
+        result["state_contains_player_visible_decision_fields"] = stateHasDecisionSurface;
+        return result;
     }
-
     pybind11::list sampleHiddenFutureParticles(
             std::uint64_t samplerSeed,
             int particleStart,
@@ -4398,19 +4133,19 @@ struct StepSimulator {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error(
-                    "T096 hidden-future sampling requested outside battle");
+                    "hidden-future sampling requested outside battle");
         }
         if (publicInformationUnsupported(gc, bc)) {
             throw std::runtime_error(
-                    "T096 hidden-future sampling unavailable: unsupported_fidelity");
+                    "hidden-future sampling unavailable: unsupported_fidelity");
         }
         if (particleStart < 0) {
             throw std::invalid_argument(
-                    "T096 particle_start must be non-negative");
+                    "particle_start must be non-negative");
         }
         if (particleCount <= 0 || particleCount > 65536) {
             throw std::invalid_argument(
-                    "T096 particle_count must be in [1, 65536]");
+                    "particle_count must be in [1, 65536]");
         }
 
         pybind11::list particles;
@@ -4424,7 +4159,7 @@ struct StepSimulator {
             row["particle_index"] = particleIndex;
             row["sampler_seed"] = particleSeed;
             row["public_information_projection"] =
-                    makeT096PublicInformationProjection(gc, particle, actions);
+                    makePublicBattleState(gc, particle, actions);
             row["hidden_future_fingerprint"] = hiddenFutureFingerprint(particle);
             if (particle.cards.drawPile.empty()) {
                 row["next_draw_card_id"] = pybind11::none();
@@ -4448,14 +4183,14 @@ struct StepSimulator {
                     "STSRL-006 particle public legal-action count drift");
         }
         for (std::size_t idx = 0; idx < anchorActions.size(); ++idx) {
-            const auto anchorIdentity = publicInformationActionIdentity(anchorActions[idx]);
-            const auto particleIdentity = publicInformationActionIdentity(particleActions[idx]);
+            const auto anchorIdentity = publicActionIdentity(anchorActions[idx]);
+            const auto particleIdentity = publicActionIdentity(particleActions[idx]);
             if (!anchorIdentity.equal(particleIdentity)) {
                 throw std::runtime_error(
                         "STSRL-006 particle public legal-action order drift");
             }
             for (std::size_t prior = 0; prior < idx; ++prior) {
-                const auto priorIdentity = publicInformationActionIdentity(anchorActions[prior]);
+                const auto priorIdentity = publicActionIdentity(anchorActions[prior]);
                 if (priorIdentity.equal(anchorIdentity)) {
                     throw std::runtime_error(
                             "STSRL-006 ambiguous duplicate public legal action identity");
@@ -4806,7 +4541,7 @@ struct StepSimulator {
         }
 
         const auto anchorActions = publicBattleActions(bc);
-        const auto anchorProjection = makeT096PublicInformationProjection(
+        const auto anchorProjection = makePublicBattleState(
                 gc, bc, anchorActions);
         const auto anchorPublicActions = anchorProjection[
                 "ordered_public_legal_actions"].cast<pybind11::list>();
@@ -4862,7 +4597,7 @@ struct StepSimulator {
                             "STSRL-006 sampled particle became unsupported_fidelity");
                 }
                 actions = publicBattleActions(particle);
-                projection = makeT096PublicInformationProjection(
+                projection = makePublicBattleState(
                         gc, particle, actions);
                 const auto particlePublicActions = projection[
                         "ordered_public_legal_actions"].cast<pybind11::list>();
@@ -4978,7 +4713,7 @@ struct StepSimulator {
             pybind11::list rootMappingAudit;
             for (std::size_t actionIdx = 0; actionIdx < item.actions.size(); ++actionIdx) {
                 const auto rawRow = rawRootRows[actionIdx].cast<pybind11::dict>();
-                pybind11::dict publicRow = publicInformationActionIdentity(
+                pybind11::dict publicRow = publicActionIdentity(
                         item.actions[actionIdx]);
                 for (const char *field : {
                         "search_tree_present", "search_edge_index", "visits",
@@ -5007,7 +4742,7 @@ struct StepSimulator {
                 pybind11::dict mappingRow;
                 mappingRow["public_action_ordinal"] = static_cast<int>(actionIdx);
                 mappingRow["public_action"] =
-                        publicInformationActionIdentity(item.actions[actionIdx]);
+                        publicActionIdentity(item.actions[actionIdx]);
                 mappingRow["mapping_classification"] =
                         rootMapping.mappingClassifications[actionIdx];
                 mappingRow["configuration_exclusion_reason"] =
@@ -5023,7 +4758,7 @@ struct StepSimulator {
                                 rootMapping.mappingModes[actionIdx]))
                         : pybind11::object(pybind11::none());
                 mappingRow["source_action"] = searched
-                        ? pybind11::object(publicInformationActionIdentity(
+                        ? pybind11::object(publicActionIdentity(
                                 makeBattleAction(
                                         item.state,
                                         searcher->root.edges[edgeIdx].action)))
@@ -7017,9 +6752,11 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("observation", &StepSimulator::observation)
         .def("legal_actions", &StepSimulator::legalActions)
         .def("public_projection", &StepSimulator::publicProjection)
-        .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
-        .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
-        .def("t096_visibility_audit", &StepSimulator::t096VisibilityAudit)
+        .def("public_battle_state", &StepSimulator::publicBattleState)
+        .def("step_public_action", &StepSimulator::stepPublicAction,
+                pybind11::arg("public_action_identity"))
+        .def("_test_public_battle_state_semantics",
+                &StepSimulator::publicBattleStateSemanticChecks)
         .def("t115_draw_insertion_audit", &StepSimulator::t115DrawInsertionAudit)
         .def("t114_shared_public_belief_search_audit",
                 &StepSimulator::t114SharedPublicBeliefSearchAudit)

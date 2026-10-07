@@ -28,7 +28,8 @@ REQUIRED_STEP_SIMULATOR_METHODS = (
     "battle_search_with_root_priors",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
-    "t096_public_information_projection",
+    "public_battle_state",
+    "step_public_action",
     "sample_hidden_future_particles_search",
     "last_particle_search_stage_diagnostics",
     "stsr008_root_occurrence_mapping_audit",
@@ -154,7 +155,7 @@ def main() -> int:
         legal_actions = require_sequence(sim.legal_actions(), "StepSimulator.legal_actions()")
 
         projection = require_mapping(sim.public_projection(), "StepSimulator.public_projection()")
-        require(projection.get("schema_id") == "native-public-projection-v1", "unexpected public_projection schema_id")
+        require(projection.get("schema_id") == "native-public-projection-v2", "unexpected public_projection schema_id")
 
         checkpoint = sim.capture_checkpoint()
         restored_snapshot = require_mapping(
@@ -174,7 +175,7 @@ def main() -> int:
         )
 
         # The native battle snapshot keeps its established raw fields while
-        # the T096 projection exposes a separate semantic monster schema.
+        # the normal-public projection exposes a separate semantic monster schema.
         battle_sim = sts.StepSimulator(sts.CharacterClass.IRONCLAD, 1, 20)
         active_snapshot = None
         for _ in range(32):
@@ -199,21 +200,58 @@ def main() -> int:
                 f"native monster snapshot lost field: {field_name}",
             )
         semantic_projection = require_mapping(
-            battle_sim.t096_public_information_projection(),
-            "StepSimulator.t096_public_information_projection()",
+            battle_sim.public_battle_state(),
+            "StepSimulator.public_battle_state()",
+        )
+        require(
+            semantic_projection.get("schema_id") == "native-public-battle-state-v1",
+            "unexpected normal-public battle-state schema",
+        )
+        require(
+            semantic_projection.get("information_regime") == "normal_public",
+            "unexpected battle-state information regime",
         )
         semantic_monsters = require_sequence(
-            semantic_projection["monsters"], "T096 projection monsters"
+            semantic_projection["monsters"], "public battle-state monsters"
         )
-        require(len(semantic_monsters) > 0, "T096 projection has no monster rows")
+        require(len(semantic_monsters) > 0, "public battle state has no monster rows")
         semantic_monster = require_mapping(semantic_monsters[0], "semantic public monster row")
         for field_name in ("misc_info", "unique_power_0", "unique_power_1"):
             require(
                 field_name not in semantic_monster,
-                f"T096 projection leaked raw field: {field_name}",
+                f"public battle state leaked raw field: {field_name}",
             )
-        require("public_statuses" in semantic_monster, "T096 projection lost semantic statuses")
-        require("information_fidelity" in semantic_monster, "T096 projection lost fidelity label")
+        require("public_statuses" in semantic_monster, "public state lost semantic statuses")
+        require("information_fidelity" in semantic_monster, "public state lost fidelity label")
+        public_actions = require_sequence(
+            semantic_projection["ordered_public_legal_actions"],
+            "ordered public legal actions",
+        )
+        require(
+            len(public_actions) == len(battle_sim.legal_actions()),
+            "public action surface does not match native legal actions",
+        )
+        require(
+            all("bits" not in action for action in public_actions),
+            "public legal actions expose native action bits",
+        )
+        generic_projection = require_mapping(
+            battle_sim.public_projection(), "StepSimulator.public_projection()"
+        )
+        candidate_surface = require_mapping(
+            generic_projection["candidate_actions"], "public candidate-action surface"
+        )
+        public_candidates = require_sequence(
+            candidate_surface["value"], "public candidate actions"
+        )
+        require(
+            all("bits" not in action for action in public_candidates),
+            "generic public projection exposes native action bits",
+        )
+        require(
+            all("bits=" not in action.get("label", "") for action in public_candidates),
+            "generic public action label exposes native action bits",
+        )
 
         print("STSRL native API smoke check passed")
         print(f"python_version: {sys.version.split()[0]}")
