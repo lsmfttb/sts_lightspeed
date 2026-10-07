@@ -10,6 +10,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -344,6 +345,151 @@ bool sameRandomState(const Random &lhs, const Random &rhs) {
             && lhs.seed1 == rhs.seed1;
 }
 
+bool sameRandomStreams(const StepSimulator &lhs, const StepSimulator &rhs) {
+    const std::array<const Random *, 14> lhsGame{
+            &lhs.gc.aiRng, &lhs.gc.cardRandomRng, &lhs.gc.cardRng,
+            &lhs.gc.eventRng, &lhs.gc.mathUtilRng, &lhs.gc.merchantRng,
+            &lhs.gc.miscRng, &lhs.gc.monsterHpRng, &lhs.gc.monsterRng,
+            &lhs.gc.neowRng, &lhs.gc.potionRng, &lhs.gc.relicRng,
+            &lhs.gc.shuffleRng, &lhs.gc.treasureRng};
+    const std::array<const Random *, 14> rhsGame{
+            &rhs.gc.aiRng, &rhs.gc.cardRandomRng, &rhs.gc.cardRng,
+            &rhs.gc.eventRng, &rhs.gc.mathUtilRng, &rhs.gc.merchantRng,
+            &rhs.gc.miscRng, &rhs.gc.monsterHpRng, &rhs.gc.monsterRng,
+            &rhs.gc.neowRng, &rhs.gc.potionRng, &rhs.gc.relicRng,
+            &rhs.gc.shuffleRng, &rhs.gc.treasureRng};
+    for (std::size_t idx = 0; idx < lhsGame.size(); ++idx) {
+        if (!sameRandomState(*lhsGame[idx], *rhsGame[idx])) {
+            return false;
+        }
+    }
+
+    const std::array<const Random *, 6> lhsBattle{
+            &lhs.bc.aiRng, &lhs.bc.cardRandomRng, &lhs.bc.miscRng,
+            &lhs.bc.monsterHpRng, &lhs.bc.potionRng, &lhs.bc.shuffleRng};
+    const std::array<const Random *, 6> rhsBattle{
+            &rhs.bc.aiRng, &rhs.bc.cardRandomRng, &rhs.bc.miscRng,
+            &rhs.bc.monsterHpRng, &rhs.bc.potionRng, &rhs.bc.shuffleRng};
+    for (std::size_t idx = 0; idx < lhsBattle.size(); ++idx) {
+        if (!sameRandomState(*lhsBattle[idx], *rhsBattle[idx])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+using PublicDrawFace = std::tuple<int, bool, int, bool, int>;
+
+using SampledDrawCard = std::tuple<
+        int, bool, int, bool, int, int, int, bool, bool>;
+
+std::vector<PublicDrawFace> publicDrawOrderIdentity(const BattleContext &battle) {
+    std::vector<PublicDrawFace> identity;
+    identity.reserve(battle.cards.drawPile.size());
+    for (const auto &card : battle.cards.drawPile) {
+        const bool hasSpecialData = card.usesSpecialData();
+        identity.emplace_back(static_cast<int>(card.getId()), card.isUpgraded(),
+                card.getUpgradeCount(), hasSpecialData,
+                hasSpecialData ? static_cast<int>(card.specialData) : 0);
+    }
+    return identity;
+}
+
+std::vector<SampledDrawCard> sampledDrawFutureIdentity(
+        const BattleContext &battle) {
+    std::vector<SampledDrawCard> identity;
+    identity.reserve(battle.cards.drawPile.size());
+    for (const auto &card : battle.cards.drawPile) {
+        const bool hasSpecialData = card.usesSpecialData();
+        identity.emplace_back(static_cast<int>(card.getId()), card.isUpgraded(),
+                card.getUpgradeCount(), hasSpecialData,
+                hasSpecialData ? static_cast<int>(card.specialData) : 0,
+                card.cost, card.costForTurn, card.freeToPlayOnce, card.retain);
+    }
+    return identity;
+}
+
+void changeAllHiddenRandomStreams(StepSimulator &simulator) {
+    std::uint64_t salt = 1;
+    const std::array<Random *, 14> gameStreams{
+            &simulator.gc.aiRng, &simulator.gc.cardRandomRng,
+            &simulator.gc.cardRng, &simulator.gc.eventRng,
+            &simulator.gc.mathUtilRng, &simulator.gc.merchantRng,
+            &simulator.gc.miscRng, &simulator.gc.monsterHpRng,
+            &simulator.gc.monsterRng, &simulator.gc.neowRng,
+            &simulator.gc.potionRng, &simulator.gc.relicRng,
+            &simulator.gc.shuffleRng, &simulator.gc.treasureRng};
+    for (auto *stream : gameStreams) {
+        changeRandomFuture(*stream, salt++);
+    }
+    const std::array<Random *, 6> battleStreams{
+            &simulator.bc.aiRng, &simulator.bc.cardRandomRng,
+            &simulator.bc.miscRng, &simulator.bc.monsterHpRng,
+            &simulator.bc.potionRng, &simulator.bc.shuffleRng};
+    for (auto *stream : battleStreams) {
+        changeRandomFuture(*stream, salt++);
+    }
+}
+
+void reverseUnconstrainedDrawCards(StepSimulator &simulator) {
+    auto &battle = simulator.bc;
+    const auto drawSize = battle.cards.drawPile.size();
+    std::vector<bool> fixed(drawSize, false);
+    for (const auto uniqueId : battle.knownDrawTopUniqueIds) {
+        const auto card = std::find_if(battle.cards.drawPile.begin(),
+                battle.cards.drawPile.end(), [&](const CardInstance &candidate) {
+                    return candidate.getUniqueId() == uniqueId;
+                });
+        require(card != battle.cards.drawPile.end(),
+                "known-top card is missing from its anchor");
+        fixed[static_cast<std::size_t>(
+                std::distance(battle.cards.drawPile.begin(), card))] = true;
+    }
+    for (const auto &[position, uniqueId] : battle.knownDrawPositionUniqueIds) {
+        (void) uniqueId;
+        fixed[drawSize - 1 - static_cast<std::size_t>(position)] = true;
+    }
+    std::vector<std::size_t> freeIndices;
+    std::vector<CardInstance> freeCards;
+    for (std::size_t idx = 0; idx < drawSize; ++idx) {
+        if (!fixed[idx]) {
+            freeIndices.push_back(idx);
+            freeCards.push_back(battle.cards.drawPile[idx]);
+        }
+    }
+    std::reverse(freeCards.begin(), freeCards.end());
+    for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
+        battle.cards.drawPile[freeIndices[idx]] = freeCards[idx];
+    }
+}
+
+void requireAnchorIndependentSamples(
+        const StepSimulator &firstAnchor,
+        const StepSimulator &secondAnchor,
+        std::uint64_t samplerSeed,
+        const std::string &caseName) {
+    auto firstStateAnchor = firstAnchor;
+    auto secondStateAnchor = secondAnchor;
+    const auto firstState = firstStateAnchor.publicBattleState();
+    const auto secondState = secondStateAnchor.publicBattleState();
+    require(firstState.equal(secondState),
+            caseName + " anchors do not have equal public battle states");
+    for (std::uint64_t index = 0; index < 8; ++index) {
+        const auto first = firstAnchor.samplePublicConsistentHiddenFuture(
+                samplerSeed, index);
+        const auto second = secondAnchor.samplePublicConsistentHiddenFuture(
+                samplerSeed, index);
+        require(publicDrawOrderIdentity(first.bc)
+                        == publicDrawOrderIdentity(second.bc),
+                caseName + " proposal depends on the anchor's hidden draw order");
+        require(sampledDrawFutureIdentity(first.bc)
+                        == sampledDrawFutureIdentity(second.bc),
+                caseName + " proposal depends on private draw-card state");
+        require(sameRandomStreams(first, second),
+                caseName + " proposal depends on the anchor's hidden RNG history");
+    }
+}
+
 void requirePublicConsistentSample(
         StepSimulator &anchor,
         StepSimulator &particle,
@@ -392,6 +538,97 @@ void verifyPublicConsistentSamplerDiversityAndReproducibility() {
             "different particle indices did not address distinct RNG futures");
     require(drawOrderIdentity(anchor.bc) == anchorOrder,
             "sampling mutated the anchor simulator");
+}
+
+void verifySamplerProposalIsAnchorIndependent() {
+    auto ordinary = makePublicBattleFixture();
+    auto ordinaryAlternate = ordinary;
+    std::reverse(ordinaryAlternate.bc.cards.drawPile.begin(),
+            ordinaryAlternate.bc.cards.drawPile.end());
+    changeAllHiddenRandomStreams(ordinaryAlternate);
+    requireAnchorIndependentSamples(ordinary, ordinaryAlternate, 709,
+            "ordinary hidden draw");
+
+    auto knownTop = makePublicBattleFixture();
+    knownTop.bc.cards.discardPile.clear();
+    CardInstance selected(CardId::RAMPAGE);
+    selected.setUniqueId(knownTop.bc.cards.nextUniqueCardId++);
+    selected.specialData = 8;
+    knownTop.bc.cards.discardPile.push_back(selected);
+    knownTop.bc.chooseHeadbuttCard(0);
+    auto knownTopAlternate = knownTop;
+    reverseUnconstrainedDrawCards(knownTopAlternate);
+    changeAllHiddenRandomStreams(knownTopAlternate);
+    requireAnchorIndependentSamples(knownTop, knownTopAlternate, 710,
+            "known-top draw");
+
+    auto knownPosition = makePublicBattleFixture();
+    const auto position = static_cast<std::int32_t>(2);
+    const auto drawIdx = knownPosition.bc.cards.drawPile.size() - 1 - position;
+    knownPosition.bc.knownDrawPositionUniqueIds[position] =
+            knownPosition.bc.cards.drawPile[drawIdx].getUniqueId();
+    auto knownPositionAlternate = knownPosition;
+    reverseUnconstrainedDrawCards(knownPositionAlternate);
+    changeAllHiddenRandomStreams(knownPositionAlternate);
+    requireAnchorIndependentSamples(knownPosition, knownPositionAlternate, 711,
+            "known-position draw");
+
+    auto insertion = makePublicBattleFixture();
+    const auto baselineSize = insertion.bc.cards.drawPile.size();
+    const std::int32_t minimumPosition = 2;
+    CardInstance generated(CardId::RAMPAGE);
+    generated.setUniqueId(insertion.bc.cards.nextUniqueCardId++);
+    generated.specialData = 11;
+    const auto insertionIdx = baselineSize - minimumPosition;
+    insertion.bc.cards.drawPile.insert(
+            insertion.bc.cards.drawPile.begin() + insertionIdx, generated);
+    insertion.bc.knownGeneratedCardPublicIdentity[generated.getUniqueId()] = true;
+    insertion.bc.knownDrawInsertionBaseSize = static_cast<std::int32_t>(baselineSize);
+    insertion.bc.knownDrawInsertionCards.push_back(
+            {generated.getUniqueId(), minimumPosition, -1});
+    require(knownDrawStateConsistent(insertion.bc),
+            "random-insertion anchor-independence fixture is inconsistent");
+
+    auto insertionAlternate = insertion;
+    auto insertionCard = std::find_if(
+            insertionAlternate.bc.cards.drawPile.begin(),
+            insertionAlternate.bc.cards.drawPile.end(),
+            [&](const CardInstance &candidate) {
+                return candidate.getUniqueId() == generated.getUniqueId();
+            });
+    require(insertionCard != insertionAlternate.bc.cards.drawPile.end(),
+            "random-insertion card is missing from alternate anchor");
+    std::vector<CardInstance> alternateBaselineTopToBottom;
+    for (auto it = insertionAlternate.bc.cards.drawPile.rbegin();
+            it != insertionAlternate.bc.cards.drawPile.rend(); ++it) {
+        if (it->getUniqueId() != generated.getUniqueId()) {
+            alternateBaselineTopToBottom.push_back(*it);
+        }
+    }
+    std::reverse(alternateBaselineTopToBottom.begin(),
+            alternateBaselineTopToBottom.end());
+    const auto drawSize = insertionAlternate.bc.cards.drawPile.size();
+    const auto alternateInsertionRank = static_cast<std::size_t>(minimumPosition + 1);
+    require(alternateInsertionRank < drawSize,
+            "random-insertion fixture has no alternate legal position");
+    std::vector<CardInstance> alternateTopToBottom;
+    alternateTopToBottom.reserve(drawSize);
+    std::size_t baselineIdx = 0;
+    for (std::size_t rank = 0; rank < drawSize; ++rank) {
+        if (rank == alternateInsertionRank) {
+            alternateTopToBottom.push_back(*insertionCard);
+        } else {
+            alternateTopToBottom.push_back(
+                    alternateBaselineTopToBottom[baselineIdx++]);
+        }
+    }
+    insertionAlternate.bc.cards.drawPile.assign(
+            alternateTopToBottom.rbegin(), alternateTopToBottom.rend());
+    changeAllHiddenRandomStreams(insertionAlternate);
+    require(knownDrawStateConsistent(insertionAlternate.bc),
+            "alternate random-insertion anchor violates its public constraints");
+    requireAnchorIndependentSamples(insertion, insertionAlternate, 712,
+            "represented random insertion");
 }
 
 void verifySamplerPreservesKnownDrawConstraints() {
@@ -518,6 +755,7 @@ int main() {
     verifyRunicDomeSuppressesMonsterIntent();
     verifyPublicActionIdentitiesExecute();
     verifyPublicConsistentSamplerDiversityAndReproducibility();
+    verifySamplerProposalIsAnchorIndependent();
     verifySamplerPreservesKnownDrawConstraints();
     verifySamplerFailsClosedForUnsupportedFidelity();
     std::cout << "PUBLIC_BATTLE_STATE_SEMANTICS_PASS\n";

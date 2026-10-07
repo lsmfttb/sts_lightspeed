@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -823,10 +824,36 @@ void reseedHiddenRandomStreams(
         const std::uint64_t domain,
         RandomStreams &... streams) {
     std::uint64_t streamIndex = 0;
-    ((streams = Random(
-              splitMix64(particleSeed ^ domain
-                      ^ (0x9E3779B97F4A7C15ULL * ++streamIndex)),
-              std::max(0, streams.counter))), ...);
+    ((streams = Random(splitMix64(particleSeed ^ domain
+                    ^ (0x9E3779B97F4A7C15ULL * ++streamIndex)))), ...);
+}
+
+auto publicDrawCardKey(const CardInstance &card) {
+    const bool hasSpecialData = card.usesSpecialData();
+    return std::make_tuple(static_cast<int>(card.getId()), card.isUpgraded(),
+            card.getUpgradeCount(), hasSpecialData,
+            hasSpecialData ? static_cast<int>(card.specialData) : 0);
+}
+
+bool publicDrawCardLess(const CardInstance &lhs, const CardInstance &rhs) {
+    const auto lhsKey = publicDrawCardKey(lhs);
+    const auto rhsKey = publicDrawCardKey(rhs);
+    if (lhsKey != rhsKey) {
+        return lhsKey < rhsKey;
+    }
+    // Runtime ids only break ties between publicly indistinguishable copies.
+    return lhs.getUniqueId() < rhs.getUniqueId();
+}
+
+CardInstance canonicalPublicDrawCard(const CardInstance &card) {
+    // Draw-pile membership publishes these fields. The other per-instance
+    // combat fields are not public while the card is hidden in the pile.
+    CardInstance result(card.getId(), card.isUpgraded());
+    result.setUniqueId(card.getUniqueId());
+    if (card.usesSpecialData()) {
+        result.specialData = card.specialData;
+    }
+    return result;
 }
 
 struct StepSimulator {
@@ -1196,19 +1223,21 @@ struct StepSimulator {
             for (std::size_t drawIdx = 0; drawIdx < drawSize; ++drawIdx) {
                 if (!fixed[drawIdx]) {
                     freeIndices.push_back(drawIdx);
-                    freeCards.push_back(particle.bc.cards.drawPile[drawIdx]);
+                    freeCards.push_back(canonicalPublicDrawCard(
+                            particle.bc.cards.drawPile[drawIdx]));
                 }
             }
+            std::sort(freeCards.begin(), freeCards.end(), publicDrawCardLess);
             java::Collections::shuffle(
                     freeCards.begin(), freeCards.end(), drawOrderRandom);
             for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
                 particle.bc.cards.drawPile[freeIndices[idx]] = freeCards[idx];
             }
         } else if (!frozenEye && particle.bc.knownDrawInsertionBaseSize >= 0) {
-            // Random insertion records define a joint constraint over the
-            // hidden baseline order and inserted-card positions. Use valid
-            // transposition proposals so every accepted move remains inside
-            // that represented public-information set.
+            // Rebuild a deterministic representative of the public insertion
+            // constraints before making proposals. A finite transposition
+            // walk from the actual arrangement would retain information about
+            // which hidden representative happened to be the real anchor.
             const auto drawSize = particle.bc.cards.drawPile.size();
             std::vector<bool> fixed(drawSize, false);
             const auto knownTop = knownDrawTopCount(particle.bc);
@@ -1229,6 +1258,228 @@ struct StepSimulator {
                 }
                 fixed[drawIdx] = true;
             }
+
+            std::map<std::int16_t, DrawKnowledgeInsertion> insertionById;
+            for (const auto &insertion : particle.bc.knownDrawInsertionCards) {
+                insertionById.emplace(insertion.uniqueId, insertion);
+            }
+            std::set<std::int16_t> exactKnownIds(
+                    particle.bc.knownDrawTopUniqueIds.begin(),
+                    particle.bc.knownDrawTopUniqueIds.begin()
+                            + knownTop);
+            for (const auto &[position, uniqueId]
+                    : particle.bc.knownDrawPositionUniqueIds) {
+                (void) position;
+                exactKnownIds.insert(uniqueId);
+            }
+            const auto baselineSize = static_cast<std::size_t>(
+                    particle.bc.knownDrawInsertionBaseSize);
+            std::vector<CardInstance> baselineCards;
+            std::vector<CardInstance> insertionCards;
+            for (const auto &card : particle.bc.cards.drawPile) {
+                const auto proposalCard = exactKnownIds.find(card.getUniqueId())
+                                != exactKnownIds.end()
+                        ? card : canonicalPublicDrawCard(card);
+                const auto insertion = insertionById.find(card.getUniqueId());
+                if (insertion == insertionById.end()) {
+                    baselineCards.push_back(proposalCard);
+                } else {
+                    insertionCards.push_back(proposalCard);
+                }
+            }
+            if (baselineCards.size() != baselineSize
+                    || insertionCards.size() != insertionById.size()) {
+                throw std::logic_error(
+                        "supported insertion constraints disagree with draw-pile membership");
+            }
+
+            std::vector<CardInstance> baseline(baselineSize);
+            std::vector<bool> fixedBaseline(baselineSize, false);
+            for (const auto &anchor : particle.bc.knownDrawInsertionAnchors) {
+                if (anchor.basePositionFromTop < 0
+                        || static_cast<std::size_t>(anchor.basePositionFromTop)
+                                >= baselineSize) {
+                    throw std::logic_error(
+                            "supported insertion anchor has an invalid baseline position");
+                }
+                const auto card = std::find_if(baselineCards.begin(),
+                        baselineCards.end(), [&](const CardInstance &candidate) {
+                            return candidate.getUniqueId() == anchor.uniqueId;
+                        });
+                const auto position = static_cast<std::size_t>(
+                        anchor.basePositionFromTop);
+                if (card == baselineCards.end() || fixedBaseline[position]) {
+                    throw std::logic_error(
+                            "supported insertion anchor is missing or duplicated");
+                }
+                baseline[position] = *card;
+                fixedBaseline[position] = true;
+                baselineCards.erase(card);
+            }
+
+            std::size_t knownTopBaselinePosition = 0;
+            for (std::size_t idx = 0; idx < knownTop; ++idx) {
+                const auto uniqueId = particle.bc.knownDrawTopUniqueIds[idx];
+                if (insertionById.find(uniqueId) != insertionById.end()) {
+                    continue;
+                }
+                const auto card = std::find_if(baselineCards.begin(),
+                        baselineCards.end(), [&](const CardInstance &candidate) {
+                            return candidate.getUniqueId() == uniqueId;
+                        });
+                if (knownTopBaselinePosition >= baselineSize) {
+                    throw std::logic_error(
+                            "supported known-top prefix exceeds the insertion baseline");
+                }
+                if (card != baselineCards.end()) {
+                    if (fixedBaseline[knownTopBaselinePosition]) {
+                        throw std::logic_error(
+                                "known-top fact conflicts with a baseline anchor");
+                    }
+                    baseline[knownTopBaselinePosition] = *card;
+                    fixedBaseline[knownTopBaselinePosition] = true;
+                    baselineCards.erase(card);
+                } else if (!fixedBaseline[knownTopBaselinePosition]
+                        || baseline[knownTopBaselinePosition].getUniqueId()
+                                != uniqueId) {
+                    throw std::logic_error(
+                            "known-top fact is absent from the insertion baseline");
+                }
+                ++knownTopBaselinePosition;
+            }
+            std::sort(baselineCards.begin(), baselineCards.end(), publicDrawCardLess);
+            auto freeBaseline = baselineCards.begin();
+            for (std::size_t position = 0; position < baselineSize; ++position) {
+                if (!fixedBaseline[position]) {
+                    baseline[position] = *freeBaseline++;
+                }
+            }
+
+            struct InsertionProposalCard {
+                CardInstance card;
+                std::int32_t maximumGap = 0;
+                DrawKnowledgeInsertion constraint{};
+                bool placed = false;
+            };
+            std::vector<InsertionProposalCard> insertions;
+            insertions.reserve(insertionCards.size());
+            for (const auto &card : insertionCards) {
+                const auto constraint = insertionById.at(card.getUniqueId());
+                auto gap = static_cast<std::int32_t>(baselineSize);
+                if (constraint.beforeAnchorUniqueId >= 0) {
+                    const auto anchor = std::find_if(
+                            particle.bc.knownDrawInsertionAnchors.begin(),
+                            particle.bc.knownDrawInsertionAnchors.end(),
+                            [&](const DrawKnowledgeAnchor &candidate) {
+                                return candidate.uniqueId
+                                        == constraint.beforeAnchorUniqueId;
+                            });
+                    if (anchor == particle.bc.knownDrawInsertionAnchors.end()) {
+                        throw std::logic_error(
+                                "supported insertion references a missing baseline anchor");
+                    }
+                    gap = anchor->basePositionFromTop;
+                }
+                insertions.push_back({card, gap, constraint, false});
+            }
+            std::sort(insertions.begin(), insertions.end(),
+                    [](const InsertionProposalCard &lhs,
+                            const InsertionProposalCard &rhs) {
+                        if (lhs.maximumGap != rhs.maximumGap) {
+                            return lhs.maximumGap < rhs.maximumGap;
+                        }
+                        if (lhs.constraint.minimumPositionFromTop
+                                != rhs.constraint.minimumPositionFromTop) {
+                            return lhs.constraint.minimumPositionFromTop
+                                    < rhs.constraint.minimumPositionFromTop;
+                        }
+                        return publicDrawCardLess(lhs.card, rhs.card);
+                    });
+
+            std::vector<CardInstance> canonicalTopToBottom;
+            canonicalTopToBottom.reserve(drawSize);
+            std::size_t consumedBaseline = 0;
+            for (std::size_t idx = 0; idx < knownTop; ++idx) {
+                const auto uniqueId = particle.bc.knownDrawTopUniqueIds[idx];
+                const auto insertion = std::find_if(insertions.begin(),
+                        insertions.end(), [&](const InsertionProposalCard &candidate) {
+                            return candidate.card.getUniqueId() == uniqueId;
+                        });
+                if (insertion != insertions.end()) {
+                    const auto gap = static_cast<std::int32_t>(consumedBaseline);
+                    const auto rank = static_cast<std::int32_t>(
+                            canonicalTopToBottom.size());
+                    if (gap > insertion->maximumGap
+                            || rank < insertion->constraint.minimumPositionFromTop) {
+                        throw std::logic_error(
+                                "known-top insertion violates its public position domain");
+                    }
+                    insertion->placed = true;
+                    canonicalTopToBottom.push_back(insertion->card);
+                    continue;
+                }
+                if (consumedBaseline >= baselineSize
+                        || baseline[consumedBaseline].getUniqueId() != uniqueId) {
+                    throw std::logic_error(
+                            "could not reconstruct the public known-top prefix");
+                }
+                canonicalTopToBottom.push_back(baseline[consumedBaseline++]);
+            }
+
+            for (std::size_t gap = consumedBaseline; gap <= baselineSize; ++gap) {
+                while (true) {
+                    const auto currentRank = static_cast<std::int32_t>(
+                            canonicalTopToBottom.size());
+                    const auto insertion = std::find_if(insertions.begin(),
+                            insertions.end(), [&](const InsertionProposalCard &candidate) {
+                                return !candidate.placed
+                                        && candidate.maximumGap
+                                                >= static_cast<std::int32_t>(gap)
+                                        && candidate.constraint.minimumPositionFromTop
+                                                <= currentRank;
+                            });
+                    if (insertion == insertions.end()) {
+                        const bool missedDeadline = std::any_of(
+                                insertions.begin(), insertions.end(),
+                                [&](const InsertionProposalCard &candidate) {
+                                    return !candidate.placed
+                                            && candidate.maximumGap
+                                                    <= static_cast<std::int32_t>(gap);
+                                });
+                        if (missedDeadline || (gap == baselineSize
+                                && std::any_of(insertions.begin(), insertions.end(),
+                                        [](const InsertionProposalCard &candidate) {
+                                            return !candidate.placed;
+                                        }))) {
+                            throw std::logic_error(
+                                    "could not construct a canonical insertion representative");
+                        }
+                        break;
+                    }
+                    insertion->placed = true;
+                    canonicalTopToBottom.push_back(insertion->card);
+                }
+                if (gap < baselineSize) {
+                    canonicalTopToBottom.push_back(baseline[gap]);
+                }
+            }
+            if (canonicalTopToBottom.size() != drawSize
+                    || std::any_of(insertions.begin(), insertions.end(),
+                            [](const InsertionProposalCard &candidate) {
+                                return !candidate.placed;
+                            })) {
+                throw std::logic_error(
+                        "could not construct a canonical insertion representative");
+            }
+            particle.bc.cards.drawPile.assign(
+                    canonicalTopToBottom.rbegin(), canonicalTopToBottom.rend());
+            if (!knownDrawStateConsistent(particle.bc)) {
+                throw std::logic_error(
+                        "canonical insertion representative violates public constraints");
+            }
+
+            // Use valid transposition proposals so every accepted move remains
+            // inside the represented public-information set.
             if (drawSize > 1) {
                 const auto proposalCount = std::max<std::size_t>(
                         64, drawSize * drawSize * 12);
