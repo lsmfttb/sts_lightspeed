@@ -370,6 +370,31 @@ void requireSamplerRejected(
     require(rejected, caseName + " did not fail closed");
 }
 
+template <PlayerStatus Status, typename ApplyStatus>
+void verifyPlayerTimingStateFailsClosed(
+        const std::string &caseName,
+        ApplyStatus applyStatus) {
+    auto justApplied = makePublicBattleFixture();
+    auto alreadyApplied = justApplied;
+    applyStatus(justApplied.bc.player);
+    applyStatus(alreadyApplied.bc.player);
+    justApplied.bc.player.setJustApplied<Status>(true);
+    alreadyApplied.bc.player.setJustApplied<Status>(false);
+
+    const auto justAppliedState = justApplied.publicBattleState();
+    const auto alreadyAppliedState = alreadyApplied.publicBattleState();
+    require(pybind11::cast<std::string>(justAppliedState["information_fidelity"])
+                    == "supported",
+            caseName + " fixture is not a supported public state");
+    require(justAppliedState.equal(alreadyAppliedState),
+            caseName + " timing fixtures do not have the same public battle state");
+    require(justApplied.bc.player.template wasJustApplied<Status>()
+                    != alreadyApplied.bc.player.template wasJustApplied<Status>(),
+            caseName + " fixtures did not vary the hidden timing bit");
+    requireSamplerRejected(justApplied, caseName + " just-applied sampler anchor");
+    requireSamplerRejected(alreadyApplied, caseName + " existing-status sampler anchor");
+}
+
 void verifyPublicConsistentSamplerDiversityAndReproducibility() {
     auto anchor = makePublicBattleFixture();
     const auto anchorState = anchor.publicBattleState();
@@ -558,6 +583,29 @@ void verifySamplerFailsClosedForUnrepresentedMonsterFuture() {
     requireSamplerRejected(weakExpired, "existing monster Weak sampler anchor");
 }
 
+void verifySamplerFailsClosedForUnrepresentedPlayerTiming() {
+    verifyPlayerTimingStateFailsClosed<PS::WEAK>(
+            "player Weak", [](Player &player) {
+                player.debuff<PS::WEAK>(2, false);
+            });
+    verifyPlayerTimingStateFailsClosed<PS::VULNERABLE>(
+            "player Vulnerable", [](Player &player) {
+                player.debuff<PS::VULNERABLE>(2, false);
+            });
+    verifyPlayerTimingStateFailsClosed<PS::FRAIL>(
+            "player Frail", [](Player &player) {
+                player.debuff<PS::FRAIL>(2, false);
+            });
+    verifyPlayerTimingStateFailsClosed<PS::DOUBLE_DAMAGE>(
+            "player Double Damage", [](Player &player) {
+                player.buff<PS::DOUBLE_DAMAGE>(2);
+            });
+    verifyPlayerTimingStateFailsClosed<PS::DRAW_REDUCTION>(
+            "player Draw Reduction", [](Player &player) {
+                player.debuff<PS::DRAW_REDUCTION>(1, false);
+            });
+}
+
 } // namespace
 
 int main() {
@@ -574,6 +622,7 @@ int main() {
     verifySamplerPreservesKnownDrawConstraints();
     verifySamplerFailsClosedForUnsupportedFidelity();
     verifySamplerFailsClosedForUnrepresentedMonsterFuture();
+    verifySamplerFailsClosedForUnrepresentedPlayerTiming();
     std::cout << "PUBLIC_BATTLE_STATE_SEMANTICS_PASS\n";
     return 0;
 }

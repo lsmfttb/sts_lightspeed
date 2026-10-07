@@ -1183,6 +1183,18 @@ struct StepSimulator {
                         "public-consistent sampling cannot represent hidden monster status timing");
             }
         }
+        const auto &player = anchor.bc.player;
+        // Player status durations also have unprojected just-applied bits.
+        // Reject by the public status presence so equivalent anchors make
+        // the same fail-closed decision regardless of those hidden bits.
+        if (player.hasStatus<PS::WEAK>()
+                || player.hasStatus<PS::VULNERABLE>()
+                || player.hasStatus<PS::FRAIL>()
+                || player.hasStatus<PS::DOUBLE_DAMAGE>()
+                || player.hasStatus<PS::DRAW_REDUCTION>()) {
+            throw std::runtime_error(
+                    "public-consistent sampling cannot represent hidden player status timing");
+        }
 
         StepSimulator particle = anchor;
         const auto particleSeed = publicFutureParticleSeed(
