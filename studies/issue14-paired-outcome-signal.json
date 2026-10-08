@@ -70218,7 +70218,7 @@
       "target_start_reached": true
     }
   ],
-  "conclusion": "pending_review_of_paired_outcome_signal",
+  "conclusion": "exploratory_paired_outcome_signal_study_only",
   "controller": "adaptive shared-public-tree UCT, one tree per decision and 32 sampled particles",
   "fixed_game_seed_count": 12,
   "game_seeds": [

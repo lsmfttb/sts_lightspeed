@@ -1519,7 +1519,7 @@ int main(int argc, char **argv) {
                 "search rollouts truncate at 24 public-action decisions with a public HP-fraction heuristic",
                 "wall times are local single-process measurements and exclude compilation",
                 "small clustered cohort and support-conditioned outcomes do not establish statistical significance or policy strength");
-        report["conclusion"] = "pending_review_of_paired_outcome_signal";
+        report["conclusion"] = "exploratory_paired_outcome_signal_study_only";
 
         std::ofstream output(outputPath, std::ios::binary | std::ios::trunc);
         if (!output) {
