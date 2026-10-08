@@ -1349,7 +1349,11 @@ def _summarize_run(
     native_search_attempts = [
         event for event in events if event.get("native_backend_mode") == "search"
     ]
-    native_search_event = native_search_attempts[0] if native_search_attempts else {}
+    native_search_event = (
+        native_search_attempts[0]
+        if native_search_attempts
+        else search_events[0] if search_events else {}
+    )
     native_failure_text = "\n".join(native_failures)
     invariance_rows = [
         _field(event.get("native_anchor_invariance"))
