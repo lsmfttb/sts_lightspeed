@@ -1,0 +1,11 @@
+{
+  "details": {
+    "executed_steps": 16,
+    "first_battle_search_executed": true,
+    "seed": 50,
+    "stop_disposition": "fixed_decision_budget"
+  },
+  "last_completed_boundary": "seed_run_complete",
+  "schema_id": "issue24-run-progress-v1",
+  "status": "complete"
+}

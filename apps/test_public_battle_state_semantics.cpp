@@ -55,8 +55,9 @@ bool containsPrivatePublicStateKey(pybind11::handle value) {
 
 StepSimulator makePublicBattleFixture(
         bool withRunicDome = false,
-        MonsterEncounter encounter = MonsterEncounter::JAW_WORM) {
-    StepSimulator simulator(CharacterClass::IRONCLAD, 101, 0);
+        MonsterEncounter encounter = MonsterEncounter::JAW_WORM,
+        int ascension = 0) {
+    StepSimulator simulator(CharacterClass::IRONCLAD, 101, ascension);
     if (withRunicDome) {
         simulator.gc.relics.add({R::RUNIC_DOME, 0});
     }
@@ -391,6 +392,16 @@ void verifyPublicActionIdentitiesExecute() {
         const auto label = pybind11::cast<std::string>(identity["label"]);
         require(label.find("bits=") == std::string::npos,
                 "public action label exposes native replay bits");
+        if (pybind11::cast<std::string>(identity["scope"]) == "battle") {
+            std::ostringstream expectedLabel;
+            expectedLabel << "battle."
+                          << pybind11::cast<std::string>(identity["kind"])
+                          << " idx1=" << pybind11::cast<int>(identity["idx1"])
+                          << " idx2=" << pybind11::cast<int>(identity["idx2"])
+                          << " idx3=" << pybind11::cast<int>(identity["idx3"]);
+            require(label == expectedLabel.str(),
+                    "public battle action label retained native card-instance details");
+        }
 
         auto executable = initial;
         const auto result = executable.stepPublicAction(identity);
@@ -412,6 +423,109 @@ bool sameRandomState(const Random &lhs, const Random &rhs) {
     return lhs.counter == rhs.counter
             && lhs.seed0 == rhs.seed0
             && lhs.seed1 == rhs.seed1;
+}
+
+std::vector<Random> hiddenRandomStreams(const StepSimulator &simulator) {
+    return {
+            simulator.gc.aiRng, simulator.gc.cardRandomRng,
+            simulator.gc.cardRng, simulator.gc.eventRng,
+            simulator.gc.mathUtilRng, simulator.gc.merchantRng,
+            simulator.gc.miscRng, simulator.gc.monsterHpRng,
+            simulator.gc.monsterRng, simulator.gc.neowRng,
+            simulator.gc.potionRng, simulator.gc.relicRng,
+            simulator.gc.shuffleRng, simulator.gc.treasureRng,
+            simulator.bc.aiRng, simulator.bc.cardRandomRng,
+            simulator.bc.miscRng, simulator.bc.monsterHpRng,
+            simulator.bc.potionRng, simulator.bc.shuffleRng};
+}
+
+bool sameHiddenRandomStreams(
+        const StepSimulator &lhs,
+        const StepSimulator &rhs) {
+    const auto left = hiddenRandomStreams(lhs);
+    const auto right = hiddenRandomStreams(rhs);
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t idx = 0; idx < left.size(); ++idx) {
+        if (!sameRandomState(left[idx], right[idx])) {
+            return false;
+        }
+    }
+    return lhs.gc.seed == rhs.gc.seed && lhs.bc.seed == rhs.bc.seed;
+}
+
+void incrementHiddenRandomCounters(StepSimulator &simulator) {
+#define INCREMENT_COUNTER(stream) ++simulator.stream.counter
+    INCREMENT_COUNTER(gc.aiRng);
+    INCREMENT_COUNTER(gc.cardRandomRng);
+    INCREMENT_COUNTER(gc.cardRng);
+    INCREMENT_COUNTER(gc.eventRng);
+    INCREMENT_COUNTER(gc.mathUtilRng);
+    INCREMENT_COUNTER(gc.merchantRng);
+    INCREMENT_COUNTER(gc.miscRng);
+    INCREMENT_COUNTER(gc.monsterHpRng);
+    INCREMENT_COUNTER(gc.monsterRng);
+    INCREMENT_COUNTER(gc.neowRng);
+    INCREMENT_COUNTER(gc.potionRng);
+    INCREMENT_COUNTER(gc.relicRng);
+    INCREMENT_COUNTER(gc.shuffleRng);
+    INCREMENT_COUNTER(gc.treasureRng);
+    INCREMENT_COUNTER(bc.aiRng);
+    INCREMENT_COUNTER(bc.cardRandomRng);
+    INCREMENT_COUNTER(bc.miscRng);
+    INCREMENT_COUNTER(bc.monsterHpRng);
+    INCREMENT_COUNTER(bc.potionRng);
+    INCREMENT_COUNTER(bc.shuffleRng);
+#undef INCREMENT_COUNTER
+    simulator.gc.seed ^= 0x123456789ULL;
+    simulator.bc.seed ^= 0x987654321ULL;
+}
+
+void changeHiddenRandomSeeds(StepSimulator &simulator) {
+#define CHANGE_SEED(stream) \
+    simulator.stream.seed0 ^= 0x1111222233334444ULL; \
+    simulator.stream.seed1 ^= 0xaaaabbbbccccddddULL
+    CHANGE_SEED(gc.aiRng);
+    CHANGE_SEED(gc.cardRandomRng);
+    CHANGE_SEED(gc.cardRng);
+    CHANGE_SEED(gc.eventRng);
+    CHANGE_SEED(gc.mathUtilRng);
+    CHANGE_SEED(gc.merchantRng);
+    CHANGE_SEED(gc.miscRng);
+    CHANGE_SEED(gc.monsterHpRng);
+    CHANGE_SEED(gc.monsterRng);
+    CHANGE_SEED(gc.neowRng);
+    CHANGE_SEED(gc.potionRng);
+    CHANGE_SEED(gc.relicRng);
+    CHANGE_SEED(gc.shuffleRng);
+    CHANGE_SEED(gc.treasureRng);
+    CHANGE_SEED(bc.aiRng);
+    CHANGE_SEED(bc.cardRandomRng);
+    CHANGE_SEED(bc.miscRng);
+    CHANGE_SEED(bc.monsterHpRng);
+    CHANGE_SEED(bc.potionRng);
+    CHANGE_SEED(bc.shuffleRng);
+#undef CHANGE_SEED
+    simulator.gc.seed ^= 0x43218765ULL;
+    simulator.bc.seed ^= 0x56781234ULL;
+}
+
+std::vector<PublicDrawCardFaceKey> publicDrawOrder(const StepSimulator &simulator) {
+    std::vector<PublicDrawCardFaceKey> result;
+    result.reserve(simulator.bc.cards.drawPile.size());
+    for (const auto &card : simulator.bc.cards.drawPile) {
+        result.push_back(publicDrawCardFaceKey(card));
+    }
+    return result;
+}
+
+bool equivalentSampleFutures(
+        StepSimulator &lhs,
+        StepSimulator &rhs) {
+    return lhs.publicBattleState().equal(rhs.publicBattleState())
+            && publicDrawOrder(lhs) == publicDrawOrder(rhs)
+            && sameHiddenRandomStreams(lhs, rhs);
 }
 
 void requirePublicConsistentSample(
@@ -562,6 +676,147 @@ void verifyPublicConsistentSamplerDiversityAndReproducibility() {
             "different particle indices did not address distinct RNG futures");
     require(drawOrderIdentity(anchor.bc) == anchorOrder,
             "sampling mutated the anchor simulator");
+}
+
+std::string selectedRootAction(const pybind11::dict &searchResult) {
+    const auto rows = searchResult["root_rows"].cast<pybind11::list>();
+    int selected = -1;
+    int bestVisits = -1;
+    for (int idx = 0; idx < static_cast<int>(rows.size()); ++idx) {
+        const auto row = rows[idx].cast<pybind11::dict>();
+        const auto visits = row["visits"].cast<int>();
+        if (visits > bestVisits) {
+            bestVisits = visits;
+            selected = idx;
+        }
+    }
+    require(selected >= 0, "root search returned no selectable action");
+    return rows[selected].cast<pybind11::dict>()["label"].cast<std::string>();
+}
+
+pybind11::dict publicEndTurnAction(StepSimulator &simulator) {
+    for (const auto &action : enumerateBattleActions(simulator.bc)) {
+        if (action.getActionType() == search::ActionType::END_TURN) {
+            return publicActionIdentity(makeBattleAction(simulator.bc, action));
+        }
+    }
+    throw std::runtime_error("supported public battle fixture has no end-turn action");
+}
+
+void requireEquivalentSampleFuture(
+        StepSimulator &lhs,
+        StepSimulator &rhs,
+        const std::string &caseName) {
+    require(equivalentSampleFutures(lhs, rhs),
+            caseName + " changed a canonical future, public root, or action ordering");
+}
+
+void verifySamplerIgnoresPrivateCountersAndDrawOrder() {
+    auto anchor = makePublicBattleFixture();
+    auto counterVaried = anchor;
+    incrementHiddenRandomCounters(counterVaried);
+    auto seedVaried = anchor;
+    changeHiddenRandomSeeds(seedVaried);
+    auto orderVaried = anchor;
+    std::reverse(orderVaried.bc.cards.drawPile.begin(),
+            orderVaried.bc.cards.drawPile.end());
+    auto allVaried = counterVaried;
+    changeHiddenRandomSeeds(allVaried);
+    std::reverse(allVaried.bc.cards.drawPile.begin(),
+            allVaried.bc.cards.drawPile.end());
+
+    const auto anchorState = anchor.publicBattleState();
+    require(anchorState.equal(counterVaried.publicBattleState())
+                    && anchorState.equal(seedVaried.publicBattleState())
+                    && anchorState.equal(orderVaried.publicBattleState())
+                    && anchorState.equal(allVaried.publicBattleState()),
+            "private-future fixtures do not share a public battle state");
+
+    constexpr std::uint64_t samplerSeed = 1701;
+    constexpr std::uint64_t particleIndex = 11;
+    auto canonical = anchor.samplePublicConsistentHiddenFuture(
+            samplerSeed, particleIndex);
+    auto canonicalCounters = counterVaried.samplePublicConsistentHiddenFuture(
+            samplerSeed, particleIndex);
+    auto canonicalSeeds = seedVaried.samplePublicConsistentHiddenFuture(
+            samplerSeed, particleIndex);
+    auto canonicalOrder = orderVaried.samplePublicConsistentHiddenFuture(
+            samplerSeed, particleIndex);
+    auto canonicalAll = allVaried.samplePublicConsistentHiddenFuture(
+            samplerSeed, particleIndex);
+    requireEquivalentSampleFuture(canonical, canonicalCounters,
+            "counter-varied sampler");
+    requireEquivalentSampleFuture(canonical, canonicalSeeds,
+            "seed-varied sampler");
+    requireEquivalentSampleFuture(canonical, canonicalOrder,
+            "draw-order-varied sampler");
+    requireEquivalentSampleFuture(canonical, canonicalAll,
+            "combined private-future sampler");
+
+    const auto canonicalSearch = canonical.battleSearchV2(192, false);
+    const auto alternateSearch = canonicalAll.battleSearchV2(192, false);
+    require(pybind11::cast<pybind11::list>(canonicalSearch["root_rows"])
+                    .equal(pybind11::cast<pybind11::list>(alternateSearch["root_rows"])),
+            "B=192 root action statistics or order depend on private anchor fields");
+    require(selectedRootAction(canonicalSearch) == selectedRootAction(alternateSearch),
+            "B=192 root action selection depends on private anchor fields");
+
+    for (int turn = 0; turn < 2; ++turn) {
+        const auto actionA = publicEndTurnAction(canonical);
+        const auto actionB = publicEndTurnAction(canonicalAll);
+        require(actionA.equal(actionB),
+                "equivalent public roots expose different end-turn actions");
+        const auto resultA = canonical.stepPublicAction(actionA);
+        const auto resultB = canonicalAll.stepPublicAction(actionB);
+        if (!resultA.equal(resultB)) {
+            const auto stateA = resultA["battle_state"].cast<pybind11::dict>();
+            const auto stateB = resultB["battle_state"].cast<pybind11::dict>();
+            for (const auto item : stateA) {
+                const auto key = item.first.cast<std::string>();
+                if (!item.second.equal(stateB[pybind11::str(key)])) {
+                    std::cerr << "transition difference " << key << ": "
+                              << pybind11::str(item.second).cast<std::string>()
+                              << " vs "
+                              << pybind11::str(stateB[pybind11::str(key)])
+                                      .cast<std::string>()
+                              << '\n';
+                }
+            }
+        }
+        require(resultA.equal(resultB),
+                "fixed public-action transitions diverged across equivalent particles");
+        if (!resultA.contains(pybind11::str("battle_state"))) {
+            break;
+        }
+    }
+
+    // Operative negative control: inject the private anchor RNG counter into
+    // the actual sampler seed, then run the same future-equivalence assertion
+    // used above. The assertion must reject the resulting particles.
+    const auto publicSeed = publicFutureParticleSeed(samplerSeed, particleIndex);
+    auto faultyA = anchor.samplePublicConsistentHiddenFutureFromParticleSeed(
+            splitMix64(publicSeed ^ static_cast<std::uint64_t>(
+                    anchor.bc.aiRng.counter)));
+    bool caughtPrivateDependence = false;
+    for (std::uint64_t counterDelta = 1; counterDelta <= 64; ++counterDelta) {
+        auto faultyAnchor = anchor;
+        faultyAnchor.bc.aiRng.counter += static_cast<std::int32_t>(counterDelta);
+        auto faultyB = faultyAnchor.samplePublicConsistentHiddenFutureFromParticleSeed(
+                splitMix64(publicSeed ^ static_cast<std::uint64_t>(
+                        faultyAnchor.bc.aiRng.counter)));
+        if (publicDrawOrder(faultyA) == publicDrawOrder(faultyB)) {
+            continue;
+        }
+        try {
+            requireEquivalentSampleFuture(
+                    faultyA, faultyB, "injected private-counter negative control");
+        } catch (const std::runtime_error &) {
+            caughtPrivateDependence = true;
+            break;
+        }
+    }
+    require(caughtPrivateDependence,
+            "future-equivalence tests did not catch injected anchor-counter dependence");
 }
 
 void verifySamplerPreservesKnownDrawConstraints() {
@@ -923,6 +1178,91 @@ void verifyPublicMonsterStatusTiming(
     }
 }
 
+void verifyLouseLatentProposalUsesOnlyPublicDamage() {
+    auto louseFirst = makePublicBattleFixture(
+            false, MonsterEncounter::TWO_LOUSE, 20);
+    auto louseSecond = louseFirst;
+    auto &firstLouse = louseFirst.bc.monsters.arr[0];
+    auto &secondLouse = louseSecond.bc.monsters.arr[0];
+    const auto nonAttackMove = firstLouse.id == MonsterId::GREEN_LOUSE
+            ? MMID::GREEN_LOUSE_SPIT_WEB : MMID::RED_LOUSE_GROW;
+    firstLouse.moveHistory[0] = nonAttackMove;
+    secondLouse.moveHistory[0] = nonAttackMove;
+    firstLouse.miscInfo = 6;
+    secondLouse.miscInfo = 8;
+    const auto nonAttackState = louseFirst.publicBattleState();
+    require(nonAttackState.equal(louseSecond.publicBattleState()),
+            "private louse-future fixtures do not have the same public battle state");
+    const auto nonAttackMonsters = nonAttackState["monsters"].cast<pybind11::list>();
+    const auto nonAttackSnapshot = nonAttackMonsters[0].cast<pybind11::dict>();
+    require(nonAttackSnapshot["move_base_damage"].is_none()
+                    && nonAttackSnapshot["move_damage_to_player"].is_none()
+                    && !nonAttackSnapshot.contains(pybind11::str("misc_info")),
+            "non-attacking Louse projection exposed its private bite parameter");
+
+    std::set<int> sampledBiteValues;
+    for (std::uint64_t particleIndex = 0; particleIndex < 96; ++particleIndex) {
+        auto firstParticle = louseFirst.samplePublicConsistentHiddenFuture(
+                1801, particleIndex);
+        auto secondParticle = louseSecond.samplePublicConsistentHiddenFuture(
+                1801, particleIndex);
+        require(firstParticle.bc.monsters.arr[0].miscInfo
+                        == secondParticle.bc.monsters.arr[0].miscInfo,
+                "same indexed Louse proposal depends on the anchor's private bite value");
+        const auto biteDamage = firstParticle.bc.monsters.arr[0].miscInfo;
+        require(biteDamage >= 6 && biteDamage <= 8,
+                "A20 Louse proposal sampled outside the native 6..8 range");
+        sampledBiteValues.insert(biteDamage);
+    }
+    require(sampledBiteValues.size() > 1,
+            "non-attacking Louse proposals collapsed genuine bite-damage uncertainty");
+
+    auto biteFirst = makePublicBattleFixture(
+            false, MonsterEncounter::TWO_LOUSE, 20);
+    auto biteSecond = biteFirst;
+    auto &knownBite = biteFirst.bc.monsters.arr[0];
+    auto &knownBiteAlternative = biteSecond.bc.monsters.arr[0];
+    const auto biteMove = knownBite.id == MonsterId::GREEN_LOUSE
+            ? MMID::GREEN_LOUSE_BITE : MMID::RED_LOUSE_BITE;
+    knownBite.moveHistory[0] = biteMove;
+    knownBiteAlternative.moveHistory[0] = biteMove;
+    knownBite.miscInfo = 6;
+    knownBiteAlternative.miscInfo = 8;
+    knownBite.strength = 2;
+    knownBiteAlternative.strength = 2;
+    knownBite.setHasStatus<MS::WEAK>();
+    knownBiteAlternative.setHasStatus<MS::WEAK>();
+    biteFirst.bc.player.buff<PS::INTANGIBLE>(1);
+    biteSecond.bc.player.buff<PS::INTANGIBLE>(1);
+    const auto biteState = biteFirst.publicBattleState();
+    require(biteState.equal(biteSecond.publicBattleState()),
+            "damage-modified Louse bite fixtures do not share a public root");
+    const auto biteMonsters = biteState["monsters"].cast<pybind11::list>();
+    const auto biteSnapshot = biteMonsters[0].cast<pybind11::dict>();
+    require(biteSnapshot["move_base_damage"].is_none()
+                    && biteSnapshot["move_damage_to_player"].cast<int>() == 1,
+            "Louse policy projection did not expose the modified damage while hiding its base");
+    auto sampledBite = biteFirst.samplePublicConsistentHiddenFuture(1802, 9);
+    auto sampledBiteAlternative = biteSecond.samplePublicConsistentHiddenFuture(1802, 9);
+    require(sampledBite.bc.monsters.arr[0].miscInfo
+                    == sampledBiteAlternative.bc.monsters.arr[0].miscInfo,
+            "modified visible bite damage did not produce an anchor-independent latent sample");
+    require(sampledBite.bc.monsters.arr[0].calculateDamageToPlayer(
+                            sampledBite.bc,
+                            sampledBite.bc.monsters.arr[0].miscInfo) == 1,
+            "sampled Louse latent value conflicts with public modified bite damage");
+
+    auto uniquelyObserved = makePublicBattleFixture(
+            false, MonsterEncounter::TWO_LOUSE, 20);
+    auto &uniqueLouse = uniquelyObserved.bc.monsters.arr[0];
+    uniqueLouse.moveHistory[0] = uniqueLouse.id == MonsterId::GREEN_LOUSE
+            ? MMID::GREEN_LOUSE_BITE : MMID::RED_LOUSE_BITE;
+    uniqueLouse.miscInfo = 7;
+    auto conditioned = uniquelyObserved.samplePublicConsistentHiddenFuture(1803, 4);
+    require(conditioned.bc.monsters.arr[0].miscInfo == 7,
+            "visible unmodified Louse bite damage did not condition the latent proposal");
+}
+
 void verifyPrivateMonsterFutureStillFailsClosed() {
     auto domeChomp = makePublicBattleFixture(true);
     auto domeThrash = domeChomp;
@@ -941,20 +1281,9 @@ void verifyPrivateMonsterFutureStillFailsClosed() {
     requireSamplerRejected(domeChomp, "Runic Dome sampler anchor");
     requireSamplerRejected(domeThrash, "Runic Dome alternate-intent anchor");
 
-    auto louseFirst = makePublicBattleFixture(false, MonsterEncounter::TWO_LOUSE);
-    auto louseSecond = louseFirst;
-    auto &firstLouse = louseFirst.bc.monsters.arr[0];
-    auto &secondLouse = louseSecond.bc.monsters.arr[0];
-    const auto nonAttackMove = firstLouse.id == MonsterId::GREEN_LOUSE
-            ? MMID::GREEN_LOUSE_SPIT_WEB : MMID::RED_LOUSE_GROW;
-    firstLouse.moveHistory[0] = nonAttackMove;
-    secondLouse.moveHistory[0] = nonAttackMove;
-    firstLouse.miscInfo = 5;
-    secondLouse.miscInfo = 7;
-    require(louseFirst.publicBattleState().equal(louseSecond.publicBattleState()),
-            "private louse-future fixtures do not have the same public battle state");
-    requireSamplerRejected(louseFirst, "private louse-future sampler anchor");
-    requireSamplerRejected(louseSecond, "alternate private louse-future sampler anchor");
+    auto darkling = makePublicBattleFixture(
+            false, MonsterEncounter::THREE_DARKLINGS, 20);
+    requireSamplerRejected(darkling, "unsupported private Darkling future");
 }
 
 void verifyPublicStatusTimingSemantics() {
@@ -1097,11 +1426,13 @@ int main() {
     verifyRunicDomeSuppressesMonsterIntent();
     verifyPublicActionIdentitiesExecute();
     verifyPublicConsistentSamplerDiversityAndReproducibility();
+    verifySamplerIgnoresPrivateCountersAndDrawOrder();
     verifySamplerPreservesKnownDrawConstraints();
     verifyGeneratedCardMembershipSurvivesPublicPileTransitions();
     verifyHiddenGeneratedIdentityRemainsFailClosedUntilObserved();
     verifyGeneratedCardIdentityIsRecordedInVisiblePiles();
     verifySamplerFailsClosedForUnsupportedFidelity();
+    verifyLouseLatentProposalUsesOnlyPublicDamage();
     verifyPrivateMonsterFutureStillFailsClosed();
     verifyPublicStatusTimingSemantics();
     verifyPublicStatusTimingStackingAndReapplication();

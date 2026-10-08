@@ -57,6 +57,18 @@ target_include_directories(test-public-noncombat-projection PUBLIC json/single_i
 target_include_directories(test-public-noncombat-projection PUBLIC bindings)
 target_link_libraries(test-public-noncombat-projection PRIVATE pybind11::embed)
 
+add_executable(study-issue24-natural-search EXCLUDE_FROM_ALL
+        apps/study_issue24_natural_search.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(study-issue24-natural-search PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE
+        PYBIND11_DETAILED_ERROR_MESSAGES)
+target_include_directories(study-issue24-natural-search PUBLIC include)
+target_include_directories(study-issue24-natural-search PUBLIC json/single_include)
+target_include_directories(study-issue24-natural-search PUBLIC bindings)
+target_link_libraries(study-issue24-natural-search PRIVATE pybind11::embed)
+
 execute_process(
         COMMAND git rev-parse --verify HEAD
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"

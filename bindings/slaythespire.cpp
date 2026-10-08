@@ -714,6 +714,17 @@ void appendPublicMonsterCounters(const Monster &monster, pybind11::dict &ret) {
     }
 }
 
+bool isLouse(const MonsterId id) {
+    return id == MonsterId::GREEN_LOUSE || id == MonsterId::RED_LOUSE;
+}
+
+bool isLouseBite(const Monster &monster) {
+    return (monster.id == MonsterId::GREEN_LOUSE
+                    && monster.moveHistory[0] == MMID::GREEN_LOUSE_BITE)
+            || (monster.id == MonsterId::RED_LOUSE
+                    && monster.moveHistory[0] == MMID::RED_LOUSE_BITE);
+}
+
 pybind11::dict publicMonsterSnapshot(const BattleContext &bc, int monsterIdx) {
     const auto &monster = bc.monsters.arr[monsterIdx];
     const auto knowledge = publicMonsterCounterKnowledge(bc, monster);
@@ -747,7 +758,18 @@ pybind11::dict publicMonsterSnapshot(const BattleContext &bc, int monsterIdx) {
                 monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
         ret["move_id"] = static_cast<int>(monster.moveHistory[0]);
         ret["last_move_id"] = static_cast<int>(monster.moveHistory[1]);
-        ret["move_base_damage"] = damage.damage;
+        if (isLouse(monster.id)) {
+            // Louse bite damage is public as the modified intent damage, but
+            // its private base parameter is not. Keep the latent value out of
+            // the policy-facing projection.
+            ret["move_base_damage"] = pybind11::none();
+            ret["move_damage_to_player"] = monster.isAttacking()
+                    ? pybind11::object(pybind11::int_(
+                            monster.calculateDamageToPlayer(bc, damage.damage)))
+                    : pybind11::object(pybind11::none());
+        } else {
+            ret["move_base_damage"] = damage.damage;
+        }
         ret["move_hits"] = damage.attackCount;
     }
     if (knowledge != PublicMonsterCounterKnowledge::MIXED_UNSUPPORTED) {
@@ -849,15 +871,17 @@ pybind11::dict publicProjectionActionSnapshot(const LightSpeedAction &action) {
     ret["idx2"] = action.idx2;
     ret["idx3"] = action.idx3;
     const auto bitsMarker = action.label.find("bits=");
-    if (bitsMarker == std::string::npos) {
-        ret["label"] = action.label;
-    } else {
+    if (action.scope == "battle" || bitsMarker != std::string::npos) {
+        // Native battle descriptions include CardInstance unique ids. Those
+        // ids are runtime bookkeeping, not public action identity.
         std::ostringstream publicLabel;
         publicLabel << action.scope << "." << action.kind
                     << " idx1=" << action.idx1
                     << " idx2=" << action.idx2
                     << " idx3=" << action.idx3;
         ret["label"] = publicLabel.str();
+    } else {
+        ret["label"] = action.label;
     }
     return ret;
 }
@@ -1342,8 +1366,42 @@ void reseedHiddenRandomStreams(
     std::uint64_t streamIndex = 0;
     ((streams = Random(
               splitMix64(particleSeed ^ domain
-                      ^ (0x9E3779B97F4A7C15ULL * ++streamIndex)),
-              std::max(0, streams.counter))), ...);
+                      ^ (0x9E3779B97F4A7C15ULL * ++streamIndex)))), ...);
+}
+
+std::vector<int> publicCompatibleLouseBiteDamageValues(
+        const BattleContext &bc,
+        const Monster &monster,
+        const pybind11::dict &publicMonster) {
+    const int minimum = bc.ascension >= 2 ? 6 : 5;
+    const int maximum = bc.ascension >= 2 ? 8 : 7;
+    std::vector<int> candidates;
+    if (!monster.isAlive() || !isLouseBite(monster)) {
+        for (int damage = minimum; damage <= maximum; ++damage) {
+            candidates.push_back(damage);
+        }
+        return candidates;
+    }
+
+    if (!publicMonster.contains(pybind11::str("move_damage_to_player"))
+            || publicMonster["move_damage_to_player"].is_none()) {
+        throw std::runtime_error(
+                "MONSTER_PRIVATE_COUNTER_UNSUPPORTED: current Louse bite has no public modified damage");
+    }
+    const auto observedDamage = publicMonster["move_damage_to_player"].cast<int>();
+    for (int damage = minimum; damage <= maximum; ++damage) {
+        auto candidate = monster;
+        candidate.miscInfo = damage;
+        const auto baseDamage = candidate.getMoveBaseDamage(bc).damage;
+        if (candidate.calculateDamageToPlayer(bc, baseDamage) == observedDamage) {
+            candidates.push_back(damage);
+        }
+    }
+    if (candidates.empty()) {
+        throw std::runtime_error(
+                "MONSTER_PRIVATE_COUNTER_UNSUPPORTED: public modified Louse bite damage has no legal native parameter");
+    }
+    return candidates;
 }
 
 struct StepSimulator {
@@ -1688,9 +1746,8 @@ struct StepSimulator {
         return state;
     }
 
-    StepSimulator samplePublicConsistentHiddenFuture(
-            const std::uint64_t samplerSeed,
-            const std::uint64_t particleIndex) const {
+    StepSimulator samplePublicConsistentHiddenFutureFromParticleSeed(
+            const std::uint64_t particleSeed) const {
         // This returns a full hidden simulator state to native callers only.
         // Do not expose it through pybind as an ordinary public observation.
         auto anchor = *this;
@@ -1718,15 +1775,14 @@ struct StepSimulator {
                         "public-consistent sampling cannot represent Hexaghost's hidden move-cycle counter");
             }
             if (publicMonsterCounterKnowledge(anchor.bc, monster)
-                    == PublicMonsterCounterKnowledge::PRIVATE_ONLY) {
+                            == PublicMonsterCounterKnowledge::PRIVATE_ONLY
+                    && !isLouse(monster.id)) {
                 throw std::runtime_error(
-                        "public-consistent sampling cannot represent private monster future counters");
+                        "MONSTER_PRIVATE_COUNTER_UNSUPPORTED: public-consistent sampling cannot represent this private monster future counter");
             }
         }
 
         StepSimulator particle = anchor;
-        const auto particleSeed = publicFutureParticleSeed(
-                samplerSeed, particleIndex);
         // This is a reproducible proposal distribution, not an exact posterior.
         java::Random drawOrderRandom(splitMix64(
                 particleSeed ^ 0x647261772d6f7264ULL));
@@ -1760,6 +1816,11 @@ struct StepSimulator {
                     freeCards.push_back(particle.bc.cards.drawPile[drawIdx]);
                 }
             }
+            std::sort(freeCards.begin(), freeCards.end(),
+                    [](const CardInstance &lhs, const CardInstance &rhs) {
+                        return publicDrawCardFaceKey(lhs)
+                                < publicDrawCardFaceKey(rhs);
+                    });
             java::Collections::shuffle(
                     freeCards.begin(), freeCards.end(), drawOrderRandom);
             for (std::size_t idx = 0; idx < freeIndices.size(); ++idx) {
@@ -1830,12 +1891,40 @@ struct StepSimulator {
                 particle.bc.miscRng, particle.bc.monsterHpRng,
                 particle.bc.potionRng, particle.bc.shuffleRng);
 
+        particle.gc.seed = splitMix64(
+                particleSeed ^ 0x7075626c69632d67ULL);
+        particle.bc.seed = splitMix64(
+                particleSeed ^ 0x7075626c69632d62ULL);
+
+        const auto publicMonsters = anchorPublicState["monsters"].cast<pybind11::list>();
+        for (int idx = 0; idx < particle.bc.monsters.monsterCount; ++idx) {
+            auto &monster = particle.bc.monsters.arr[idx];
+            if (!isLouse(monster.id)) {
+                continue;
+            }
+            const auto publicMonster = publicMonsters[idx].cast<pybind11::dict>();
+            const auto candidates = publicCompatibleLouseBiteDamageValues(
+                    anchor.bc, anchor.bc.monsters.arr[idx], publicMonster);
+            Random latentRng(splitMix64(
+                    particleSeed ^ 0x6c6f7573652d6c61ULL
+                    ^ static_cast<std::uint64_t>(idx)));
+            monster.miscInfo = candidates[static_cast<std::size_t>(
+                    latentRng.random(static_cast<int>(candidates.size()) - 1))];
+        }
+
         const auto particlePublicState = particle.publicBattleState();
         if (!anchorPublicState.equal(particlePublicState)) {
             throw std::logic_error(
                     "sampled hidden future changed the anchor's public battle state");
         }
         return particle;
+    }
+
+    StepSimulator samplePublicConsistentHiddenFuture(
+            const std::uint64_t samplerSeed,
+            const std::uint64_t particleIndex) const {
+        return samplePublicConsistentHiddenFutureFromParticleSeed(
+                publicFutureParticleSeed(samplerSeed, particleIndex));
     }
 
     pybind11::dict stepPublicAction(const pybind11::dict &identity) {

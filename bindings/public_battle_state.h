@@ -36,6 +36,15 @@ pybind11::dict publicDrawCardFace(const CardInstance &card) {
     return ret;
 }
 
+using PublicDrawCardFaceKey = std::tuple<int, bool, int, bool, int>;
+
+PublicDrawCardFaceKey publicDrawCardFaceKey(const CardInstance &card) {
+    const bool hasSpecialData = card.usesSpecialData();
+    return {static_cast<int>(card.getId()), card.isUpgraded(),
+            card.getUpgradeCount(), hasSpecialData,
+            hasSpecialData ? card.specialData : 0};
+}
+
 bool drawPilePublicMembershipKnown(const GameContext &gc, const BattleContext &bc) {
     for (const auto &card : bc.cards.drawPile) {
         const auto uniqueId = static_cast<int>(card.getUniqueId());
@@ -54,13 +63,9 @@ bool drawPilePublicMembershipKnown(const GameContext &gc, const BattleContext &b
 }
 
 pybind11::list drawPilePublicMultiset(const BattleContext &bc) {
-    using DrawPileFace = std::tuple<int, bool, int, bool, int>;
-    std::map<DrawPileFace, int> counts;
+    std::map<PublicDrawCardFaceKey, int> counts;
     for (const auto &card : bc.cards.drawPile) {
-        const bool hasSpecialData = card.usesSpecialData();
-        ++counts[{static_cast<int>(card.getId()), card.isUpgraded(),
-                card.getUpgradeCount(), hasSpecialData,
-                hasSpecialData ? card.specialData : 0}];
+        ++counts[publicDrawCardFaceKey(card)];
     }
     pybind11::list ret;
     for (const auto &[face, count] : counts) {
