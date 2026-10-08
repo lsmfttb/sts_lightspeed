@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import select
+import signal
 import subprocess
 import sys
 import time
@@ -1201,6 +1202,163 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     os.replace(temp, path)
 
 
+def _read_progress(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _progress_seed(progress: Mapping[str, Any]) -> int | None:
+    details = _field(progress.get("details"))
+    seed = details.get("seed")
+    if isinstance(seed, int) and not isinstance(seed, bool):
+        return seed
+    boundary = progress.get("last_completed_boundary")
+    if isinstance(boundary, str) and boundary.startswith("seed"):
+        prefix = boundary.partition("_")[0][4:]
+        if prefix.isdigit():
+            return int(prefix)
+    return None
+
+
+def _kill_process_tree(process: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    else:
+        try:
+            result = subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            result = None
+        if result is None or result.returncode != 0:
+            process.kill()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def _supervise_process(
+    command: Sequence[str],
+    *,
+    progress_path: Path,
+    max_wall_seconds: float,
+) -> dict[str, Any]:
+    """Run the study in a killable process group with a per-seed hard deadline."""
+
+    progress_path = progress_path.resolve()
+    started = time.monotonic()
+    popen_options: dict[str, Any] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": None,
+    }
+    if os.name == "posix":
+        popen_options["start_new_session"] = True
+    elif os.name == "nt":
+        popen_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    # Keep the child attached to the caller's stderr so diagnostics remain visible.
+    process = subprocess.Popen(command, **popen_options)
+    active_seed: int | None = None
+    active_seed_started: float | None = None
+    completed_seeds: set[int] = set()
+    between_seeds_started: float | None = None
+    last_seen_progress: dict[str, Any] = {}
+    while True:
+        now = time.monotonic()
+        progress = _read_progress(progress_path)
+        if progress and progress != last_seen_progress:
+            boundary = progress.get("last_completed_boundary")
+            seed = _progress_seed(progress)
+            if boundary == "seed_run_starting" and seed is not None:
+                if active_seed != seed:
+                    if active_seed is not None:
+                        completed_seeds.add(active_seed)
+                    active_seed = seed
+                    active_seed_started = now
+                    between_seeds_started = None
+            elif boundary == "seed_run_complete" and seed is not None:
+                completed_seeds.add(seed)
+                if active_seed == seed:
+                    active_seed = None
+                    active_seed_started = None
+                between_seeds_started = now
+            elif active_seed is None and seed is not None and seed not in completed_seeds:
+                # Recover the current run if polling skipped its start checkpoint.
+                active_seed = seed
+                active_seed_started = now
+                between_seeds_started = None
+            last_seen_progress = progress
+
+        return_code = process.poll()
+        if return_code is not None:
+            return {
+                "returncode": return_code,
+                "timed_out": False,
+                "elapsed_seconds": max(0.0, now - started),
+            }
+
+        if active_seed is not None and active_seed_started is not None:
+            deadline = active_seed_started + max_wall_seconds
+            timeout_seed: int | None = active_seed
+        elif completed_seeds and len(completed_seeds) < len(GAME_SEEDS):
+            idle_started = between_seeds_started or started
+            deadline = idle_started + max_wall_seconds
+            timeout_seed = None
+        elif completed_seeds and len(completed_seeds) >= len(GAME_SEEDS):
+            deadline = (between_seeds_started or started) + max_wall_seconds
+            timeout_seed = None
+        else:
+            deadline = started + max_wall_seconds
+            timeout_seed = None
+
+        remaining = deadline - now
+        if remaining <= 0:
+            _kill_process_tree(process)
+            last_progress = _read_progress(progress_path)
+            previous_boundary = last_progress.get("last_completed_boundary")
+            previous_details = _field(last_progress.get("details"))
+            last_progress.update(
+                {
+                    "status": "timed_out",
+                    "supervisor_timeout": {
+                        "stop_classification": "WALL_BUDGET",
+                        "scope": "per_seed" if timeout_seed is not None else "study_startup_or_finalization",
+                        "seed": timeout_seed,
+                        "limit_seconds": max_wall_seconds,
+                        "elapsed_seconds": round(now - (active_seed_started or started), 6),
+                        "terminated_process_tree": True,
+                        "last_completed_boundary": previous_boundary,
+                        "last_completed_details": previous_details,
+                    },
+                }
+            )
+            if not last_progress.get("schema_id"):
+                last_progress["schema_id"] = "issue25-run-progress-v1"
+            _atomic_json(progress_path, last_progress)
+            return {
+                "returncode": process.returncode,
+                "timed_out": True,
+                "seed": timeout_seed,
+                "elapsed_seconds": round(now - (active_seed_started or started), 6),
+                "last_completed_boundary": previous_boundary,
+            }
+        try:
+            process.wait(timeout=min(0.05, remaining))
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def _summarize_run(
     run: Any,
     controller: FirewalledController,
@@ -1558,13 +1716,52 @@ def _summarize_run(
     }
 
 
+def _run_supervised_study(args: argparse.Namespace) -> int:
+    output_path = args.output.resolve()
+    progress_path = output_path.with_name(output_path.stem + ".progress.json")
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--st-srl-root",
+        str(args.st_srl_root.resolve()),
+        "--build-dir",
+        str(args.build_dir.resolve()),
+        "--native-search",
+        str(args.native_search.resolve()),
+        "--output",
+        str(output_path),
+        "--_supervised-child",
+    ]
+    result = _supervise_process(
+        command,
+        progress_path=progress_path,
+        max_wall_seconds=MAX_RUN_SECONDS,
+    )
+    if result["timed_out"]:
+        print(
+            "WALL_BUDGET: outer supervisor terminated the study process tree "
+            f"after {result['elapsed_seconds']:.3f}s; seed={result['seed']}, "
+            f"last_completed_boundary={result['last_completed_boundary']}",
+            file=sys.stderr,
+        )
+        return 124
+    if result["returncode"] != 0:
+        return int(result["returncode"])
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--st-srl-root", type=Path, required=True)
     parser.add_argument("--build-dir", type=Path, default=Path("build-issue25"))
     parser.add_argument("--native-search", type=Path, default=Path("build-issue25/study-issue24-natural-search"))
     parser.add_argument("--output", type=Path, default=Path("studies/issue25/result.json"))
+    parser.add_argument("--_supervised-child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if not args._supervised_child:
+        return _run_supervised_study(args)
     st_srl_root = args.st_srl_root.resolve()
     build_dir = args.build_dir.resolve()
     native_search = args.native_search.resolve()
@@ -1682,6 +1879,7 @@ def main() -> int:
         # Preserve the exact seeded ExpertNonCombatDriver configuration from
         # Issue #22 so both natural runs follow the cited four-decision path.
         driver_seed = DRIVER_SEED
+        seed_run_started = time.monotonic()
         journal.checkpoint("seed_run_starting", seed=game_seed, driver_seed=driver_seed)
         worker = PolicyWorker(
             Path(__file__).with_name("policy_worker.py"),
@@ -1730,6 +1928,7 @@ def main() -> int:
             native_search=native_search,
             ascension=ASCENSION,
         )
+        controller.run_started = seed_run_started
 
         def after_transition(step: Any) -> None:
             mapping = adapter.mapping_trace[-1] if adapter.mapping_trace else {}
@@ -1843,7 +2042,7 @@ def main() -> int:
         "The result is a two-seed reachability and coverage diagnostic; it does not establish broad A20 performance or a general posterior model.",
         "Unsupported Runic Dome intents, Darkling private damage, and unrepresented Hexaghost move-cycle state remain fail-closed.",
         "Insertion states with known top prefixes, baseline anchors, before-anchor relations, or unrepresented draw-card runtime changes remain fail-closed.",
-        "The 180-second guard bounds policy-worker and native-search subprocess calls and stops at the next controlled transition boundary; a synchronous simulator transition cannot be interrupted mid-call.",
+        "An outer process-group supervisor enforces a 180-second per-seed hard deadline and records the last atomic progress checkpoint before terminating a hung reset or simulator transition; the in-controller wall checks remain an early cooperative stop.",
     ]
     noncombat_gap_screens = list(dict.fromkeys(
         summary["stop_screen"]
@@ -1889,6 +2088,8 @@ def main() -> int:
         "fixed_budget": {
             "max_decisions_per_run": MAX_DECISIONS,
             "max_wall_seconds_per_run": MAX_RUN_SECONDS,
+            "outer_supervisor_enforced": True,
+            "outer_supervisor_termination": "terminate runner process tree at per-seed deadline",
             "native_decision_timeout_seconds": NATIVE_DECISION_TIMEOUT,
             "search_simulations_per_actual_first_battle_decision": 192,
             "particle_count": 32,
@@ -1970,7 +2171,7 @@ def main() -> int:
             "",
             f"Causal next action: {causal_next_action}",
             "",
-            f"Each fixed seed is capped at {MAX_DECISIONS} controller decisions and {MAX_RUN_SECONDS:.0f} seconds. The unsupported Shop fixture passed with no policy callback or selected action; it is excluded from natural-run progress. Search counts as executed only if native root replay, the 32-particle public-consistent sampler, anchor invariance, and fixed B=192 search all complete.",
+            f"Each fixed seed is capped at {MAX_DECISIONS} controller decisions and {MAX_RUN_SECONDS:.0f} seconds. An outer supervisor kills the runner process tree at the per-seed wall deadline and preserves the last atomic checkpoint in `result.progress.json`; the completion report is not rewritten after a timeout. The unsupported Shop fixture passed with no policy callback or selected action; it is excluded from natural-run progress. Search counts as executed only if native root replay, the 32-particle public-consistent sampler, anchor invariance, and fixed B=192 search all complete.",
             "",
             "The sampler law is a public-consistent proposal Q, not an exact posterior. This study stays disposable until independent review; any core promotion is a separate decision.",
             "",
