@@ -265,6 +265,7 @@ SearchResult searchDecision(
     double publicProjectionAndKeySeconds = 0.0;
     double treeSelectionSeconds = 0.0;
     double nativeTransitionSeconds = 0.0;
+    const auto rootStateKey = canonicalJson(rootState);
 
     for (int simulation = 0; simulation < budget; ++simulation) {
         const auto particleIndex = static_cast<std::uint64_t>(simulation % kParticleCount);
@@ -274,11 +275,12 @@ SearchResult searchDecision(
                 Clock::now() - samplerStart).count();
         const auto projectionStart = Clock::now();
         auto state = particle.publicBattleState();
-        if (canonicalJson(state) != canonicalJson(rootState)) {
+        const auto stateKey = canonicalJson(state);
+        if (stateKey != rootStateKey) {
             throw std::logic_error("sampled particle did not preserve the decision public root");
         }
 
-        std::vector<std::string> history{canonicalJson(state)};
+        std::vector<std::string> history{stateKey};
         publicProjectionAndKeySeconds += std::chrono::duration<double>(
                 Clock::now() - projectionStart).count();
         std::vector<std::pair<std::string, std::size_t>> path;
@@ -1859,7 +1861,9 @@ int main(int argc, char **argv) {
             throw std::runtime_error("failed writing study evidence output: " + outputPath);
         }
         std::remove(progressPath.c_str());
-        std::cout << "ISSUE17_PROSPECTIVE_PUBLIC_SEARCH_STUDY_PASS\n";
+        std::cout << (issue18Profile
+                ? "ISSUE18_PUBLIC_SEARCH_COST_PROFILE_PASS\n"
+                : "ISSUE17_PROSPECTIVE_PUBLIC_SEARCH_STUDY_PASS\n");
         std::cout << "runs=" << attempts.size()
                   << " elite_starts=" << reachedStarts
                   << " setup_failures=" << setupFailures << '\n';
