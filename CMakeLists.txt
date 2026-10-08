@@ -45,3 +45,25 @@ target_include_directories(test-public-battle-state-semantics PUBLIC include)
 target_include_directories(test-public-battle-state-semantics PUBLIC json/single_include)
 target_include_directories(test-public-battle-state-semantics PUBLIC bindings)
 target_link_libraries(test-public-battle-state-semantics PRIVATE pybind11::embed)
+
+add_executable(study-issue17-public-comparator-qualification EXCLUDE_FROM_ALL
+        apps/study_issue17_public_comparator_qualification.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(study-issue17-public-comparator-qualification PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(study-issue17-public-comparator-qualification PUBLIC include)
+target_include_directories(study-issue17-public-comparator-qualification PUBLIC json/single_include)
+target_include_directories(study-issue17-public-comparator-qualification PUBLIC bindings)
+target_link_libraries(study-issue17-public-comparator-qualification PRIVATE pybind11::embed)
+
+add_executable(study-issue17-prospective-comparison EXCLUDE_FROM_ALL
+        apps/study_issue17_prospective_public_comparison.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(study-issue17-prospective-comparison PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(study-issue17-prospective-comparison PUBLIC include)
+target_include_directories(study-issue17-prospective-comparison PUBLIC json/single_include)
+target_include_directories(study-issue17-prospective-comparison PUBLIC bindings)
+target_link_libraries(study-issue17-prospective-comparison PRIVATE pybind11::embed)
