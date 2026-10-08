@@ -1,0 +1,119 @@
+{
+  "ascension": 20,
+  "battle_candidate_count": 9,
+  "battle_fidelity": "supported",
+  "candidate_order_matches_legal_actions": true,
+  "character": "IRONCLAD",
+  "diagnostic_prelude": "first legal native action at each public screen; mechanics probe only",
+  "distinct_hidden_future_found": true,
+  "distinct_particle_index": 1,
+  "interpretation": "battle public projection is invariant across sampled hidden draw orders; noncombat screen payload gaps are evaluated separately",
+  "native_base_commit": "ab2b11bc3b5b6c6b68d9d855bc9545e9aca62a28",
+  "noncombat_screen_samples": [
+    {
+      "candidate_labels": [
+        "game.event idx1=0 idx2=0 idx3=0",
+        "game.event idx1=1 idx2=0 idx3=0",
+        "game.event idx1=2 idx2=0 idx3=0",
+        "game.event idx1=3 idx2=0 idx3=0"
+      ],
+      "current_map_node": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "immediately_legal_routes": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "screen": "EVENT_SCREEN",
+      "screen_payload": {
+        "availability": "unsupported",
+        "reason": "screen-specific payloads are not exposed by this patch"
+      },
+      "visible_map_graph": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      }
+    },
+    {
+      "candidate_labels": [
+        "game.reward_card idx1=0 idx2=0 idx3=0",
+        "game.reward_card idx1=0 idx2=1 idx3=0",
+        "game.reward_card idx1=0 idx2=2 idx3=0",
+        "game.skip idx1=0 idx2=0 idx3=0"
+      ],
+      "current_map_node": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "immediately_legal_routes": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "screen": "REWARDS",
+      "screen_payload": {
+        "availability": "unsupported",
+        "reason": "screen-specific payloads are not exposed by this patch"
+      },
+      "visible_map_graph": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      }
+    },
+    {
+      "candidate_labels": [
+        "game.skip idx1=0 idx2=0 idx3=0"
+      ],
+      "current_map_node": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "immediately_legal_routes": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "screen": "REWARDS",
+      "screen_payload": {
+        "availability": "unsupported",
+        "reason": "screen-specific payloads are not exposed by this patch"
+      },
+      "visible_map_graph": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      }
+    },
+    {
+      "candidate_labels": [
+        "game.map idx1=1 idx2=0 idx3=0",
+        "game.map idx1=2 idx2=0 idx3=0",
+        "game.map idx1=3 idx2=0 idx3=0",
+        "game.map idx1=5 idx2=0 idx3=0"
+      ],
+      "current_map_node": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "immediately_legal_routes": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      },
+      "screen": "MAP_SCREEN",
+      "screen_payload": {
+        "availability": "unsupported",
+        "reason": "screen-specific payloads are not exposed by this patch"
+      },
+      "visible_map_graph": {
+        "availability": "unavailable",
+        "reason": "not provided by the current simulator interface"
+      }
+    }
+  ],
+  "opaque_action_bits_in_public_candidates": false,
+  "outcome_claim": "none",
+  "prelude_steps_to_battle": 4,
+  "public_battle_state_equal": true,
+  "public_projection_equal": true,
+  "public_projection_schema": "native-public-projection-v2",
+  "schema_id": "issue19-public-boundary-smoke-v1",
+  "seed": 49
+}

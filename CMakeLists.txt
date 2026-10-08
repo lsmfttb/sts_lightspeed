@@ -45,3 +45,14 @@ target_include_directories(test-public-battle-state-semantics PUBLIC include)
 target_include_directories(test-public-battle-state-semantics PUBLIC json/single_include)
 target_include_directories(test-public-battle-state-semantics PUBLIC bindings)
 target_link_libraries(test-public-battle-state-semantics PRIVATE pybind11::embed)
+
+add_executable(test-issue19-public-boundary EXCLUDE_FROM_ALL
+        apps/test_issue19_public_boundary.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(test-issue19-public-boundary PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(test-issue19-public-boundary PUBLIC include)
+target_include_directories(test-issue19-public-boundary PUBLIC json/single_include)
+target_include_directories(test-issue19-public-boundary PUBLIC bindings)
+target_link_libraries(test-issue19-public-boundary PRIVATE pybind11::embed)
