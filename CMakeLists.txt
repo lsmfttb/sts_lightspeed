@@ -45,3 +45,14 @@ target_include_directories(test-public-battle-state-semantics PUBLIC include)
 target_include_directories(test-public-battle-state-semantics PUBLIC json/single_include)
 target_include_directories(test-public-battle-state-semantics PUBLIC bindings)
 target_link_libraries(test-public-battle-state-semantics PRIVATE pybind11::embed)
+
+add_executable(study-issue16-prospective-corrected-comparison EXCLUDE_FROM_ALL
+        apps/study_issue16_prospective_corrected_comparison.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(study-issue16-prospective-corrected-comparison PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(study-issue16-prospective-corrected-comparison PUBLIC include)
+target_include_directories(study-issue16-prospective-corrected-comparison PUBLIC json/single_include)
+target_include_directories(study-issue16-prospective-corrected-comparison PUBLIC bindings)
+target_link_libraries(study-issue16-prospective-corrected-comparison PRIVATE pybind11::embed)
