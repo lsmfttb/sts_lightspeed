@@ -18,6 +18,8 @@
     "max_decisions_per_run": 96,
     "max_wall_seconds_per_run": 180.0,
     "native_decision_timeout_seconds": 180.0,
+    "outer_supervisor_enforced": true,
+    "outer_supervisor_termination": "terminate runner process tree at per-seed deadline",
     "particle_count": 32,
     "sampler_seed": "0x6e6f726d70756231",
     "search_seed": "0x7368617265647472",
@@ -29,7 +31,7 @@
     "The result is a two-seed reachability and coverage diagnostic; it does not establish broad A20 performance or a general posterior model.",
     "Unsupported Runic Dome intents, Darkling private damage, and unrepresented Hexaghost move-cycle state remain fail-closed.",
     "Insertion states with known top prefixes, baseline anchors, before-anchor relations, or unrepresented draw-card runtime changes remain fail-closed.",
-    "The 180-second guard bounds policy-worker and native-search subprocess calls and stops at the next controlled transition boundary; a synchronous simulator transition cannot be interrupted mid-call."
+    "An outer process-group supervisor enforces a 180-second per-seed hard deadline and records the last atomic progress checkpoint before terminating a hung reset or simulator transition; the in-controller wall checks remain an early cooperative stop."
   ],
   "outcomes": [
     "NATURAL_PUBLIC_SEARCH_EXECUTED",
@@ -75,7 +77,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.2332591879999768,
+          "controller_callback_wall_seconds": 0.26029176800000187,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -90,7 +92,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "EVENT_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -109,7 +111,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.00557404999997857,
+          "controller_callback_wall_seconds": 0.004933983000000808,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -124,7 +126,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -143,7 +145,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.00422639000001368,
+          "controller_callback_wall_seconds": 0.005026509000003898,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -158,7 +160,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -177,7 +179,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.00768994000000589,
+          "controller_callback_wall_seconds": 0.00766923499998029,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -192,7 +194,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -218,7 +220,7 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 5,
-          "controller_callback_wall_seconds": 2.938665571999991,
+          "controller_callback_wall_seconds": 3.4904492990000335,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": {
@@ -363,7 +365,7 @@
             "tree_key_source": "public state and public action/result history only",
             "truncated_rollouts": 0
           },
-          "native_backend_wall_seconds": 2.9364959910000152,
+          "native_backend_wall_seconds": 3.4846586600000364,
           "native_private_anchor_counter_fault_changed_public_transition": true,
           "native_public_sample_pool_equal": true,
           "native_root_candidate_count": 9,
@@ -399,12 +401,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 5,
-          "controller_callback_wall_seconds": 0.048860433000015746,
+          "controller_callback_wall_seconds": 0.0717145709999727,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.04758558500000731,
+          "native_backend_wall_seconds": 0.07040930599998774,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 7,
@@ -440,12 +442,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.05007066400000326,
+          "controller_callback_wall_seconds": 0.05734526300000198,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.04884432699998342,
+          "native_backend_wall_seconds": 0.056102364999958354,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 3,
@@ -481,12 +483,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.04791125200000579,
+          "controller_callback_wall_seconds": 0.0616998530000501,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.04666940599997815,
+          "native_backend_wall_seconds": 0.06030515100002276,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -522,12 +524,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 5,
-          "controller_callback_wall_seconds": 0.048953041000004305,
+          "controller_callback_wall_seconds": 0.0675449539999704,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.047030935999998746,
+          "native_backend_wall_seconds": 0.06573196499999767,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 8,
@@ -563,12 +565,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.04710581199998387,
+          "controller_callback_wall_seconds": 0.06194012999998222,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.04574833800000988,
+          "native_backend_wall_seconds": 0.06052588000000014,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -604,12 +606,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.046218419000013,
+          "controller_callback_wall_seconds": 0.061376219000010224,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.044990928999993685,
+          "native_backend_wall_seconds": 0.059617430999992393,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -645,12 +647,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.04991486499997677,
+          "controller_callback_wall_seconds": 0.0661765790000004,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.048235145000006696,
+          "native_backend_wall_seconds": 0.06457655899998826,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 6,
@@ -679,7 +681,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.007414495999995552,
+          "controller_callback_wall_seconds": 0.015601828000001206,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -694,7 +696,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -713,7 +715,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.008267085999989376,
+          "controller_callback_wall_seconds": 0.009115951999945082,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -728,7 +730,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -747,7 +749,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.008000171999981376,
+          "controller_callback_wall_seconds": 0.00885677499996973,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -762,7 +764,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -781,7 +783,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.008947231000007605,
+          "controller_callback_wall_seconds": 0.01736579100003155,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -796,7 +798,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -815,7 +817,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.0076127499999927295,
+          "controller_callback_wall_seconds": 0.008391731000017444,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -830,7 +832,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -849,7 +851,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.009651783999998997,
+          "controller_callback_wall_seconds": 0.01270929800000431,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -864,7 +866,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -890,12 +892,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 4,
-          "controller_callback_wall_seconds": 0.05142214599999306,
+          "controller_callback_wall_seconds": 0.06262535500002286,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.0491460840000002,
+          "native_backend_wall_seconds": 0.05903135400001247,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 6,
@@ -931,12 +933,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 4,
-          "controller_callback_wall_seconds": 0.052963545000011436,
+          "controller_callback_wall_seconds": 0.08691182699999445,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.050953194000015856,
+          "native_backend_wall_seconds": 0.08344474399996216,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -972,12 +974,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.055956347000005735,
+          "controller_callback_wall_seconds": 0.06609682399999883,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05407873400000085,
+          "native_backend_wall_seconds": 0.06304813999997805,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 3,
@@ -1013,12 +1015,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.051890873000019155,
+          "controller_callback_wall_seconds": 0.06136991300002137,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05028657500000122,
+          "native_backend_wall_seconds": 0.05942148100001532,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -1054,12 +1056,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 3,
-          "controller_callback_wall_seconds": 0.05515812400000186,
+          "controller_callback_wall_seconds": 0.06190127200000006,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05335302899999306,
+          "native_backend_wall_seconds": 0.05974272100002054,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -1095,12 +1097,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.0599291380000011,
+          "controller_callback_wall_seconds": 0.06378964499998574,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.057743641000001844,
+          "native_backend_wall_seconds": 0.060933733000013035,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -1136,12 +1138,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.05747977100000412,
+          "controller_callback_wall_seconds": 0.06978316900000436,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05561916199999928,
+          "native_backend_wall_seconds": 0.06704468200001656,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -1177,12 +1179,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 4,
-          "controller_callback_wall_seconds": 0.056495810000001256,
+          "controller_callback_wall_seconds": 0.0617112259999999,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05252259499999923,
+          "native_backend_wall_seconds": 0.057597797999960676,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 6,
@@ -1211,7 +1213,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.011056665999973347,
+          "controller_callback_wall_seconds": 0.011124566000034974,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1226,7 +1228,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1245,7 +1247,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.012174909000009393,
+          "controller_callback_wall_seconds": 0.014811702000031346,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1260,7 +1262,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1279,7 +1281,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.012762799000000769,
+          "controller_callback_wall_seconds": 0.012418027000023812,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1294,7 +1296,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1313,7 +1315,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.011493266999991647,
+          "controller_callback_wall_seconds": 0.012591515999986314,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1328,7 +1330,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1347,7 +1349,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.014536660000004531,
+          "controller_callback_wall_seconds": 0.01848473100000092,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1362,7 +1364,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1388,12 +1390,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.06012097600000743,
+          "controller_callback_wall_seconds": 0.0759357719999798,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.055802483000007896,
+          "native_backend_wall_seconds": 0.07308080100000325,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 16,
@@ -1429,12 +1431,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 3,
-          "controller_callback_wall_seconds": 0.06172205499998995,
+          "controller_callback_wall_seconds": 0.06891919899999266,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05912994899998125,
+          "native_backend_wall_seconds": 0.06552320000002965,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 11,
@@ -1470,12 +1472,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.06326860599997985,
+          "controller_callback_wall_seconds": 0.06871561099995915,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06046789699999522,
+          "native_backend_wall_seconds": 0.06495519699996066,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 10,
@@ -1511,12 +1513,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.06203502799999683,
+          "controller_callback_wall_seconds": 0.0667078739999738,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.059488225999984934,
+          "native_backend_wall_seconds": 0.06366708399997378,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 7,
@@ -1552,12 +1554,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.061845083999997996,
+          "controller_callback_wall_seconds": 0.07021641400001499,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.058641077000004316,
+          "native_backend_wall_seconds": 0.06677272499996434,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 11,
@@ -1593,12 +1595,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06763249000002247,
+          "controller_callback_wall_seconds": 0.07374328299999888,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06457630200000608,
+          "native_backend_wall_seconds": 0.0702114299999721,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 10,
@@ -1627,7 +1629,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.017843773000009833,
+          "controller_callback_wall_seconds": 0.01659865300001684,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1642,7 +1644,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1661,7 +1663,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.01628781900001286,
+          "controller_callback_wall_seconds": 0.016939253999964876,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1676,7 +1678,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1695,7 +1697,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.015202173999995239,
+          "controller_callback_wall_seconds": 0.01610867900001267,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1710,7 +1712,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1729,7 +1731,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.01629415700000436,
+          "controller_callback_wall_seconds": 0.016317173999993884,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1744,7 +1746,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -1763,7 +1765,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.01745699399998557,
+          "controller_callback_wall_seconds": 0.01881453800001509,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -1778,7 +1780,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 461,
+          "policy_worker_pid": 464,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -2109,7 +2111,7 @@
           "scope": "battle"
         },
         "baseline_public_ordinal": 5,
-        "controller_callback_wall_seconds": 2.938665571999991,
+        "controller_callback_wall_seconds": 3.4904492990000335,
         "controller_decision_completed": true,
         "coverage_status": "supported",
         "native_anchor_invariance": {
@@ -2254,7 +2256,7 @@
           "tree_key_source": "public state and public action/result history only",
           "truncated_rollouts": 0
         },
-        "native_backend_wall_seconds": 2.9364959910000152,
+        "native_backend_wall_seconds": 3.4846586600000364,
         "native_private_anchor_counter_fault_changed_public_transition": true,
         "native_public_sample_pool_equal": true,
         "native_root_candidate_count": 9,
@@ -2287,7 +2289,7 @@
         "native_public_action_steps": 2551,
         "particles": 32,
         "simulations": 192,
-        "wall_seconds": 2.9364959910000152
+        "wall_seconds": 3.4846586600000364
       },
       "first_battle_search_executed": true,
       "first_meaningful_blocker": "PUBLIC_NONCOMBAT_COVERAGE_GAP screen=SHOP_ROOM field=screen_payload.coverage_status source=StepSimulator::publicProjection screen coverage and choices value=unsupported reason=shop choice coverage is not part of this capability",
@@ -2307,7 +2309,7 @@
       "public_history_count": 42,
       "public_sample_pool_equal": true,
       "raw_stop_detail": "PUBLIC_NONCOMBAT_COVERAGE_GAP screen=SHOP_ROOM field=screen_payload.coverage_status source=StepSimulator::publicProjection screen coverage and choices value=unsupported reason=shop choice coverage is not part of this capability",
-      "run_wall_seconds": 6.126367,
+      "run_wall_seconds": 7.180095,
       "screens_with_policy_decisions": {
         "BATTLE": 22,
         "EVENT_SCREEN": 1,
@@ -2328,7 +2330,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.233259
+              "value": 0.260292
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -2613,7 +2615,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.238833
+              "value": 0.265226
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -2910,7 +2912,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.24306
+              "value": 0.270252
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -3075,7 +3077,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.25075
+              "value": 0.277921
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -4046,12 +4048,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.189415
+              "value": 3.768371
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 2.936496
+              "value": 3.484659
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -4396,12 +4398,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.238276
+              "value": 3.840085
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 2.984082
+              "value": 3.555068
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -4698,12 +4700,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.288346
+              "value": 3.897431
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.032926
+              "value": 3.61117
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -4904,12 +4906,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.336257
+              "value": 3.95913
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.079595
+              "value": 3.671475
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -5062,12 +5064,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.385211
+              "value": 4.026675
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.126626
+              "value": 3.737207
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -5388,12 +5390,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.432316
+              "value": 4.088616
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.172375
+              "value": 3.797733
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -5618,12 +5620,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.478535
+              "value": 4.149992
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.217366
+              "value": 3.857351
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -5776,12 +5778,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.52845
+              "value": 4.216168
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.265601
+              "value": 3.921927
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -6054,12 +6056,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.535864
+              "value": 4.23177
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.265601
+              "value": 3.921927
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -6431,12 +6433,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.544131
+              "value": 4.240886
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.265601
+              "value": 3.921927
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -6771,12 +6773,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.552131
+              "value": 4.249743
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.265601
+              "value": 3.921927
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -7112,12 +7114,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.561079
+              "value": 4.267109
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.265601
+              "value": 3.921927
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -7321,12 +7323,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.568691
+              "value": 4.2755
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.265601
+              "value": 3.921927
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -7488,12 +7490,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.578343
+              "value": 4.28821
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.265601
+              "value": 3.921927
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -8341,12 +8343,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.629765
+              "value": 4.350835
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.314747
+              "value": 3.980959
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -8619,12 +8621,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.682729
+              "value": 4.437747
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.3657
+              "value": 4.064403
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -8873,12 +8875,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.738685
+              "value": 4.503844
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.419779
+              "value": 4.127452
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -9079,12 +9081,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.790576
+              "value": 4.565214
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.470065
+              "value": 4.186873
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -9237,12 +9239,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.845734
+              "value": 4.627115
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.523418
+              "value": 4.246616
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -9491,12 +9493,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.905663
+              "value": 4.690905
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.581162
+              "value": 4.307549
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -9721,12 +9723,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.963143
+              "value": 4.760688
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.636781
+              "value": 4.374594
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -9879,12 +9881,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.019639
+              "value": 4.822399
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.689304
+              "value": 4.432192
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -10157,12 +10159,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.030696
+              "value": 4.833524
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.689304
+              "value": 4.432192
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -10534,12 +10536,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.04287
+              "value": 4.848335
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.689304
+              "value": 4.432192
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -10912,12 +10914,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.055633
+              "value": 4.860753
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.689304
+              "value": 4.432192
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -11158,12 +11160,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.067127
+              "value": 4.873345
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.689304
+              "value": 4.432192
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -11367,12 +11369,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.081663
+              "value": 4.89183
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.689304
+              "value": 4.432192
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -12285,12 +12287,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.141784
+              "value": 4.967765
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.745106
+              "value": 4.505273
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -12803,12 +12805,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.203506
+              "value": 5.036684
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.804236
+              "value": 4.570796
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -13201,12 +13203,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.266775
+              "value": 5.1054
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.864704
+              "value": 4.635751
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -13575,12 +13577,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.32881
+              "value": 5.172108
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.924192
+              "value": 4.699418
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -13877,12 +13879,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.390655
+              "value": 5.242324
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.982833
+              "value": 4.766191
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -14275,12 +14277,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.458287
+              "value": 5.316068
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.04741
+              "value": 4.836402
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -14649,12 +14651,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.476131
+              "value": 5.332666
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.04741
+              "value": 4.836402
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -15027,12 +15029,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.492419
+              "value": 5.349606
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.04741
+              "value": 4.836402
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -15273,12 +15275,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.507621
+              "value": 5.365714
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.04741
+              "value": 4.836402
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -15482,12 +15484,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.523915
+              "value": 5.382031
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.04741
+              "value": 4.836402
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -15649,12 +15651,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.541372
+              "value": 5.400846
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.04741
+              "value": 4.836402
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -16872,7 +16874,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.25330196999999544,
+          "controller_callback_wall_seconds": 0.275927103000015,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -16887,7 +16889,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "EVENT_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -16906,7 +16908,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.005701660999989144,
+          "controller_callback_wall_seconds": 0.005414116999986618,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -16921,7 +16923,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -16940,7 +16942,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.004825995000004468,
+          "controller_callback_wall_seconds": 0.004741641000009622,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -16955,7 +16957,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -16974,7 +16976,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.006987885000000915,
+          "controller_callback_wall_seconds": 0.007061982999971406,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -16989,7 +16991,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -17015,7 +17017,7 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 6,
-          "controller_callback_wall_seconds": 3.3136530919999814,
+          "controller_callback_wall_seconds": 4.061428454999998,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": {
@@ -17136,7 +17138,7 @@
             "tree_key_source": "public state and public action/result history only",
             "truncated_rollouts": 2
           },
-          "native_backend_wall_seconds": 3.311625767999999,
+          "native_backend_wall_seconds": 4.059267133999981,
           "native_private_anchor_counter_fault_changed_public_transition": true,
           "native_public_sample_pool_equal": true,
           "native_root_candidate_count": 7,
@@ -17172,12 +17174,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 3,
-          "controller_callback_wall_seconds": 0.056816674000003786,
+          "controller_callback_wall_seconds": 0.05336143400000992,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.054832491000013306,
+          "native_backend_wall_seconds": 0.05194743399999879,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -17213,12 +17215,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.05253401600000984,
+          "controller_callback_wall_seconds": 0.05189147900000535,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05106326899999658,
+          "native_backend_wall_seconds": 0.05037695000004305,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -17254,12 +17256,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.051772590000013,
+          "controller_callback_wall_seconds": 0.05459877099997357,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05039357500001529,
+          "native_backend_wall_seconds": 0.053137571999968713,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 8,
@@ -17295,12 +17297,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.04912780399999406,
+          "controller_callback_wall_seconds": 0.054396672999985185,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.047400224000000435,
+          "native_backend_wall_seconds": 0.05205787400001327,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -17336,12 +17338,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.05588193599999158,
+          "controller_callback_wall_seconds": 0.05810629499995912,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05381482699999651,
+          "native_backend_wall_seconds": 0.055514689999995426,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 3,
@@ -17370,7 +17372,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.007622180000026901,
+          "controller_callback_wall_seconds": 0.009592886000007184,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -17385,7 +17387,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -17404,7 +17406,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.007589300999995885,
+          "controller_callback_wall_seconds": 0.007395355000028303,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -17419,7 +17421,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -17438,7 +17440,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.00797149099997796,
+          "controller_callback_wall_seconds": 0.008260842000026969,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -17453,7 +17455,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -17472,7 +17474,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.008383565999992015,
+          "controller_callback_wall_seconds": 0.0077707739999937075,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -17487,7 +17489,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -17506,7 +17508,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.008506157999988773,
+          "controller_callback_wall_seconds": 0.008714353000016217,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -17521,7 +17523,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -17540,7 +17542,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.010594211000011455,
+          "controller_callback_wall_seconds": 0.010132297999973616,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -17555,7 +17557,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -17581,12 +17583,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.060627393000004304,
+          "controller_callback_wall_seconds": 0.05952296300000626,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05830327000001034,
+          "native_backend_wall_seconds": 0.05621114199999511,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -17622,12 +17624,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.05724428900001044,
+          "controller_callback_wall_seconds": 0.0663655399999925,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05567152000000419,
+          "native_backend_wall_seconds": 0.06455197899998666,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 3,
@@ -17663,12 +17665,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.05493897600001674,
+          "controller_callback_wall_seconds": 0.06490437900004054,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05327450499999031,
+          "native_backend_wall_seconds": 0.06243835999998737,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 2,
@@ -17704,12 +17706,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.056876125000002276,
+          "controller_callback_wall_seconds": 0.0629249399999594,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05509138700000449,
+          "native_backend_wall_seconds": 0.06111715800000184,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -17745,12 +17747,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.05034760399999527,
+          "controller_callback_wall_seconds": 0.06705314099997395,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.048469471000004205,
+          "native_backend_wall_seconds": 0.06500002799998583,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -17786,12 +17788,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.05151023699997381,
+          "controller_callback_wall_seconds": 0.06443387699999903,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.04957335200001012,
+          "native_backend_wall_seconds": 0.06245868300004531,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -17827,12 +17829,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.05582836399997859,
+          "controller_callback_wall_seconds": 0.06662749800000256,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.053445160999984864,
+          "native_backend_wall_seconds": 0.0640757979999762,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 6,
@@ -17868,12 +17870,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.05179929499999503,
+          "controller_callback_wall_seconds": 0.08915623799998684,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.0496828220000225,
+          "native_backend_wall_seconds": 0.08534944600000927,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -17909,12 +17911,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.05225625400001377,
+          "controller_callback_wall_seconds": 0.09090729100000772,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05038263999998094,
+          "native_backend_wall_seconds": 0.08732988100001648,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -17950,12 +17952,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.05497850599999765,
+          "controller_callback_wall_seconds": 0.07908064400004378,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.053106773999985535,
+          "native_backend_wall_seconds": 0.07639192499999581,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -17991,12 +17993,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.057786590999995724,
+          "controller_callback_wall_seconds": 0.0793355760000054,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.055474822999997286,
+          "native_backend_wall_seconds": 0.07660491199999342,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -18025,7 +18027,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.01208398700001112,
+          "controller_callback_wall_seconds": 0.013315352999995866,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18040,7 +18042,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18059,7 +18061,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.011446954999996706,
+          "controller_callback_wall_seconds": 0.012154328999997688,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18074,7 +18076,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18093,7 +18095,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.01140625200000045,
+          "controller_callback_wall_seconds": 0.01295582799997419,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18108,7 +18110,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18127,7 +18129,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.011412043000007088,
+          "controller_callback_wall_seconds": 0.013058090000015454,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18142,7 +18144,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18161,7 +18163,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.012784009000000651,
+          "controller_callback_wall_seconds": 0.015168701999982659,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18176,7 +18178,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18202,12 +18204,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.0617884970000091,
+          "controller_callback_wall_seconds": 0.07549626599995918,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05862874300001408,
+          "native_backend_wall_seconds": 0.07223346500001071,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 11,
@@ -18243,12 +18245,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06214978399998472,
+          "controller_callback_wall_seconds": 0.06644302300003346,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05901345300000571,
+          "native_backend_wall_seconds": 0.06330248599999777,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 9,
@@ -18284,12 +18286,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.06190426899999579,
+          "controller_callback_wall_seconds": 0.06879556900003081,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.05943447300001026,
+          "native_backend_wall_seconds": 0.06582154699998455,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 7,
@@ -18325,12 +18327,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.060626106000000846,
+          "controller_callback_wall_seconds": 0.06926662900002611,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.057929673000018056,
+          "native_backend_wall_seconds": 0.0654416040000001,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 14,
@@ -18366,12 +18368,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.061208060000012665,
+          "controller_callback_wall_seconds": 0.07069747000002735,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.058573815999977796,
+          "native_backend_wall_seconds": 0.0675750909999806,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 10,
@@ -18407,12 +18409,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.063933679999991,
+          "controller_callback_wall_seconds": 0.07664189700000179,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.0613094839999917,
+          "native_backend_wall_seconds": 0.07355025399999704,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 9,
@@ -18448,12 +18450,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.06441002899998693,
+          "controller_callback_wall_seconds": 0.07132988799997975,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.061459552000002304,
+          "native_backend_wall_seconds": 0.06822773300001472,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 7,
@@ -18489,12 +18491,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06412573099999008,
+          "controller_callback_wall_seconds": 0.07082372000002124,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.061164411000021346,
+          "native_backend_wall_seconds": 0.06721751599997106,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 12,
@@ -18530,12 +18532,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06489568000000645,
+          "controller_callback_wall_seconds": 0.07397892199998068,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06181193699998744,
+          "native_backend_wall_seconds": 0.07075448699998788,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 11,
@@ -18571,12 +18573,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06604559499999141,
+          "controller_callback_wall_seconds": 0.07309648799997603,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06106173800000647,
+          "native_backend_wall_seconds": 0.06960370799998827,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 10,
@@ -18612,12 +18614,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.06216643799999133,
+          "controller_callback_wall_seconds": 0.07623980500000016,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.059216408999986925,
+          "native_backend_wall_seconds": 0.07222070500000655,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 7,
@@ -18653,12 +18655,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06418132200002447,
+          "controller_callback_wall_seconds": 0.0704990499999667,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06116012799998316,
+          "native_backend_wall_seconds": 0.06709736100003738,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 11,
@@ -18694,12 +18696,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.06643282400000317,
+          "controller_callback_wall_seconds": 0.0771775649999995,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06341364499999713,
+          "native_backend_wall_seconds": 0.07395862900000338,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 10,
@@ -18728,7 +18730,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.016590991000015265,
+          "controller_callback_wall_seconds": 0.02031808499998533,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18743,7 +18745,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18762,7 +18764,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.016240490000001273,
+          "controller_callback_wall_seconds": 0.019349384999998165,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18777,7 +18779,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18796,7 +18798,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.016701893999993445,
+          "controller_callback_wall_seconds": 0.020216561999973237,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18811,7 +18813,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18830,7 +18832,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.016762569000007943,
+          "controller_callback_wall_seconds": 0.020329003000028933,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18845,7 +18847,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18864,7 +18866,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.01883456100000558,
+          "controller_callback_wall_seconds": 0.02089134400000603,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18879,7 +18881,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18898,7 +18900,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.017242279000015515,
+          "controller_callback_wall_seconds": 0.022223499000006086,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18913,7 +18915,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "EVENT_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18932,7 +18934,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.01972969700000249,
+          "controller_callback_wall_seconds": 0.025186599999983628,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18947,7 +18949,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -18966,7 +18968,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.017962742999998227,
+          "controller_callback_wall_seconds": 0.02093290199997,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -18981,7 +18983,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "EVENT_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19000,7 +19002,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.019090294999983826,
+          "controller_callback_wall_seconds": 0.02239951599995038,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19015,7 +19017,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19041,12 +19043,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.07322754499998041,
+          "controller_callback_wall_seconds": 0.09844868699997278,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06978867600000171,
+          "native_backend_wall_seconds": 0.09301545599998917,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -19082,12 +19084,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06536744199999589,
+          "controller_callback_wall_seconds": 0.09501478300001054,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.062040534000004754,
+          "native_backend_wall_seconds": 0.09054163899998002,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -19123,12 +19125,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06923465200000578,
+          "controller_callback_wall_seconds": 0.09631099099999574,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06488931799998454,
+          "native_backend_wall_seconds": 0.09178338399999575,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 3,
@@ -19164,12 +19166,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.06940490599998839,
+          "controller_callback_wall_seconds": 0.07484184399999094,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06572949200000267,
+          "native_backend_wall_seconds": 0.07148957800001199,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -19205,12 +19207,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.07435995699998443,
+          "controller_callback_wall_seconds": 0.07837036800003716,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.0699760910000009,
+          "native_backend_wall_seconds": 0.07424266499998566,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -19246,12 +19248,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.07570461899999259,
+          "controller_callback_wall_seconds": 0.09403637799999842,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.07208144300000185,
+          "native_backend_wall_seconds": 0.08526616399996101,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 5,
@@ -19287,12 +19289,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.07230104300001017,
+          "controller_callback_wall_seconds": 0.09724079100004701,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06855619600000296,
+          "native_backend_wall_seconds": 0.09151863699997875,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 3,
@@ -19328,12 +19330,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.07010889899999029,
+          "controller_callback_wall_seconds": 0.09576560900001141,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06657394999999156,
+          "native_backend_wall_seconds": 0.08910032000000001,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -19369,12 +19371,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.06924556900000312,
+          "controller_callback_wall_seconds": 0.09282649499999707,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06468543100001511,
+          "native_backend_wall_seconds": 0.08688458899996476,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 6,
@@ -19410,12 +19412,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 3,
-          "controller_callback_wall_seconds": 0.0702588050000088,
+          "controller_callback_wall_seconds": 0.08202617799997824,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06599505400001249,
+          "native_backend_wall_seconds": 0.0774186200000031,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -19451,12 +19453,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.06833136099999138,
+          "controller_callback_wall_seconds": 0.0780738470000415,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06441217799999777,
+          "native_backend_wall_seconds": 0.07337305499999047,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 3,
@@ -19492,12 +19494,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.07056095299998333,
+          "controller_callback_wall_seconds": 0.1073772720000079,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06665179899999885,
+          "native_backend_wall_seconds": 0.10011174699997127,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -19533,12 +19535,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.07548708600000964,
+          "controller_callback_wall_seconds": 0.08245204800005013,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.07093399099997555,
+          "native_backend_wall_seconds": 0.07755838600002107,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 6,
@@ -19574,12 +19576,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 2,
-          "controller_callback_wall_seconds": 0.07388150899998891,
+          "controller_callback_wall_seconds": 0.0863600210000186,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.0697423929999843,
+          "native_backend_wall_seconds": 0.08124599100000296,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 4,
@@ -19615,12 +19617,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 1,
-          "controller_callback_wall_seconds": 0.07778429199998982,
+          "controller_callback_wall_seconds": 0.08261353099999269,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06992194099998983,
+          "native_backend_wall_seconds": 0.07382186499995669,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 2,
@@ -19656,12 +19658,12 @@
             "scope": "battle"
           },
           "baseline_public_ordinal": 0,
-          "controller_callback_wall_seconds": 0.07252341800000295,
+          "controller_callback_wall_seconds": 0.08203109800001585,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
           "native_backend_evidence": null,
-          "native_backend_wall_seconds": 0.06773938899999621,
+          "native_backend_wall_seconds": 0.07762748000004649,
           "native_private_anchor_counter_fault_changed_public_transition": false,
           "native_public_sample_pool_equal": null,
           "native_root_candidate_count": 1,
@@ -19690,7 +19692,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.02221713199998021,
+          "controller_callback_wall_seconds": 0.025747916999989684,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19705,7 +19707,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19724,7 +19726,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.024765683000026684,
+          "controller_callback_wall_seconds": 0.025223207999999886,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19739,7 +19741,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19758,7 +19760,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.028379147999999077,
+          "controller_callback_wall_seconds": 0.03673017699998127,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19773,7 +19775,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19792,7 +19794,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.023275939000001244,
+          "controller_callback_wall_seconds": 0.03640500599999541,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19807,7 +19809,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "REWARDS",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19826,7 +19828,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.02472360199999457,
+          "controller_callback_wall_seconds": 0.03200013000002855,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19841,7 +19843,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19860,7 +19862,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.02603561399999421,
+          "controller_callback_wall_seconds": 0.03278517500001499,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19875,7 +19877,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "EVENT_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -19894,7 +19896,7 @@
         {
           "baseline_public_action": null,
           "baseline_public_ordinal": null,
-          "controller_callback_wall_seconds": 0.0281109739999863,
+          "controller_callback_wall_seconds": 0.037058426000044165,
           "controller_decision_completed": true,
           "coverage_status": "supported",
           "native_anchor_invariance": null,
@@ -19909,7 +19911,7 @@
           "policy_input_type": "bytes",
           "policy_role": "expert_non_combat",
           "policy_worker_invoked": true,
-          "policy_worker_pid": 487,
+          "policy_worker_pid": 490,
           "screen": "MAP_SCREEN",
           "selected_action_mode": null,
           "selected_public_identity": {
@@ -20080,7 +20082,7 @@
           "scope": "battle"
         },
         "baseline_public_ordinal": 6,
-        "controller_callback_wall_seconds": 3.3136530919999814,
+        "controller_callback_wall_seconds": 4.061428454999998,
         "controller_decision_completed": true,
         "coverage_status": "supported",
         "native_anchor_invariance": {
@@ -20201,7 +20203,7 @@
           "tree_key_source": "public state and public action/result history only",
           "truncated_rollouts": 2
         },
-        "native_backend_wall_seconds": 3.311625767999999,
+        "native_backend_wall_seconds": 4.059267133999981,
         "native_private_anchor_counter_fault_changed_public_transition": true,
         "native_public_sample_pool_equal": true,
         "native_root_candidate_count": 7,
@@ -20234,7 +20236,7 @@
         "native_public_action_steps": 2858,
         "particles": 32,
         "simulations": 192,
-        "wall_seconds": 3.311625767999999
+        "wall_seconds": 4.059267133999981
       },
       "first_battle_search_executed": true,
       "first_meaningful_blocker": "PUBLIC_NONCOMBAT_COVERAGE_GAP screen=TREASURE_ROOM field=screen_payload.coverage_status source=StepSimulator::publicProjection screen coverage and choices value=unsupported reason=treasure-room choice coverage is not part of this capability",
@@ -20254,7 +20256,7 @@
       "public_history_count": 77,
       "public_sample_pool_equal": true,
       "raw_stop_detail": "PUBLIC_NONCOMBAT_COVERAGE_GAP screen=TREASURE_ROOM field=screen_payload.coverage_status source=StepSimulator::publicProjection screen coverage and choices value=unsupported reason=treasure-room choice coverage is not part of this capability",
-      "run_wall_seconds": 10.892189,
+      "run_wall_seconds": 13.235104,
       "screens_with_policy_decisions": {
         "BATTLE": 46,
         "EVENT_SCREEN": 4,
@@ -20275,7 +20277,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.253302
+              "value": 0.275927
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -20560,7 +20562,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.259004
+              "value": 0.281341
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -20857,7 +20859,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.26383
+              "value": 0.286083
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -21022,7 +21024,7 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 0.270818
+              "value": 0.293145
             },
             "native_backend_wall_seconds": {
               "availability": "available",
@@ -21984,12 +21986,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.584471
+              "value": 4.354573
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.311626
+              "value": 4.059267
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -22286,12 +22288,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.641287
+              "value": 4.407935
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.366458
+              "value": 4.111215
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -22540,12 +22542,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.693821
+              "value": 4.459826
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.417522
+              "value": 4.161592
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -22698,12 +22700,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.745594
+              "value": 4.514425
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.467915
+              "value": 4.214729
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -23024,12 +23026,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.794722
+              "value": 4.568822
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.515315
+              "value": 4.266787
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -23254,12 +23256,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.850604
+              "value": 4.626928
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.56913
+              "value": 4.322302
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -23460,12 +23462,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.858226
+              "value": 4.636521
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.56913
+              "value": 4.322302
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -23837,12 +23839,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.865815
+              "value": 4.643916
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.56913
+              "value": 4.322302
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -24177,12 +24179,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.873787
+              "value": 4.652177
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.56913
+              "value": 4.322302
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -24518,12 +24520,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.88217
+              "value": 4.659948
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.56913
+              "value": 4.322302
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -24727,12 +24729,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.890676
+              "value": 4.668662
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.56913
+              "value": 4.322302
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -24894,12 +24896,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.901271
+              "value": 4.678794
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.56913
+              "value": 4.322302
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -25779,12 +25781,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 3.961898
+              "value": 4.738317
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.627433
+              "value": 4.378513
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -26033,12 +26035,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.019142
+              "value": 4.804683
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.683105
+              "value": 4.443065
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -26239,12 +26241,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.074081
+              "value": 4.869587
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.736379
+              "value": 4.505503
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -26421,12 +26423,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.130957
+              "value": 4.932512
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.791471
+              "value": 4.56662
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -26675,12 +26677,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.181305
+              "value": 4.999565
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.83994
+              "value": 4.63162
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -26905,12 +26907,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.232815
+              "value": 5.063999
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.889514
+              "value": 4.694079
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -27063,12 +27065,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.288644
+              "value": 5.130627
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.942959
+              "value": 4.758155
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -27341,12 +27343,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.340443
+              "value": 5.219783
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 3.992642
+              "value": 4.843504
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -27595,12 +27597,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.392699
+              "value": 5.31069
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.043024
+              "value": 4.930834
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -27825,12 +27827,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.447678
+              "value": 5.389771
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.096131
+              "value": 5.007226
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -27983,12 +27985,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.505464
+              "value": 5.469107
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.151606
+              "value": 5.083831
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -28237,12 +28239,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.517548
+              "value": 5.482422
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.151606
+              "value": 5.083831
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -28614,12 +28616,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.528995
+              "value": 5.494576
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.151606
+              "value": 5.083831
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -28992,12 +28994,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.540401
+              "value": 5.507532
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.151606
+              "value": 5.083831
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -29238,12 +29240,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.551813
+              "value": 5.52059
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.151606
+              "value": 5.083831
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -29447,12 +29449,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.564597
+              "value": 5.535759
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.151606
+              "value": 5.083831
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -30356,12 +30358,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.626386
+              "value": 5.611255
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.210235
+              "value": 5.156064
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -30754,12 +30756,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.688536
+              "value": 5.677698
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.269248
+              "value": 5.219367
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -31104,12 +31106,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.75044
+              "value": 5.746494
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.328683
+              "value": 5.285188
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -31406,12 +31408,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.811066
+              "value": 5.81576
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.386612
+              "value": 5.35063
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -31876,12 +31878,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.872274
+              "value": 5.886458
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.445186
+              "value": 5.418205
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -32250,12 +32252,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 4.936208
+              "value": 5.9631
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.506496
+              "value": 5.491755
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -32600,12 +32602,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.000618
+              "value": 6.03443
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.567955
+              "value": 5.559983
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -32902,12 +32904,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.064744
+              "value": 6.105253
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.629119
+              "value": 5.627201
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -33324,12 +33326,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.129639
+              "value": 6.179232
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.690931
+              "value": 5.697955
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -33722,12 +33724,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.195685
+              "value": 6.252329
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.751993
+              "value": 5.767559
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -34096,12 +34098,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.257851
+              "value": 6.328569
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.81121
+              "value": 5.83978
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -34398,12 +34400,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.322033
+              "value": 6.399068
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.87237
+              "value": 5.906877
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -34796,12 +34798,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.388465
+              "value": 6.476245
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -35170,12 +35172,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.405056
+              "value": 6.496563
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -35548,12 +35550,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.421297
+              "value": 6.515913
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -35794,12 +35796,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.437999
+              "value": 6.536129
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -36003,12 +36005,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.454761
+              "value": 6.556458
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -36170,12 +36172,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.473596
+              "value": 6.57735
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -37055,12 +37057,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.490838
+              "value": 6.599573
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -37266,12 +37268,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.510568
+              "value": 6.62476
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -38151,12 +38153,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.528531
+              "value": 6.645693
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -38362,12 +38364,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.547621
+              "value": 6.668092
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 4.935783
+              "value": 5.980836
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -39247,12 +39249,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.620848
+              "value": 6.766541
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.005572
+              "value": 6.073851
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -39501,12 +39503,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.686216
+              "value": 6.861556
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.067613
+              "value": 6.164393
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -39731,12 +39733,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.755451
+              "value": 6.957866
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.132502
+              "value": 6.256176
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -39937,12 +39939,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.824855
+              "value": 7.032708
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.198231
+              "value": 6.327666
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -40095,12 +40097,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.899215
+              "value": 7.111079
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.268207
+              "value": 6.401908
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -40349,12 +40351,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 5.97492
+              "value": 7.205115
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.340289
+              "value": 6.487174
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -40603,12 +40605,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.047221
+              "value": 7.302356
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.408845
+              "value": 6.578693
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -40809,12 +40811,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.11733
+              "value": 7.398121
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.475419
+              "value": 6.667793
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -40967,12 +40969,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.186576
+              "value": 7.490948
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.540104
+              "value": 6.754678
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -41245,12 +41247,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.256834
+              "value": 7.572974
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.6061
+              "value": 6.832097
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -41475,12 +41477,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.325166
+              "value": 7.651048
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.670512
+              "value": 6.90547
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -41681,12 +41683,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.395727
+              "value": 7.758425
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.737164
+              "value": 7.005581
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -41839,12 +41841,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.471214
+              "value": 7.840877
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.808097
+              "value": 7.08314
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -42117,12 +42119,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.545095
+              "value": 7.927237
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.87784
+              "value": 7.164386
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -42347,12 +42349,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.62288
+              "value": 8.009851
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 5.947762
+              "value": 7.238208
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -42529,12 +42531,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.695403
+              "value": 8.091882
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -42687,12 +42689,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.71762
+              "value": 8.11763
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -43064,12 +43066,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.742386
+              "value": 8.142853
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -43404,12 +43406,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.770765
+              "value": 8.179583
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -43612,12 +43614,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.794041
+              "value": 8.215988
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -43821,12 +43823,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.818765
+              "value": 8.247988
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -44730,12 +44732,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.8448
+              "value": 8.280774
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -44984,12 +44986,12 @@
             "controller_callback_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around controller callbacks",
-              "value": 6.872911
+              "value": 8.317832
             },
             "native_backend_wall_seconds": {
               "availability": "available",
               "source": "study monotonic timer around trusted native backend calls",
-              "value": 6.015501
+              "value": 7.315835
             },
             "native_public_search_action_steps": {
               "availability": "available",
@@ -46087,7 +46089,7 @@
   "source_revisions": {
     "issue24_source": "c6021fb4a59d6ef73db6cdca1de981957937078d",
     "legacy_stsrl": "3037b75eca4bd73fa70d018ffd4442a1f2d65628",
-    "native": "270e79c19d76d3d14529db4540f557339cafe213",
+    "native": "fdc15032d1d363c6329dc85f9ae56aea92e1a349",
     "native_base": "d1dcd6534ec4a1f38ac1f7f916f01a3f931fcfd0",
     "public_input_adapter": "77771184827de85a0125177b852e762d2d1372dd",
     "public_tactical_baseline": "9a2792e1e02157124b4f90edc91b7ad8765d5d10"
