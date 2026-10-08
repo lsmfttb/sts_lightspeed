@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cctype>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -1828,12 +1829,92 @@ struct StepSimulator {
             }
         } else if (!frozenEye && particle.bc.knownDrawInsertionBaseSize >= 0) {
             // Random insertion records define a joint constraint over the
-            // hidden baseline order and inserted-card positions. Use valid
-            // transposition proposals so every accepted move remains inside
-            // that represented public-information set.
+            // hidden baseline order and inserted-card positions. Rebuild the
+            // baseline permutation from its public multiset and exact public
+            // anchors before proposing valid transpositions. Starting from
+            // the anchor's hidden baseline order would make the indexed
+            // proposal depend on private information.
             const auto drawSize = particle.bc.cards.drawPile.size();
-            std::vector<bool> fixed(drawSize, false);
+            std::set<std::int16_t> insertionIds;
+            for (const auto &insertion : particle.bc.knownDrawInsertionCards) {
+                insertionIds.insert(insertion.uniqueId);
+            }
+
+            std::vector<CardInstance> baseline;
+            baseline.reserve(static_cast<std::size_t>(
+                    particle.bc.knownDrawInsertionBaseSize));
+            for (auto it = particle.bc.cards.drawPile.rbegin();
+                    it != particle.bc.cards.drawPile.rend(); ++it) {
+                if (insertionIds.find(it->getUniqueId()) == insertionIds.end()) {
+                    baseline.push_back(*it);
+                }
+            }
+            if (baseline.size() != static_cast<std::size_t>(
+                    particle.bc.knownDrawInsertionBaseSize)) {
+                throw std::runtime_error(
+                        "ANCHOR_INDEPENDENCE_UNSUPPORTED: insertion baseline cannot be reconstructed from public constraints");
+            }
+
+            std::vector<bool> fixedBaseline(baseline.size(), false);
+            std::size_t baselinePosition = 0;
             const auto knownTop = knownDrawTopCount(particle.bc);
+            for (std::size_t position = 0; position < knownTop; ++position) {
+                const auto &card = particle.bc.cards.drawPile[drawSize - 1 - position];
+                if (insertionIds.find(card.getUniqueId()) == insertionIds.end()) {
+                    if (baselinePosition >= fixedBaseline.size()
+                            || baseline[baselinePosition].getUniqueId()
+                                    != card.getUniqueId()) {
+                        throw std::logic_error(
+                                "supported insertion anchor disagrees with its known top prefix");
+                    }
+                    fixedBaseline[baselinePosition++] = true;
+                }
+            }
+            for (const auto &anchor : particle.bc.knownDrawInsertionAnchors) {
+                if (anchor.basePositionFromTop < 0
+                        || static_cast<std::size_t>(anchor.basePositionFromTop)
+                                >= baseline.size()) {
+                    throw std::logic_error(
+                            "supported insertion anchor has an invalid baseline position");
+                }
+                const auto position = static_cast<std::size_t>(
+                        anchor.basePositionFromTop);
+                if (baseline[position].getUniqueId() != anchor.uniqueId) {
+                    throw std::logic_error(
+                            "supported insertion anchor disagrees with its public baseline position");
+                }
+                fixedBaseline[position] = true;
+            }
+
+            std::vector<std::size_t> freeBaselineIndices;
+            std::vector<CardInstance> freeBaselineCards;
+            for (std::size_t position = 0; position < baseline.size(); ++position) {
+                if (!fixedBaseline[position]) {
+                    freeBaselineIndices.push_back(position);
+                    freeBaselineCards.push_back(baseline[position]);
+                }
+            }
+            std::sort(freeBaselineCards.begin(), freeBaselineCards.end(),
+                    [](const CardInstance &lhs, const CardInstance &rhs) {
+                        return publicDrawCardFaceKey(lhs)
+                                < publicDrawCardFaceKey(rhs);
+                    });
+            for (std::size_t idx = 0; idx < freeBaselineIndices.size(); ++idx) {
+                baseline[freeBaselineIndices[idx]] = freeBaselineCards[idx];
+            }
+
+            auto baselineIt = baseline.rbegin();
+            for (auto &card : particle.bc.cards.drawPile) {
+                if (insertionIds.find(card.getUniqueId()) == insertionIds.end()) {
+                    card = *baselineIt++;
+                }
+            }
+            if (baselineIt != baseline.rend()) {
+                throw std::logic_error(
+                        "canonical insertion baseline did not match the draw pile");
+            }
+
+            std::vector<bool> fixed(drawSize, false);
             for (std::size_t position = 0; position < knownTop; ++position) {
                 fixed[drawSize - 1 - position] = true;
             }

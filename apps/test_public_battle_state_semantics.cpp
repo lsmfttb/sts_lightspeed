@@ -904,6 +904,75 @@ void verifySamplerPreservesKnownDrawConstraints() {
                                 >= minimumPosition,
                 "sampler violated a known random-insertion constraint");
     }
+
+    auto insertionAlternate = inserted;
+    std::vector<CardInstance> alternateBaseline;
+    alternateBaseline.reserve(baselineSize);
+    for (const auto &card : insertionAlternate.bc.cards.drawPile) {
+        if (card.getUniqueId() != generated.getUniqueId()) {
+            alternateBaseline.push_back(card);
+        }
+    }
+    require(alternateBaseline.size() > 1,
+            "random-insertion fixture has too few baseline cards to vary hidden order");
+    bool changedPublicOrder = false;
+    for (std::size_t offset = 1; offset < alternateBaseline.size(); ++offset) {
+        auto candidate = alternateBaseline;
+        std::rotate(candidate.begin(), candidate.begin() + offset, candidate.end());
+        std::size_t baselineIdx = 0;
+        for (auto &card : insertionAlternate.bc.cards.drawPile) {
+            if (card.getUniqueId() != generated.getUniqueId()) {
+                card = candidate[baselineIdx++];
+            }
+        }
+        if (publicDrawOrder(inserted) != publicDrawOrder(insertionAlternate)) {
+            changedPublicOrder = true;
+            break;
+        }
+    }
+    require(changedPublicOrder,
+            "random-insertion fixture could not vary the hidden baseline face order");
+    incrementHiddenRandomCounters(insertionAlternate);
+    changeHiddenRandomSeeds(insertionAlternate);
+    require(inserted.publicBattleState().equal(
+                    insertionAlternate.publicBattleState())
+                    && knownDrawStateConsistent(insertionAlternate.bc),
+            "cross-anchor insertion fixtures changed public state or constraints");
+    auto canonicalInsertionParticle =
+            inserted.samplePublicConsistentHiddenFuture(706, 5);
+    auto alternateInsertionParticle =
+            insertionAlternate.samplePublicConsistentHiddenFuture(706, 5);
+    requireEquivalentSampleFuture(
+            canonicalInsertionParticle, alternateInsertionParticle,
+            "cross-anchor random-insertion sample");
+
+    const auto canonicalInsertionSearch =
+            canonicalInsertionParticle.battleSearchV2(192, false);
+    const auto alternateInsertionSearch =
+            alternateInsertionParticle.battleSearchV2(192, false);
+    require(pybind11::cast<pybind11::list>(
+                    canonicalInsertionSearch["root_rows"])
+                    .equal(pybind11::cast<pybind11::list>(
+                            alternateInsertionSearch["root_rows"]))
+                    && selectedRootAction(canonicalInsertionSearch)
+                            == selectedRootAction(alternateInsertionSearch),
+            "cross-anchor insertion B=192 root statistics or selection diverged");
+
+    auto transitionA = canonicalInsertionParticle;
+    auto transitionB = alternateInsertionParticle;
+    for (int turn = 0; turn < 2; ++turn) {
+        const auto actionA = publicEndTurnAction(transitionA);
+        const auto actionB = publicEndTurnAction(transitionB);
+        require(actionA.equal(actionB),
+                "cross-anchor insertion roots exposed different end-turn actions");
+        const auto resultA = transitionA.stepPublicAction(actionA);
+        const auto resultB = transitionB.stepPublicAction(actionB);
+        require(resultA.equal(resultB),
+                "cross-anchor insertion fixed-action transitions diverged");
+        if (!resultA.contains(pybind11::str("battle_state"))) {
+            break;
+        }
+    }
 }
 
 void moveCurrentDrawPileToDiscard(StepSimulator &simulator) {
