@@ -1,4 +1,4 @@
-"""Run Issue 24 through the pinned STSRL controlled-run path."""
+"""Run the Issue 25 coverage frontier through the pinned STSRL path."""
 
 from __future__ import annotations
 
@@ -8,24 +8,27 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
 
 
 ISSUE24_SCHEMA = "issue24-v1-public-policy-input"
 NATIVE_SCHEMA = "native-public-projection-v3"
 NATIVE_BASE = "d1dcd6534ec4a1f38ac1f7f916f01a3f931fcfd0"
+ISSUE24_SOURCE = "c6021fb4a59d6ef73db6cdca1de981957937078d"
 LEGACY_BASE = "3037b75eca4bd73fa70d018ffd4442a1f2d65628"
 PUBLIC_ADAPTER_SOURCE = "77771184827de85a0125177b852e762d2d1372dd"
 BASELINE_SOURCE = "9a2792e1e02157124b4f90edc91b7ad8765d5d10"
 DRIVER_SEED = 21021
 GAME_SEEDS = (49, 50)
 ASCENSION = 20
-MAX_DECISIONS = 16
-MAX_RUN_SECONDS = 120.0
-NATIVE_DECISION_TIMEOUT = 30.0
+MAX_DECISIONS = 96
+MAX_RUN_SECONDS = 180.0
+NATIVE_DECISION_TIMEOUT = MAX_RUN_SECONDS
 
 
 def canonical_bytes(value: object) -> bytes:
@@ -197,47 +200,160 @@ def _candidate_items(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 def coverage_blocker(public_context: Mapping[str, Any]) -> str | None:
     projection = _field(public_context.get("native_public_projection"))
-    screen = str(_value(projection.get("screen_identity")) or "(unknown)")
+    screen_field = _field(projection.get("screen_identity"))
+    screen_value = _value(screen_field)
+    if not isinstance(screen_value, str) or not screen_value:
+        return (
+            "FIREWALL_OR_MAPPING_FAILURE screen=(unknown) field=screen_identity "
+            f"source={screen_field.get('source', 'native-public-projection-v3')} "
+            f"availability={screen_field.get('availability', 'missing')} "
+            f"reason={screen_field.get('reason', 'public screen identity unavailable')}"
+        )
+    screen = screen_value
+    category = (
+        "PUBLIC_BATTLE_PROPOSAL_GAP"
+        if screen == "BATTLE"
+        else "PUBLIC_NONCOMBAT_COVERAGE_GAP"
+    )
     boss = _field(projection.get("visible_act_boss"))
     if screen == "MAP_SCREEN" and boss.get("availability") != "available":
         reason = str(boss.get("reason", "visible act boss identity unavailable"))
         return (
-            "PUBLIC_SCREEN_COVERAGE_GAP screen=MAP_SCREEN "
-            f"field=visible_act_boss availability={boss.get('availability')} reason={reason}"
+            "PUBLIC_NONCOMBAT_COVERAGE_GAP screen=MAP_SCREEN "
+            f"field=visible_act_boss source={boss.get('source', 'native-public-projection-v3.visible_act_boss')} "
+            f"availability={boss.get('availability', 'missing')} reason={reason}"
         )
 
     payload_field = _field(projection.get("screen_payload"))
     if payload_field.get("availability") != "available":
         return (
-            f"PUBLIC_SCREEN_COVERAGE_GAP screen={screen} field=screen_payload "
-            f"availability={payload_field.get('availability')} "
+            f"{category} screen={screen} field=screen_payload "
+            f"source={payload_field.get('source', 'native-public-projection-v3.screen_payload')} "
+            f"availability={payload_field.get('availability', 'missing')} "
             f"reason={payload_field.get('reason', 'payload unavailable')}"
         )
     payload = _field(payload_field.get("value"))
     status = payload.get("coverage_status")
     if status != "supported":
         return (
-            f"PUBLIC_SCREEN_COVERAGE_GAP screen={screen} "
-            f"field=screen_payload.coverage_status value={status} "
+            f"{category} screen={screen} field=screen_payload.coverage_status "
+            f"source={payload.get('source', payload_field.get('source', 'native-public-projection-v3.screen_payload'))} "
+            f"value={status} "
             f"reason={payload.get('reason', 'screen coverage is not complete')}"
         )
     candidates = _field(projection.get("candidate_actions"))
     if candidates.get("availability") != "available":
         return (
-            f"PUBLIC_SCREEN_COVERAGE_GAP screen={screen} field=candidate_actions "
-            f"availability={candidates.get('availability')} "
+            f"{category} screen={screen} field=candidate_actions "
+            f"source={candidates.get('source', 'native-public-projection-v3.candidate_actions')} "
+            f"availability={candidates.get('availability', 'missing')} "
             f"reason={candidates.get('reason', 'ordered public candidates unavailable')}"
         )
     if screen == "BATTLE":
         battle = _field(public_context.get("native_public_battle_observation"))
         if battle.get("information_regime") != "normal_public":
-            return "PUBLIC_SCREEN_COVERAGE_GAP screen=BATTLE field=information_regime"
+            return (
+                "PUBLIC_BATTLE_PROPOSAL_GAP screen=BATTLE field=information_regime "
+                f"source={battle.get('schema_id', 'native-public-battle-state-v1')} "
+                f"value={battle.get('information_regime', 'missing')}"
+            )
         if battle.get("information_fidelity") != "supported":
             return (
-                "PUBLIC_SCREEN_COVERAGE_GAP screen=BATTLE field=information_fidelity "
-                f"value={battle.get('information_fidelity')}"
+                "PUBLIC_BATTLE_PROPOSAL_GAP screen=BATTLE field=information_fidelity "
+                f"source={battle.get('schema_id', 'native-public-battle-state-v1')} "
+                f"value={battle.get('information_fidelity', 'missing')}"
             )
     return None
+
+
+def _public_fact(value: Any, source: str | None, unavailable_reason: str) -> dict[str, Any]:
+    if source is None:
+        return _unavailable(unavailable_reason)
+    return _available(value, source)
+
+
+def _public_boundary_evidence(public_context: Mapping[str, Any]) -> dict[str, Any]:
+    projection = _field(public_context.get("native_public_projection"))
+    battle = _field(public_context.get("native_public_battle_observation"))
+    screen = _value(projection.get("screen_identity"))
+    candidates = _field(projection.get("candidate_actions"))
+    candidate_rows = candidates.get("value") if candidates.get("availability") == "available" else None
+    resources_outer = _field(projection.get("persistent_resources"))
+    resources = _field(resources_outer.get("value"))
+    resource_names = (
+        "current_hp",
+        "max_hp",
+        "gold",
+        "potion_count",
+        "potion_capacity",
+    )
+    battle_public = (
+        battle.get("schema_id") == "native-public-battle-state-v1"
+        and battle.get("information_regime") == "normal_public"
+    )
+    battle_source = "native-public-battle-state-v1" if battle_public else None
+    outside_battle = f"{screen or '(unknown)'} has no verified public battle field"
+    return {
+        "screen_identity": _plain(projection.get("screen_identity", _unavailable("missing"))),
+        "ordered_public_legal_identities": (
+            _plain(candidate_rows) if isinstance(candidate_rows, list) else None
+        ),
+        "candidate_actions_availability": _plain(candidates) if candidates else _unavailable("missing"),
+        "screen_payload": _plain(projection.get("screen_payload", _unavailable("missing"))),
+        "battle_information_regime": _public_fact(
+            battle.get("information_regime"),
+            f"{battle_source}.information_regime" if battle_source else None,
+            outside_battle,
+        ),
+        "battle_information_fidelity": _public_fact(
+            battle.get("information_fidelity"),
+            f"{battle_source}.information_fidelity" if battle_source else None,
+            outside_battle,
+        ),
+        "act": _public_fact(
+            battle.get("act"), f"{battle_source}.act" if battle_public else None,
+            "act is not exposed by the verified public projection at this screen",
+        ),
+        "floor": _public_fact(
+            battle.get("floor_num"), f"{battle_source}.floor_num" if battle_public else None,
+            "floor is not exposed by the verified public projection at this screen",
+        ),
+        "encounter": _public_fact(
+            battle.get("encounter_id"), f"{battle_source}.encounter_id" if battle_public else None,
+            outside_battle,
+        ),
+        "battle_turn": _public_fact(
+            battle.get("turn"), f"{battle_source}.turn" if battle_public else None,
+            outside_battle,
+        ),
+        "public_resources": {
+            name: _plain(resources.get(name, _unavailable("field missing from public resource projection")))
+            for name in resource_names
+        },
+    }
+
+
+def _stop_classification(blocker: str | None, terminal: bool, decision_count: int) -> str:
+    if blocker:
+        if blocker.startswith("WALL_BUDGET"):
+            return "WALL_BUDGET"
+        if blocker.startswith("PUBLIC_NONCOMBAT_COVERAGE_GAP"):
+            return "PUBLIC_NONCOMBAT_COVERAGE_GAP"
+        if blocker.startswith("PUBLIC_BATTLE_PROPOSAL_GAP") or any(
+            marker in blocker
+            for marker in (
+                "ANCHOR_INVARIANCE_BLOCKED",
+                "ANCHOR_INDEPENDENCE_UNSUPPORTED",
+                "cannot represent private monster future counters",
+            )
+        ):
+            return "PUBLIC_BATTLE_PROPOSAL_GAP"
+        return "FIREWALL_OR_MAPPING_FAILURE"
+    if terminal:
+        return "NATIVE_TERMINAL"
+    if decision_count >= MAX_DECISIONS:
+        return "FIXED_DECISION_BUDGET"
+    return "FIREWALL_OR_MAPPING_FAILURE"
 
 
 def _public_run_context(
@@ -427,7 +543,7 @@ class RunJournal:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.state: dict[str, Any] = {
-            "schema_id": "issue24-run-progress-v1",
+            "schema_id": "issue25-run-progress-v1",
             "status": "running",
             "last_completed_boundary": "startup",
         }
@@ -588,7 +704,7 @@ class PolicyWorker:
             bufsize=0,
         )
 
-    def choose(self, public_input: bytes) -> dict[str, Any]:
+    def choose(self, public_input: bytes, *, timeout: float) -> dict[str, Any]:
         if self.process.poll() is not None:
             detail = self.process.stderr.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"public policy worker exited: {detail[-400:]}")
@@ -596,6 +712,11 @@ class PolicyWorker:
         self.last_public_input = bytes(public_input)
         self.process.stdin.write(public_input + b"\n")
         self.process.stdin.flush()
+        readable, _, _ = select.select([self.process.stdout], [], [], max(0.0, timeout))
+        if not readable:
+            self.process.kill()
+            self.process.wait(timeout=5)
+            raise ValueError(f"WALL_BUDGET: public policy worker exhausted the remaining {timeout:.3f}s")
         line = self.process.stdout.readline()
         if not line:
             detail = ""
@@ -654,7 +775,44 @@ class FirewalledController:
         self.run_started = time.monotonic()
         self.battle_decisions = 0
 
-    def _native_decision(self, public_input: bytes, mode: str) -> dict[str, Any]:
+    def _remaining_seconds(self) -> float:
+        return self.max_run_seconds - (time.monotonic() - self.run_started)
+
+    def _record_wall_budget(
+        self,
+        step_index: int,
+        screen: str,
+        public_context: Mapping[str, Any],
+        detail: str,
+    ) -> None:
+        event = {
+            "step_index": step_index,
+            "screen": screen,
+            "coverage_status": "wall_budget",
+            "stop_classification": "WALL_BUDGET",
+            "controller_decision_completed": False,
+            "policy_callback_invoked": False,
+            "native_execution_parity": "not_attempted",
+            "public_boundary": _public_boundary_evidence(public_context),
+            "blocker": detail,
+        }
+        self.events.append(event)
+        if self.journal is not None:
+            self.journal.checkpoint(
+                f"{self.run_label}_wall_budget",
+                step_index=step_index,
+                screen=screen,
+                blocker=detail,
+                policy_invoked=False,
+            )
+
+    def _native_decision(
+        self,
+        public_input: bytes,
+        mode: str,
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
         if self.simulator_seed is None:
             raise ValueError("NATURAL_SEARCH_INTEGRATION_BLOCKED: trusted backend lacks run seed")
         started = time.monotonic()
@@ -672,13 +830,14 @@ class FirewalledController:
                 ],
                 input=public_input,
                 capture_output=True,
-                timeout=NATIVE_DECISION_TIMEOUT,
+                timeout=max(0.001, timeout),
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
             stderr = exc.stderr.decode("utf-8", errors="replace").strip() if exc.stderr else ""
             raise ValueError(
-                f"COST_BLOCKED: trusted native {mode} exceeded {NATIVE_DECISION_TIMEOUT:.0f}s; "
+                f"WALL_BUDGET: trusted native {mode} exhausted the remaining "
+                f"{timeout:.3f}s; "
                 f"stderr={stderr[:1200]!r}"
             ) from exc
         if result.returncode != 0:
@@ -719,6 +878,11 @@ class FirewalledController:
 
         public_context = context.public_run_context
         screen = str(context.screen_state)
+        remaining = self._remaining_seconds()
+        if remaining <= 0:
+            blocker = f"WALL_BUDGET: run reached {self.max_run_seconds:.0f}s before decision {step_index}"
+            self._record_wall_budget(step_index, screen, public_context, blocker)
+            raise ValueError(blocker)
         blocker = coverage_blocker(public_context)
         if blocker is not None:
             if self.journal is not None:
@@ -734,36 +898,37 @@ class FirewalledController:
                     "step_index": step_index,
                     "screen": screen,
                     "coverage_status": "partial_or_unsupported",
+                    "stop_classification": blocker.split(" ", 1)[0],
                     "policy_callback_invoked": False,
+                    "controller_decision_completed": False,
+                    "native_execution_parity": "not_attempted",
+                    "public_boundary": _public_boundary_evidence(public_context),
                     "blocker": blocker,
                 }
             )
             raise ValueError(blocker)
 
         public_input = _encode_input(context)
-        if time.monotonic() - self.run_started >= self.max_run_seconds:
-            blocker = f"COST_BLOCKED: run reached {self.max_run_seconds:.0f}s decision-boundary limit"
-            self.events.append(
-                {
-                    "step_index": step_index,
-                    "screen": screen,
-                    "coverage_status": "cost_limit",
-                    "policy_callback_invoked": False,
-                    "blocker": blocker,
-                }
-            )
+        remaining = self._remaining_seconds()
+        if remaining <= 0:
+            blocker = f"WALL_BUDGET: run reached {self.max_run_seconds:.0f}s before decision {step_index}"
+            self._record_wall_budget(step_index, screen, public_context, blocker)
             raise ValueError(blocker)
+        callback_started = time.monotonic()
         if screen == "BATTLE":
             mode = "search" if self.battle_decisions == 0 else "heuristic"
             try:
-                response = self._native_decision(public_input, mode)
+                response = self._native_decision(public_input, mode, timeout=remaining)
             except ValueError as exc:
                 failure = str(exc)
                 event = {
                     "step_index": step_index,
                     "screen": screen,
                     "coverage_status": "native_backend_blocked",
+                    "stop_classification": _stop_classification(failure, False, step_index),
                     "controller_decision_completed": False,
+                    "native_execution_parity": "not_attempted",
+                    "public_boundary": _public_boundary_evidence(public_context),
                     "policy_input_type": "bytes",
                     "policy_input_sha256": hashlib.sha256(public_input).hexdigest(),
                     "native_backend_mode": mode,
@@ -807,7 +972,13 @@ class FirewalledController:
                 raise
             self.battle_decisions += 1
         else:
-            response = self.worker.choose(public_input)
+            try:
+                response = self.worker.choose(public_input, timeout=remaining)
+            except ValueError as exc:
+                failure = str(exc)
+                if failure.startswith("WALL_BUDGET"):
+                    self._record_wall_budget(step_index, screen, public_context, failure)
+                raise
             response["policy_worker_invoked"] = True
             response["trusted_native_backend_invoked"] = False
         selected_index = response.get("selected_index")
@@ -872,6 +1043,7 @@ class FirewalledController:
             "baseline_public_action": response.get("baseline_public_action"),
             "baseline_public_ordinal": response.get("baseline_public_ordinal"),
             "native_backend_wall_seconds": response.get("native_backend_wall_seconds"),
+            "controller_callback_wall_seconds": time.monotonic() - callback_started,
         }
         self.events.append(event)
         if self.journal is not None:
@@ -899,8 +1071,103 @@ def _legacy_revision(st_srl_root: Path) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=_isolated_git_env(),
     )
     return result.stdout.strip()
+
+
+def _isolated_git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "ISSUE25_GIT_DIR", "ISSUE25_GIT_WORK_TREE"):
+        env.pop(name, None)
+    return env
+
+
+def _native_git_env() -> dict[str, str]:
+    env = _isolated_git_env()
+    git_dir = os.environ.get("ISSUE25_GIT_DIR")
+    work_tree = os.environ.get("ISSUE25_GIT_WORK_TREE")
+    if git_dir:
+        env["GIT_DIR"] = git_dir
+    if work_tree:
+        env["GIT_WORK_TREE"] = work_tree
+    return env
+
+
+def verify_unsupported_screen_fixture(provenance: Any, native_search: Path) -> dict[str, Any]:
+    class CallbackProbe:
+        called = False
+
+        def choose(self, public_input: bytes, *, timeout: float) -> dict[str, Any]:
+            del public_input, timeout
+            self.called = True
+            raise AssertionError("unsupported fixture invoked the policy callback")
+
+    worker = CallbackProbe()
+    controller = FirewalledController(
+        worker,
+        provenance,
+        native_search=native_search,
+        run_label="issue25_unsupported_screen_fixture",
+    )
+    projection = {
+        "schema_id": NATIVE_SCHEMA,
+        "screen_identity": _available("SHOP_ROOM", "GameContext::screenState"),
+        "visible_act_boss": _unavailable("not applicable outside MAP_SCREEN"),
+        "screen_payload": _available(
+            {
+                "coverage_status": "unsupported",
+                "source": "StepSimulator::publicProjection screen coverage and choices",
+                "reason": "shop choice coverage is not part of this capability",
+            },
+            "StepSimulator::publicProjection screen coverage and choices",
+        ),
+        "candidate_actions": _available(
+            [
+                {
+                    "scope": "game",
+                    "kind": "map",
+                    "idx1": 0,
+                    "idx2": 0,
+                    "idx3": 0,
+                    "label": "game.map idx1=0 idx2=0 idx3=0",
+                }
+            ],
+            "StepSimulator::legalActions",
+        ),
+        "persistent_resources": _unavailable("fixture has no resources"),
+    }
+    public_context = {
+        "native_public_projection": projection,
+        "native_public_battle_observation": None,
+    }
+    context = SimpleNamespace(
+        screen_state="SHOP_ROOM",
+        public_run_context=public_context,
+    )
+    try:
+        controller.select_action(None, None, (), context, 0)
+    except ValueError as exc:
+        blocker = str(exc)
+    else:
+        raise AssertionError("unsupported fixture did not fail closed")
+    event = controller.events[-1] if controller.events else {}
+    if (
+        not blocker.startswith("PUBLIC_NONCOMBAT_COVERAGE_GAP")
+        or worker.called
+        or event.get("policy_callback_invoked") is not False
+        or event.get("controller_decision_completed") is not False
+        or "selected_public_ordinal" in event
+    ):
+        raise AssertionError("unsupported fixture reached policy selection")
+    return {
+        "screen": "SHOP_ROOM",
+        "stop_classification": blocker.split(" ", 1)[0],
+        "blocker": blocker,
+        "policy_callback_invoked": worker.called,
+        "selected_action": "selected_public_ordinal" in event,
+        "passed": True,
+    }
 
 
 def _require_clean_legacy_worktree(st_srl_root: Path) -> None:
@@ -918,6 +1185,7 @@ def _require_clean_legacy_worktree(st_srl_root: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        env=_isolated_git_env(),
     )
     if result.stdout.strip():
         raise RuntimeError("legacy STSRL source worktree must be clean at the pinned revision")
@@ -940,45 +1208,92 @@ def _summarize_run(
     *,
     game_seed: int,
     driver_seed: int,
+    run_wall_seconds: float,
 ) -> dict[str, Any]:
     events = [dict(event) for event in controller.events]
     events_by_step = {int(event["step_index"]): event for event in events}
+    integrity_problems: list[str] = []
     if len(adapter.mapping_trace) != len(run.steps):
-        raise AssertionError(
-            f"seed {game_seed} executor mapping count differs from executed steps"
+        integrity_problems.append(
+            f"mapping count differs from executed steps "
+            f"(mapping={len(adapter.mapping_trace)}, steps={len(run.steps)})"
         )
     if not all(item.get("executed_legal_identity_matches") is True for item in adapter.mapping_trace):
-        raise AssertionError(f"seed {game_seed} has a selected/executed identity mismatch")
+        integrity_problems.append("selected/executed public identity mismatch")
 
     decisions_by_screen: dict[str, int] = {}
+    decisions_by_mode: dict[str, int] = {}
     step_rows: list[dict[str, Any]] = []
+    cumulative_simulations = 0
+    cumulative_native_action_steps = 0
+    cumulative_native_wall_seconds = 0.0
+    cumulative_controller_callback_seconds = 0.0
+    search_work_available = False
     for step in run.steps:
         screen = str(step.screen_state)
         decisions_by_screen[screen] = decisions_by_screen.get(screen, 0) + 1
-        projection = _field(step.public_run_context.get("native_public_projection"))
-        battle = _field(step.public_run_context.get("native_public_battle_observation"))
-        resources = _resources(projection)
         event = events_by_step.get(int(step.step_index), {})
-        mapping = adapter.mapping_trace[int(step.step_index)]
+        mapping_index = int(step.step_index)
+        mapping = (
+            adapter.mapping_trace[mapping_index]
+            if mapping_index < len(adapter.mapping_trace)
+            else {}
+        )
+        mode = str(event.get("selected_action_mode") or event.get("policy_role") or "unknown")
+        decisions_by_mode[mode] = decisions_by_mode.get(mode, 0) + 1
+        evidence = _field(event.get("native_backend_evidence"))
+        if isinstance(evidence.get("simulations"), int):
+            cumulative_simulations += int(evidence["simulations"])
+            search_work_available = True
+        if isinstance(evidence.get("native_public_action_steps"), int):
+            cumulative_native_action_steps += int(evidence["native_public_action_steps"])
+            search_work_available = True
+        native_wall = event.get("native_backend_wall_seconds")
+        if isinstance(native_wall, (int, float)) and not isinstance(native_wall, bool):
+            cumulative_native_wall_seconds += float(native_wall)
+        callback_wall = event.get("controller_callback_wall_seconds")
+        if isinstance(callback_wall, (int, float)) and not isinstance(callback_wall, bool):
+            cumulative_controller_callback_seconds += float(callback_wall)
+        public_boundary = _public_boundary_evidence(step.public_run_context)
         step_rows.append(
             {
                 "step_index": int(step.step_index),
                 "screen": screen,
-                "act": battle.get("act"),
-                "floor": step.floor,
-                "encounter": battle.get("encounter_id"),
-                "player_hp_before": resources.get("current_hp", step.player_hp),
-                "player_hp_after": step.next_player_hp,
-                "potion_count_before": resources.get("potion_count", step.potion_count),
-                "potion_count_after": step.next_potion_count,
-                "gold_before": resources.get("gold", step.gold),
-                "gold_after": step.next_gold,
-                "controller_mode": event.get("selected_action_mode") or event.get("policy_role"),
+                "public_boundary": public_boundary,
+                "ordered_public_legal_identities": public_boundary[
+                    "ordered_public_legal_identities"
+                ],
+                "controller_mode": mode,
                 "selected_public_ordinal": event.get("selected_public_ordinal"),
                 "selected_public_action": event.get("selected_public_identity"),
                 "executed_public_action": mapping.get("selected_public_identity"),
-                "executed_identity_matches": mapping.get("executed_legal_identity_matches"),
+                "native_execution_parity": mapping.get("executed_legal_identity_matches", False),
+                "native_execution_parity_source": "V3LightSpeedAdapter.step public identity check",
                 "terminal_after_step": bool(step.terminal_after_step),
+                "cumulative_work": {
+                    "controlled_actions_executed": _available(
+                        int(step.step_index) + 1,
+                        "STSRL execute_controlled_run executed step index",
+                    ),
+                    "shared_public_search_simulations": (
+                        _available(cumulative_simulations, "trusted native shared-public search response")
+                        if search_work_available
+                        else _unavailable("no shared public search completed by this decision")
+                    ),
+                    "native_public_search_action_steps": (
+                        _available(cumulative_native_action_steps, "trusted native shared-public search response")
+                        if search_work_available
+                        else _unavailable("no shared public search completed by this decision")
+                    ),
+                    "native_backend_wall_seconds": _available(
+                        round(cumulative_native_wall_seconds, 6),
+                        "study monotonic timer around trusted native backend calls",
+                    ),
+                    "controller_callback_wall_seconds": _available(
+                        round(cumulative_controller_callback_seconds, 6),
+                        "study monotonic timer around controller callbacks",
+                    ),
+                },
             }
         )
 
@@ -988,23 +1303,24 @@ def _summarize_run(
     ]
     if search_events:
         if len(search_events) != 1:
-            raise AssertionError(f"seed {game_seed} made more than one search decision")
+            integrity_problems.append("more than one shared-public search decision completed")
         search_event = search_events[0]
         search_step = next(
             (step for step in run.steps if int(step.step_index) == int(search_event["step_index"])),
             None,
         )
         if search_step is None or search_step.screen_state != "BATTLE":
-            raise AssertionError(f"seed {game_seed} search action was not an executed Battle step")
-        mapping = adapter.mapping_trace[int(search_step.step_index)]
-        if (
-            mapping.get("selected_public_ordinal") != search_event.get("selected_public_ordinal")
-            or mapping.get("selected_public_identity") != search_event.get("selected_public_identity")
-        ):
-            raise AssertionError(f"seed {game_seed} search choice differs from executed legal identity")
+            integrity_problems.append("shared-public search action was not an executed Battle step")
+        elif int(search_step.step_index) < len(adapter.mapping_trace):
+            mapping = adapter.mapping_trace[int(search_step.step_index)]
+            if (
+                mapping.get("selected_public_ordinal") != search_event.get("selected_public_ordinal")
+                or mapping.get("selected_public_identity") != search_event.get("selected_public_identity")
+            ):
+                integrity_problems.append("search choice differs from executed public identity")
         evidence = _field(search_event.get("native_backend_evidence"))
         if evidence.get("simulations") != 192 or evidence.get("particle_count") != 32:
-            raise AssertionError(f"seed {game_seed} did not use the fixed B=192/32-particle search")
+            integrity_problems.append("shared-public search evidence differs from fixed B=192/32 budget")
 
     policy_events = [event for event in events if event.get("policy_worker_invoked") is True]
     policy_process_isolated = bool(policy_events) and all(
@@ -1012,9 +1328,19 @@ def _summarize_run(
         for event in policy_events
     )
     if policy_events and not policy_process_isolated:
-        raise AssertionError(f"seed {game_seed} policy worker imported the native simulator")
+        integrity_problems.append("policy worker imported the native simulator")
 
     blocker = run.problems[0] if run.problems else None
+    if blocker is None and integrity_problems:
+        blocker = (
+            "FIREWALL_OR_MAPPING_FAILURE screen=(run) field=execution_integrity "
+            f"source=STSRL controlled-run/native public adapter reason={' ; '.join(integrity_problems)}"
+        )
+    if blocker is None and run_wall_seconds >= MAX_RUN_SECONDS:
+        blocker = (
+            f"WALL_BUDGET: run reached {MAX_RUN_SECONDS:.0f}s "
+            "before another controller boundary"
+        )
     native_failures = [
         str(event.get("native_backend_failure", ""))
         for event in events
@@ -1030,37 +1356,74 @@ def _summarize_run(
         for event in events
         if event.get("selected_action_mode") == "shared_public_tree_B192"
     ]
+    stop_classification = _stop_classification(blocker, bool(run.terminal), len(run.steps))
+    stop_event = next(
+        (
+            event for event in reversed(events)
+            if event.get("controller_decision_completed") is False
+        ),
+        None,
+    )
+    stop_boundary = (
+        stop_event.get("public_boundary")
+        if stop_event is not None
+        else _public_boundary_evidence(run.public_run_context)
+        if run.public_run_context
+        else None
+    )
+    if not events and run.public_run_context:
+        stop_boundary = _public_boundary_evidence(run.public_run_context)
+    boundary_screen = _value(_field(_field(stop_boundary).get("screen_identity")))
+    stop_screen = str(
+        (stop_event or {}).get("screen")
+        or boundary_screen
+        or (run.steps[-1].next_screen_state if run.steps else "(unknown)")
+    )
+    stop_detail = blocker
+    if stop_classification == "PUBLIC_BATTLE_PROPOSAL_GAP" and blocker:
+        if blocker.startswith("PUBLIC_BATTLE_PROPOSAL_GAP"):
+            stop_detail = blocker
+        elif "ANCHOR_INDEPENDENCE_UNSUPPORTED:" in blocker:
+            reason = blocker.split("ANCHOR_INDEPENDENCE_UNSUPPORTED:", 1)[1].split(";", 1)[0].strip()
+            stop_detail = (
+                "PUBLIC_BATTLE_PROPOSAL_GAP screen=BATTLE field=draw_order_constraints "
+                "source=StepSimulator::samplePublicConsistentHiddenFutureFromParticleSeed "
+                f"reason={reason}"
+            )
+        else:
+            stop_detail = (
+                "PUBLIC_BATTLE_PROPOSAL_GAP screen=BATTLE field=proposal_support "
+                f"source=native shared-public sampler reason={blocker}"
+            )
+    elif stop_classification == "FIXED_DECISION_BUDGET":
+        stop_detail = (
+            f"FIXED_DECISION_BUDGET screen={stop_screen} field=controller_decisions "
+            f"source=Issue 25 per-seed budget value={MAX_DECISIONS}"
+        )
+    elif stop_classification == "WALL_BUDGET":
+        stop_detail = (
+            f"WALL_BUDGET screen={stop_screen} field=elapsed_seconds "
+            f"source=study monotonic clock limit={MAX_RUN_SECONDS:.0f} "
+            f"observed={run_wall_seconds:.3f}"
+        )
+    elif stop_classification == "NATIVE_TERMINAL":
+        stop_detail = (
+            f"NATIVE_TERMINAL screen={stop_screen} field=outcome "
+            f"source=execute_controlled_run value={run.outcome}"
+        )
+    elif stop_classification == "FIREWALL_OR_MAPPING_FAILURE" and blocker and not blocker.startswith(
+        "FIREWALL_OR_MAPPING_FAILURE"
+    ):
+        stop_detail = (
+            f"FIREWALL_OR_MAPPING_FAILURE screen={stop_screen} "
+            "field=ordered_public_identity_or_execution "
+            f"source=V3LightSpeedAdapter/execute_controlled_run reason={blocker}"
+        )
+
     outcomes: list[str] = []
     if search_events:
         outcomes.append("NATURAL_PUBLIC_SEARCH_EXECUTED")
-    else:
-        outcomes.append("NATURAL_SEARCH_INTEGRATION_BLOCKED")
-    if blocker and "COST_BLOCKED" in blocker:
-        outcomes.append("COST_BLOCKED")
-        stop_disposition = "cost_limit"
-    elif blocker and (
-        "ANCHOR_INVARIANCE_BLOCKED" in blocker
-        or "cannot represent private monster future counters" in blocker
-    ):
-        stop_disposition = "anchor_invariance_or_sampler_blocked"
-    elif blocker and "PUBLIC_SCREEN_COVERAGE_GAP" in blocker:
-        if "screen=BATTLE" not in blocker:
-            outcomes.append("NEXT_PUBLIC_NONCOMBAT_GAP")
-            stop_disposition = "first_unsupported_public_screen"
-        else:
-            outcomes.append("NATURAL_SEARCH_INTEGRATION_BLOCKED")
-            stop_disposition = "unsupported_battle_root_or_state"
-    elif run.terminal:
-        stop_disposition = "native_terminal"
-    elif len(run.steps) >= MAX_DECISIONS:
-        outcomes.append("COST_BLOCKED")
-        stop_disposition = "fixed_decision_budget"
-    elif blocker:
-        outcomes.append("NATURAL_SEARCH_INTEGRATION_BLOCKED")
-        stop_disposition = "executor_or_policy_failure"
-    else:
-        outcomes.append("NATURAL_SEARCH_INTEGRATION_BLOCKED")
-        stop_disposition = "controlled_run_ended_without_classified_boundary"
+    outcomes.append(stop_classification)
 
     return {
         "seed": game_seed,
@@ -1068,7 +1431,12 @@ def _summarize_run(
         "player_class": "IRONCLAD",
         "driver_seed": driver_seed,
         "steps_executed": len(run.steps),
+        "controller_decisions_by_mode": decisions_by_mode,
         "screens_with_policy_decisions": decisions_by_screen,
+        "decision_screen_coverage": [
+            f"{screen}×{count}" for screen, count in decisions_by_screen.items()
+        ],
+        "run_wall_seconds": round(run_wall_seconds, 6),
         "first_battle_search_executed": bool(search_events),
         "first_battle_search_attempted": any(
             event.get("screen") == "BATTLE"
@@ -1123,16 +1491,24 @@ def _summarize_run(
         ),
         "first_battle_search_audit": native_search_event.get("native_search_audit"),
         "first_battle_search": search_events[0] if search_events else None,
-        "first_unsupported_or_failure": blocker,
-        "stop_disposition": stop_disposition,
+        "first_meaningful_blocker": stop_detail,
+        "raw_stop_detail": blocker,
+        "stop_classification": stop_classification,
+        "stop_disposition": stop_classification,
+        "stop_boundary": stop_boundary,
         "outcomes": list(dict.fromkeys(outcomes)),
         "terminal": bool(run.terminal),
         "native_outcome": str(run.outcome),
         "steps": step_rows,
         "decisions": events,
         "native_action_mapping_count": len(adapter.mapping_trace),
-        "all_selected_identities_executed": True,
-        "policy_process_isolated_from_simulator_extension": policy_process_isolated,
+        "all_selected_identities_executed": (
+            len(adapter.mapping_trace) == len(run.steps)
+            and all(item.get("executed_legal_identity_matches") is True for item in adapter.mapping_trace)
+        ),
+        "policy_process_isolated_from_simulator_extension": (
+            policy_process_isolated if policy_events else None
+        ),
         "policy_worker_decision_count": len(policy_events),
         "public_history_count": len(run.public_history),
     }
@@ -1141,9 +1517,9 @@ def _summarize_run(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--st-srl-root", type=Path, required=True)
-    parser.add_argument("--build-dir", type=Path, default=Path("build-issue24"))
-    parser.add_argument("--native-search", type=Path, default=Path("build-issue24/study-issue24-natural-search"))
-    parser.add_argument("--output", type=Path, default=Path("studies/issue24/result.json"))
+    parser.add_argument("--build-dir", type=Path, default=Path("build-issue25"))
+    parser.add_argument("--native-search", type=Path, default=Path("build-issue25/study-issue24-natural-search"))
+    parser.add_argument("--output", type=Path, default=Path("studies/issue25/result.json"))
     args = parser.parse_args()
     st_srl_root = args.st_srl_root.resolve()
     build_dir = args.build_dir.resolve()
@@ -1156,14 +1532,25 @@ def main() -> int:
         check=True,
         capture_output=True,
         text=True,
+        env=_native_git_env(),
     ).stdout.strip()
     native_base_is_ancestor = subprocess.run(
         ["git", "merge-base", "--is-ancestor", NATIVE_BASE, native_revision],
         check=False,
+        env=_native_git_env(),
     )
     if native_base_is_ancestor.returncode != 0:
         raise RuntimeError(
             f"native source mismatch: {native_revision} is not based on {NATIVE_BASE}"
+        )
+    issue24_source_is_ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ISSUE24_SOURCE, native_revision],
+        check=False,
+        env=_native_git_env(),
+    )
+    if issue24_source_is_ancestor.returncode != 0:
+        raise RuntimeError(
+            f"native source mismatch: {native_revision} does not include reviewed source {ISSUE24_SOURCE}"
         )
     legacy_revision = _legacy_revision(st_srl_root)
     if legacy_revision != LEGACY_BASE:
@@ -1174,10 +1561,13 @@ def main() -> int:
     journal.checkpoint(
         "source_revisions_validated",
         native_base=NATIVE_BASE,
+        issue24_source=ISSUE24_SOURCE,
         native_source=native_revision,
         legacy_base=legacy_revision,
         legacy_worktree_clean=True,
         seeds=list(GAME_SEEDS),
+        max_decisions_per_run=MAX_DECISIONS,
+        max_wall_seconds_per_run=MAX_RUN_SECONDS,
     )
 
     sys.path.insert(0, str(build_dir))
@@ -1188,6 +1578,16 @@ def main() -> int:
     from sts_combat_rl.sim.controlled_run import execute_controlled_run
     from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
     import sts_combat_rl.sim.controlled_run as controlled_run
+
+    coverage_fixture = verify_unsupported_screen_fixture(
+        ControllerProvenance(
+            kind="study_fixture",
+            name="issue25_unsupported_screen_fail_closed",
+            config={},
+        ),
+        native_search,
+    )
+    journal.checkpoint("unsupported_screen_fixture_passed", fixture=coverage_fixture)
 
     def read_v3_projection(adapter: Any, snapshot: Any) -> dict[str, Any]:
         return adapter.public_projection(snapshot)
@@ -1218,6 +1618,14 @@ def main() -> int:
         public_run_context: Mapping[str, Any] | None = None,
     ) -> Any:
         del raw_snapshot
+        context = _field(public_run_context)
+        if coverage_blocker(context) is not None:
+            projection = _field(context.get("native_public_projection"))
+            screen = str(_value(projection.get("screen_identity")) or "(unknown)")
+            return SimpleNamespace(
+                screen_state=screen,
+                public_run_context=dict(context),
+            )
         return _decision_context(_field(public_run_context), active_action_space)
 
     controlled_run.read_native_public_projection = read_v3_projection
@@ -1246,10 +1654,12 @@ def main() -> int:
         )
         provenance = ControllerProvenance(
             kind="study_public_firewall",
-            name="issue24_natural_shared_public_search",
+            name="issue25_natural_shared_public_search_coverage_frontier",
             config={
+                "study_issue": 25,
                 "native_projection_schema": NATIVE_SCHEMA,
                 "native_base_commit": NATIVE_BASE,
+                "issue24_source_commit": ISSUE24_SOURCE,
                 "native_source_commit": native_revision,
                 "legacy_executor": "execute_controlled_run",
                 "legacy_commit": LEGACY_BASE,
@@ -1263,6 +1673,8 @@ def main() -> int:
                 "search_tree_seed": "0x7368617265647472",
                 "search_budget": 192,
                 "search_particles": 32,
+                "max_decisions_per_run": MAX_DECISIONS,
+                "max_wall_seconds_per_run": MAX_RUN_SECONDS,
                 "information_regime": "normal_public",
             },
         )
@@ -1274,6 +1686,68 @@ def main() -> int:
             native_search=native_search,
             ascension=ASCENSION,
         )
+
+        def after_transition(step: Any) -> None:
+            mapping = adapter.mapping_trace[-1] if adapter.mapping_trace else {}
+            elapsed = time.monotonic() - controller.run_started
+            journal.checkpoint(
+                "controlled_action_executed",
+                seed=game_seed,
+                step_index=int(step.step_index),
+                screen=str(step.screen_state),
+                next_screen=str(step.next_screen_state),
+                executed_legal_identity_matches=mapping.get("executed_legal_identity_matches"),
+                run_wall_seconds=elapsed,
+            )
+            if elapsed >= MAX_RUN_SECONDS:
+                blocker = (
+                    f"WALL_BUDGET: run reached {MAX_RUN_SECONDS:.0f}s after "
+                    f"controlled decision {int(step.step_index)}"
+                )
+                unavailable = "wall budget stopped before the next public projection"
+                controller.events.append(
+                    {
+                        "step_index": int(step.step_index) + 1,
+                        "screen": str(step.next_screen_state),
+                        "coverage_status": "wall_budget",
+                        "stop_classification": "WALL_BUDGET",
+                        "controller_decision_completed": False,
+                        "policy_callback_invoked": False,
+                        "native_execution_parity": "not_attempted_at_next_boundary",
+                        "blocker": blocker,
+                        "public_boundary": {
+                            "screen_identity": _available(
+                                str(step.next_screen_state),
+                                "ControlledRunStep.next_screen_state",
+                            ),
+                            "ordered_public_legal_identities": None,
+                            "candidate_actions_availability": _unavailable(unavailable),
+                            "screen_payload": _unavailable(unavailable),
+                            "act": _unavailable(unavailable),
+                            "floor": _unavailable(unavailable),
+                            "encounter": _unavailable(unavailable),
+                            "battle_turn": _unavailable(unavailable),
+                            "public_resources": {
+                                name: _unavailable(unavailable)
+                                for name in (
+                                    "current_hp",
+                                    "max_hp",
+                                    "gold",
+                                    "potion_count",
+                                    "potion_capacity",
+                                )
+                            },
+                        },
+                    }
+                )
+                journal.checkpoint(
+                    "wall_budget_reached",
+                    seed=game_seed,
+                    step_index=int(step.step_index) + 1,
+                    run_wall_seconds=elapsed,
+                    blocker=blocker,
+                )
+                raise ValueError(blocker)
         try:
             run = execute_controlled_run(
                 adapter,
@@ -1281,13 +1755,16 @@ def main() -> int:
                 seed=game_seed,
                 max_steps=MAX_DECISIONS,
                 action_space=action_space,
+                after_transition=after_transition,
             )
+            run_wall_seconds = max(0.0, time.monotonic() - controller.run_started)
             summary = _summarize_run(
                 run,
                 controller,
                 adapter,
                 game_seed=game_seed,
                 driver_seed=driver_seed,
+                run_wall_seconds=run_wall_seconds,
             )
             if controller.last_public_selection is not None:
                 stale_input, stale_candidates, stale_index = controller.last_public_selection
@@ -1319,15 +1796,18 @@ def main() -> int:
     limitations = [
         "Two fixed A20 Ironclad seeds only; no held-out seeds or win-rate/continuation-strength claim.",
         "Only the first actual Battle decision uses B=192 shared-public search; later Battle decisions use the named Issue 17 public tactical heuristic.",
-        "The result covers only the exposed first-Battle roots for seeds 49 and 50; it does not establish broad A20 performance or a general posterior model.",
+        "The result is a two-seed reachability and coverage diagnostic; it does not establish broad A20 performance or a general posterior model.",
         "Unsupported Runic Dome intents, Darkling private damage, and unrepresented Hexaghost move-cycle state remain fail-closed.",
         "Insertion states with known top prefixes, baseline anchors, before-anchor relations, or unrepresented draw-card runtime changes remain fail-closed.",
+        "The 180-second guard bounds policy-worker and native-search subprocess calls and stops at the next controlled transition boundary; a synchronous simulator transition cannot be interrupted mid-call.",
     ]
     report = {
-        "schema_id": "issue24-natural-shared-public-search-report-v1",
+        "schema_id": "issue25-public-run-coverage-frontier-v1",
         "disposition": "STUDY_ONLY",
+        "coverage_fixture": coverage_fixture,
         "source_revisions": {
             "native_base": NATIVE_BASE,
+            "issue24_source": ISSUE24_SOURCE,
             "native": native_revision,
             "legacy_stsrl": LEGACY_BASE,
             "public_input_adapter": PUBLIC_ADAPTER_SOURCE,
@@ -1366,37 +1846,38 @@ def main() -> int:
         "proposed_code_disposition": "study_only_pending_independent_review",
         "seed_runs": run_summaries,
         "limitations": limitations,
-        "retention": {"downstream_consumer": "Issue #24 independent Reviewer"},
+        "retention": {"downstream_consumer": "Issue #25 independent Reviewer"},
     }
     _atomic_json(output_path, report)
     markdown = [
-        "# Issue 24: natural shared-public Battle search",
+        "# Issue 25: public-only run coverage frontier",
         "",
         f"Disposition: **STUDY_ONLY**. Outcomes: `{', '.join(outcomes)}`.",
         "",
-        f"Provenance: native source `{native_revision}` (base `{NATIVE_BASE}`); STSRL executor `{LEGACY_BASE}`; public adapter `{PUBLIC_ADAPTER_SOURCE}`; tactical baseline `{BASELINE_SOURCE}`.",
+        f"Provenance: reviewed Issue 24 source `{ISSUE24_SOURCE}`; native source `{native_revision}` (base `{NATIVE_BASE}`); STSRL executor `{LEGACY_BASE}`; public adapter `{PUBLIC_ADAPTER_SOURCE}`; tactical baseline `{BASELINE_SOURCE}`.",
         "",
-        "| Seed | Root replay | Public baseline | Counter fault control | Public sample pool | B=192 audit | Action executed | Stop |",
-        "|---:|---|---|---|---|---|---|---|",
+        "| Seed | Decisions | Screens | Controller modes | Wall seconds | Stop classification | First blocker |",
+        "|---:|---:|---|---|---:|---|---|",
     ]
     for summary in run_summaries:
+        screens = ", ".join(summary["decision_screen_coverage"])
+        modes = ", ".join(
+            f"{mode}×{count}"
+            for mode, count in summary["controller_decisions_by_mode"].items()
+        )
         markdown.append(
-            f"| {summary['seed']} | {_display_check(summary['first_battle_root_replay_validated'])} | "
-            f"`{_field(summary.get('first_battle_public_baseline_action')).get('label', 'none')}` | "
-            f"{_display_check(summary['private_anchor_counter_fault_changed_public_transition'])} | "
-            f"{_display_check(summary['public_sample_pool_equal'])} | "
-            f"{_display_check(summary['first_battle_search_audit_completed'])} | "
-            f"{_display_check(summary['first_battle_search_executed'])} | "
-            f"{summary['stop_disposition']} |"
+            f"| {summary['seed']} | {summary['steps_executed']} | {screens} | {modes} | "
+            f"{summary['run_wall_seconds']:.3f} | `{summary['stop_classification']}` | "
+            f"{summary['first_meaningful_blocker'] or 'declared limit/terminal'} |"
         )
     markdown.extend(
         [
             "",
-            "Each run uses the pinned STSRL controlled-run loop after four seeded ExpertNonCombatDriver decisions. Search counts as executed only if native root replay, the 32-particle public-consistent sampler, anchor invariance, and the fixed B=192 search all complete; a blocked run is not reported as a Battle choice. No win-rate, training, or continuation-strength claim is made.",
+            f"Each fixed seed is capped at {MAX_DECISIONS} controller decisions and {MAX_RUN_SECONDS:.0f} seconds. The unsupported Shop fixture passed with no policy callback or selected action; it is excluded from natural-run progress. Search counts as executed only if native root replay, the 32-particle public-consistent sampler, anchor invariance, and fixed B=192 search all complete.",
             "",
             "The sampler law is a public-consistent proposal Q, not an exact posterior. This study stays disposable until independent review; any core promotion is a separate decision.",
             "",
-            "See `result.json` for exact public identities, root replay boundary, search and anchor-invariance evidence, public screen/resource trace, and the final stop boundary. `result.progress.json` records durable execution progress.",
+            "See `result.json` for the per-decision public identity/resource trace, fidelity and availability provenance, cumulative grounded work, and exact stop boundary. `result.progress.json` records the last durable execution boundary.",
             "",
         ]
     )
