@@ -11,6 +11,11 @@
 #include <utility>
 #include <vector>
 
+#ifndef STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
+#define STS_LIGHTSPEED_TESTED_SOURCE_COMMIT "unknown"
+#endif
+
+
 namespace {
 
 using namespace pybind11;
@@ -119,7 +124,7 @@ int main() {
         constexpr std::uint64_t secondSeed = 50;
         nlohmann::json evidence = {
             {"schema_id", "native-public-noncombat-projection-smoke-v1"},
-            {"native_base_commit", "ab2b11bc3b5b6c6b68d9d855bc9545e9aca62a28"},
+            {"tested_native_source_commit", STS_LIGHTSPEED_TESTED_SOURCE_COMMIT},
             {"character", "IRONCLAD"},
             {"ascension", ascension},
             {"seeds", nlohmann::json::array({firstSeed, secondSeed})},
