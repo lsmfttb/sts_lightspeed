@@ -45,3 +45,14 @@ target_include_directories(test-public-battle-state-semantics PUBLIC include)
 target_include_directories(test-public-battle-state-semantics PUBLIC json/single_include)
 target_include_directories(test-public-battle-state-semantics PUBLIC bindings)
 target_link_libraries(test-public-battle-state-semantics PRIVATE pybind11::embed)
+
+add_executable(test-public-noncombat-projection EXCLUDE_FROM_ALL
+        apps/test_public_noncombat_projection.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(test-public-noncombat-projection PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(test-public-noncombat-projection PUBLIC include)
+target_include_directories(test-public-noncombat-projection PUBLIC json/single_include)
+target_include_directories(test-public-noncombat-projection PUBLIC bindings)
+target_link_libraries(test-public-noncombat-projection PRIVATE pybind11::embed)

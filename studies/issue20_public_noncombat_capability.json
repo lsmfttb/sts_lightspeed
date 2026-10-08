@@ -1,0 +1,120 @@
+{
+  "alternate_neow": {
+    "candidate_order_matches_legal_actions": true,
+    "choice_count": 4,
+    "coverage_status": "supported",
+    "visible_choices_differ_from_seed_49": true,
+    "visible_options": [
+      "Remove a card.",
+      "Max Hp +10%.",
+      "Choose a rare card to obtain.\tObtain a curse.",
+      "Obtain a random boss relic.\tLose your starter relic."
+    ]
+  },
+  "ascension": 20,
+  "battle_unchanged": {
+    "candidate_order_matches_legal_actions": true,
+    "projection_equal_across_hidden_futures": true,
+    "public_battle_state_equal": true
+  },
+  "character": "IRONCLAD",
+  "exceptional_event_phase": {
+    "coverage_status": "unsupported",
+    "event_identity": "Cursed Tome",
+    "event_phase": 5,
+    "reason": "Cursed Tome phase is outside the rendered range"
+  },
+  "indexed_gold_regression": {
+    "both_candidate_mappings_execute_exact_amount": true,
+    "fixture": "native Rewards container with distinct indexed gold, relic, potion, and sapphire key entries",
+    "key": "SAPPHIRE_KEY; removes final relic offer",
+    "legal_candidate_count_including_skip": 6,
+    "potion": "Fire Potion",
+    "relic": "Anchor",
+    "visible_amounts": [
+      17,
+      41
+    ]
+  },
+  "map_screen": {
+    "act_boss_identity": "unavailable; reveal state is not tracked",
+    "candidate_order_matches_legal_actions": true,
+    "candidate_route_bindings_valid": true,
+    "contains_unknown_room_symbol": true,
+    "coverage_status": "partial",
+    "legal_route_count": 4,
+    "visible_node_count": 58
+  },
+  "match_and_keep": {
+    "coverage_status": "unsupported",
+    "reason": "Match and Keep contains unrevealed card faces and has no safe public choice surface"
+  },
+  "native_base_commit": "ab2b11bc3b5b6c6b68d9d855bc9545e9aca62a28",
+  "neow": {
+    "candidate_order_matches_legal_actions": true,
+    "choice_count": 4,
+    "coverage_status": "supported",
+    "event_identity": "NEOW",
+    "visible_options": [
+      "Choose a colorless card to obtain.",
+      "Obtain 100 gold.",
+      "Choose a rare colorless card to obtain.\tTake 30% Hp damage.",
+      "Obtain a random boss relic.\tLose your starter relic."
+    ]
+  },
+  "other_screen_coverage": {
+    "screens": 5,
+    "status": "explicitly_unsupported"
+  },
+  "outcome_claim": "none",
+  "phased_event": {
+    "candidate_order_matches_legal_actions": true,
+    "coverage_status": "supported",
+    "event_identity": "Dead Adventurer",
+    "event_phase": 2
+  },
+  "reward_screen": {
+    "actual_card_contents_exposed": true,
+    "candidate_order_matches_legal_actions": true,
+    "card_offers": [
+      {
+        "id": 150,
+        "id_label": "FINESSE",
+        "name": "Finesse",
+        "rarity": "UNCOMMON",
+        "type": "SKILL",
+        "upgraded": false
+      },
+      {
+        "id": 113,
+        "id_label": "DISCOVERY",
+        "name": "Discovery",
+        "rarity": "UNCOMMON",
+        "type": "SKILL",
+        "upgraded": false
+      },
+      {
+        "id": 100,
+        "id_label": "DEEP_BREATH",
+        "name": "Deep Breath",
+        "rarity": "UNCOMMON",
+        "type": "SKILL",
+        "upgraded": false
+      }
+    ],
+    "choice_count": 4,
+    "choice_types": [
+      "card",
+      "card",
+      "card",
+      "skip"
+    ],
+    "coverage_status": "supported",
+    "gold_offers": []
+  },
+  "schema_id": "native-public-noncombat-projection-smoke-v1",
+  "seeds": [
+    49,
+    50
+  ]
+}
