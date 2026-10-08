@@ -1,0 +1,11 @@
+{
+  "details": {
+    "executed_steps": 77,
+    "first_battle_search_executed": true,
+    "seed": 50,
+    "stop_disposition": "PUBLIC_NONCOMBAT_COVERAGE_GAP"
+  },
+  "last_completed_boundary": "seed_run_complete",
+  "schema_id": "issue25-run-progress-v1",
+  "status": "complete"
+}
