@@ -888,6 +888,41 @@ void verifySamplerPreservesKnownDrawConstraints() {
             {generated.getUniqueId(), minimumPosition, -1});
     require(knownDrawStateConsistent(inserted.bc),
             "random-insertion fixture is internally inconsistent");
+    const auto requireInsertionFailClosed = [](StepSimulator &anchor,
+                                                const std::string &caseName) {
+        bool rejected = false;
+        try {
+            (void) anchor.samplePublicConsistentHiddenFuture(706, 0);
+        } catch (const std::runtime_error &error) {
+            rejected = std::string(error.what()).rfind(
+                    "ANCHOR_INDEPENDENCE_UNSUPPORTED:", 0) == 0;
+        }
+        require(rejected,
+                caseName + " did not fail closed with the insertion support boundary");
+    };
+    auto insertionWithKnownTop = inserted;
+    insertionWithKnownTop.bc.knownDrawTopUniqueIds.push_back(
+            insertionWithKnownTop.bc.cards.drawPile.back().getUniqueId());
+    require(knownDrawStateConsistent(insertionWithKnownTop.bc),
+            "known-top insertion fixture is inconsistent");
+    requireInsertionFailClosed(insertionWithKnownTop, "known-top insertion sample");
+
+    auto insertionWithBaselineAnchor = inserted;
+    const auto baselineTop = std::find_if(
+            insertionWithBaselineAnchor.bc.cards.drawPile.rbegin(),
+            insertionWithBaselineAnchor.bc.cards.drawPile.rend(),
+            [&](const CardInstance &card) {
+                return card.getUniqueId() != generated.getUniqueId();
+            });
+    require(baselineTop != insertionWithBaselineAnchor.bc.cards.drawPile.rend(),
+            "baseline-anchor insertion fixture has no baseline card");
+    insertionWithBaselineAnchor.bc.knownDrawInsertionAnchors.push_back(
+            {0, baselineTop->getUniqueId()});
+    require(knownDrawStateConsistent(insertionWithBaselineAnchor.bc),
+            "baseline-anchor insertion fixture is inconsistent");
+    requireInsertionFailClosed(
+            insertionWithBaselineAnchor, "baseline-anchor insertion sample");
+
     for (std::uint64_t index = 0; index < 8; ++index) {
         auto particle = inserted.samplePublicConsistentHiddenFuture(706, index);
         requirePublicConsistentSample(inserted, particle, "random-insertion sample");
@@ -932,6 +967,27 @@ void verifySamplerPreservesKnownDrawConstraints() {
     }
     require(changedPublicOrder,
             "random-insertion fixture could not vary the hidden baseline face order");
+    auto insertedCard = std::find_if(
+            insertionAlternate.bc.cards.drawPile.begin(),
+            insertionAlternate.bc.cards.drawPile.end(),
+            [&](const CardInstance &card) {
+                return card.getUniqueId() == generated.getUniqueId();
+            });
+    require(insertedCard != insertionAlternate.bc.cards.drawPile.end(),
+            "cross-anchor insertion fixture lost its inserted card");
+    const auto originalInsertionRank = static_cast<std::int32_t>(
+            insertionAlternate.bc.cards.drawPile.size() - 1
+            - std::distance(insertionAlternate.bc.cards.drawPile.begin(), insertedCard));
+    const auto movedInsertionRank = minimumPosition + 1;
+    const auto insertedCardValue = *insertedCard;
+    insertionAlternate.bc.cards.drawPile.erase(insertedCard);
+    const auto movedInsertionIndex = static_cast<std::size_t>(
+            insertionAlternate.bc.cards.drawPile.size() - movedInsertionRank);
+    insertionAlternate.bc.cards.drawPile.insert(
+            insertionAlternate.bc.cards.drawPile.begin() + movedInsertionIndex,
+            insertedCardValue);
+    require(originalInsertionRank != movedInsertionRank,
+            "cross-anchor insertion fixture did not vary the hidden insertion position");
     incrementHiddenRandomCounters(insertionAlternate);
     changeHiddenRandomSeeds(insertionAlternate);
     require(inserted.publicBattleState().equal(
