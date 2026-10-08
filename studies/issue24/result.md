@@ -2,7 +2,7 @@
 
 Disposition: **STUDY_ONLY**. Outcomes: `NATURAL_PUBLIC_SEARCH_EXECUTED, COST_BLOCKED`.
 
-Provenance: native `d1dcd6534ec4a1f38ac1f7f916f01a3f931fcfd0`; STSRL executor `3037b75eca4bd73fa70d018ffd4442a1f2d65628`; public adapter `77771184827de85a0125177b852e762d2d1372dd`; tactical baseline `9a2792e1e02157124b4f90edc91b7ad8765d5d10`.
+Provenance: native source `925c39d4de6bb01a2d52e2bfec14d58ea0fac524` (base `d1dcd6534ec4a1f38ac1f7f916f01a3f931fcfd0`); STSRL executor `3037b75eca4bd73fa70d018ffd4442a1f2d65628`; public adapter `77771184827de85a0125177b852e762d2d1372dd`; tactical baseline `9a2792e1e02157124b4f90edc91b7ad8765d5d10`.
 
 | Seed | Root replay | Public baseline | Counter fault control | Public sample pool | B=192 audit | Action executed | Stop |
 |---:|---|---|---|---|---|---|---|

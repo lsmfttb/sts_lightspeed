@@ -1157,8 +1157,14 @@ def main() -> int:
         capture_output=True,
         text=True,
     ).stdout.strip()
-    if native_revision != NATIVE_BASE:
-        raise RuntimeError(f"native source mismatch: expected {NATIVE_BASE}, found {native_revision}")
+    native_base_is_ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", NATIVE_BASE, native_revision],
+        check=False,
+    )
+    if native_base_is_ancestor.returncode != 0:
+        raise RuntimeError(
+            f"native source mismatch: {native_revision} is not based on {NATIVE_BASE}"
+        )
     legacy_revision = _legacy_revision(st_srl_root)
     if legacy_revision != LEGACY_BASE:
         raise RuntimeError(f"legacy source mismatch: expected {LEGACY_BASE}, found {legacy_revision}")
@@ -1167,7 +1173,8 @@ def main() -> int:
         raise FileNotFoundError(f"native search backend not found: {native_search}")
     journal.checkpoint(
         "source_revisions_validated",
-        native_base=native_revision,
+        native_base=NATIVE_BASE,
+        native_source=native_revision,
         legacy_base=legacy_revision,
         legacy_worktree_clean=True,
         seeds=list(GAME_SEEDS),
@@ -1243,6 +1250,7 @@ def main() -> int:
             config={
                 "native_projection_schema": NATIVE_SCHEMA,
                 "native_base_commit": NATIVE_BASE,
+                "native_source_commit": native_revision,
                 "legacy_executor": "execute_controlled_run",
                 "legacy_commit": LEGACY_BASE,
                 "public_adapter_source_commit": PUBLIC_ADAPTER_SOURCE,
@@ -1313,12 +1321,14 @@ def main() -> int:
         "Only the first actual Battle decision uses B=192 shared-public search; later Battle decisions use the named Issue 17 public tactical heuristic.",
         "The result covers only the exposed first-Battle roots for seeds 49 and 50; it does not establish broad A20 performance or a general posterior model.",
         "Unsupported Runic Dome intents, Darkling private damage, and unrepresented Hexaghost move-cycle state remain fail-closed.",
+        "Insertion states with known top prefixes, baseline anchors, before-anchor relations, or unrepresented draw-card runtime changes remain fail-closed.",
     ]
     report = {
         "schema_id": "issue24-natural-shared-public-search-report-v1",
         "disposition": "STUDY_ONLY",
         "source_revisions": {
-            "native": NATIVE_BASE,
+            "native_base": NATIVE_BASE,
+            "native": native_revision,
             "legacy_stsrl": LEGACY_BASE,
             "public_input_adapter": PUBLIC_ADAPTER_SOURCE,
             "public_tactical_baseline": BASELINE_SOURCE,
@@ -1364,7 +1374,7 @@ def main() -> int:
         "",
         f"Disposition: **STUDY_ONLY**. Outcomes: `{', '.join(outcomes)}`.",
         "",
-        f"Provenance: native `{NATIVE_BASE}`; STSRL executor `{LEGACY_BASE}`; public adapter `{PUBLIC_ADAPTER_SOURCE}`; tactical baseline `{BASELINE_SOURCE}`.",
+        f"Provenance: native source `{native_revision}` (base `{NATIVE_BASE}`); STSRL executor `{LEGACY_BASE}`; public adapter `{PUBLIC_ADAPTER_SOURCE}`; tactical baseline `{BASELINE_SOURCE}`.",
         "",
         "| Seed | Root replay | Public baseline | Counter fault control | Public sample pool | B=192 audit | Action executed | Stop |",
         "|---:|---|---|---|---|---|---|---|",
