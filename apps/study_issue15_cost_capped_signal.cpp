@@ -508,6 +508,7 @@ int estimatedAttackDamage(
     int damage = std::max(0, base + intField(player, "strength"));
     if (intField(player, "weak") > 0) damage = damage * 3 / 4;
     if (intField(monster, "vulnerable") > 0) damage = damage * 3 / 2;
+    // The estimate is HP damage after the target's visible block is applied.
     return std::max(0, damage - intField(monster, "block"));
 }
 
@@ -597,18 +598,21 @@ pb::dict selectPublicHeuristicAction(const pb::dict &state, pb::dict *audit = nu
             if (type == "ATTACK" || (type == "SKILL" && estimatedBlock(card) > 0)) {
                 int selectedDamage = 0;
                 int selectedTargetHp = std::numeric_limits<int>::max();
+                int selectedTargetEffectiveHp = std::numeric_limits<int>::max();
                 for (int monsterIndex = 0; monsterIndex < monsters.size(); ++monsterIndex) {
                     if (target >= 0 && target < monsters.size() && target != monsterIndex) continue;
                     const auto monster = pb::reinterpret_borrow<pb::dict>(monsters[monsterIndex]);
                     if (!monster["alive"].cast<bool>() || !monster["targetable"].cast<bool>()) continue;
                     const int damage = estimatedAttackDamage(card, player, monster);
-                    const int targetHp = intField(monster, "current_hp")
-                            + intField(monster, "block");
+                    const int targetHp = intField(monster, "current_hp");
+                    const int targetEffectiveHp = targetHp + intField(monster, "block");
                     if (damage > selectedDamage
-                            || (damage == selectedDamage && targetHp < selectedTargetHp)) {
+                            || (damage == selectedDamage
+                                    && targetEffectiveHp < selectedTargetEffectiveHp)) {
                         selectedDamage = damage;
                         selectedTargetHp = targetHp;
-                        targetTie = -targetHp;
+                        selectedTargetEffectiveHp = targetEffectiveHp;
+                        targetTie = -targetEffectiveHp;
                     }
                 }
                 estimatedDamage = selectedDamage;
@@ -771,6 +775,23 @@ void runHeuristicSanityChecks() {
     }
     {
         const auto strike = mockCard(CardId::STRIKE_RED, "Strike", "ATTACK", 1);
+        const auto inflame = mockCard(CardId::INFLAME, "Inflame", "POWER", 0);
+        auto blockedTarget = mockMonster("Jaw Worm", 3, 0, false);
+        blockedTarget["block"] = 3;
+        const auto state = mockPublicState(70, {strike, inflame},
+                {blockedTarget},
+                {mockPublicAction("card", 0, 0), mockPublicAction("card", 1, 0), endTurn});
+        pb::dict audit;
+        const auto selected = selectPublicHeuristicAction(state, &audit);
+        if (intField(selected, "idx1") != 0
+                || intField(audit, "estimated_card_damage") != 3
+                || stringField(audit, "priority_reason").find("immediate lethal")
+                        == std::string::npos) {
+            throw std::logic_error("public heuristic missed a lethal against visible target block");
+        }
+    }
+    {
+        const auto strike = mockCard(CardId::STRIKE_RED, "Strike", "ATTACK", 1);
         const auto defend = mockCard(CardId::DEFEND_RED, "Defend", "SKILL", 1);
         const auto state = mockPublicState(20, {strike, defend},
                 {mockMonster("Jaw Worm", 40, 20, true)},
@@ -833,7 +854,7 @@ void runHeuristicSanityChecks() {
             throw std::logic_error("public heuristic accepted private particle metadata");
         }
     }
-    std::cout << "ISSUE15_PUBLIC_HEURISTIC_SANITY_PASS cases=6\n";
+    std::cout << "ISSUE15_PUBLIC_HEURISTIC_SANITY_PASS cases=7\n";
 }
 
 struct DecisionLatency {
