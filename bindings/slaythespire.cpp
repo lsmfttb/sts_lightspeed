@@ -1848,6 +1848,15 @@ struct StepSimulator {
                 throw std::runtime_error(
                         "ANCHOR_INDEPENDENCE_UNSUPPORTED: insertion state has top-prefix or anchor constraints not reconstructed by this proposal");
             }
+            for (const auto &card : particle.bc.cards.drawPile) {
+                const CardInstance canonicalCard(card.getId(), card.isUpgraded());
+                if (card.cost != canonicalCard.cost
+                        || card.costForTurn != canonicalCard.costForTurn
+                        || card.freeToPlayOnce || card.retain) {
+                    throw std::runtime_error(
+                            "ANCHOR_INDEPENDENCE_UNSUPPORTED: draw card has unrepresented runtime state");
+                }
+            }
 
             std::set<std::int16_t> insertionIds;
             for (const auto &insertion : particle.bc.knownDrawInsertionCards) {

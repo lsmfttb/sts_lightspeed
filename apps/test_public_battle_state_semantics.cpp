@@ -923,6 +923,22 @@ void verifySamplerPreservesKnownDrawConstraints() {
     requireInsertionFailClosed(
             insertionWithBaselineAnchor, "baseline-anchor insertion sample");
 
+    auto insertionWithHiddenDrawCost = inserted;
+    const auto hiddenCostCard = std::find_if(
+            insertionWithHiddenDrawCost.bc.cards.drawPile.begin(),
+            insertionWithHiddenDrawCost.bc.cards.drawPile.end(),
+            [&](const CardInstance &card) {
+                return card.getUniqueId() != generated.getUniqueId();
+            });
+    require(hiddenCostCard != insertionWithHiddenDrawCost.bc.cards.drawPile.end(),
+            "hidden-cost insertion fixture has no baseline card");
+    ++hiddenCostCard->cost;
+    require(inserted.publicBattleState().equal(
+                    insertionWithHiddenDrawCost.publicBattleState()),
+            "hidden-cost insertion fixtures do not share a public battle state");
+    requireInsertionFailClosed(
+            insertionWithHiddenDrawCost, "unrepresented draw-cost insertion sample");
+
     for (std::uint64_t index = 0; index < 8; ++index) {
         auto particle = inserted.samplePublicConsistentHiddenFuture(706, index);
         requirePublicConsistentSample(inserted, particle, "random-insertion sample");
