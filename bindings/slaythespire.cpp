@@ -871,6 +871,43 @@ pybind11::dict publicChoiceAssociation(
     return ret;
 }
 
+bool isCurrentActBossSelection(const GameContext &gc) {
+    switch (gc.act) {
+        case 1:
+            return gc.boss == MonsterEncounter::THE_GUARDIAN
+                    || gc.boss == MonsterEncounter::HEXAGHOST
+                    || gc.boss == MonsterEncounter::SLIME_BOSS;
+        case 2:
+            return gc.boss == MonsterEncounter::AUTOMATON
+                    || gc.boss == MonsterEncounter::COLLECTOR
+                    || gc.boss == MonsterEncounter::CHAMP;
+        case 3:
+            return gc.boss == MonsterEncounter::AWAKENED_ONE
+                    || gc.boss == MonsterEncounter::TIME_EATER
+                    || gc.boss == MonsterEncounter::DONU_AND_DECA;
+        case 4:
+            return gc.boss == MonsterEncounter::THE_HEART;
+        default:
+            return false;
+    }
+}
+
+pybind11::dict publicVisibleActBoss(const GameContext &gc) {
+    if (!gc.map) {
+        return publicProjectionUnavailable(
+                "unavailable", "the current Act map is not initialized");
+    }
+    if (!isCurrentActBossSelection(gc)) {
+        return publicProjectionUnavailable(
+                "unavailable",
+                "the current Act has no validated public boss selection");
+    }
+
+    return publicProjectionAvailable(
+            pybind11::str(monsterEncounterStrings[static_cast<int>(gc.boss)]),
+            "the current Act boss icon on the public map; GameContext::secondBoss is excluded");
+}
+
 pybind11::list publicMapGraphSnapshot(const Map &map) {
     pybind11::list nodes;
     for (int y = 0; y < static_cast<int>(map.nodes.size()); ++y) {
@@ -1219,6 +1256,7 @@ pybind11::dict publicEventScreenPayload(
 
 pybind11::dict publicScreenPayload(
         GameContext &gc,
+        const pybind11::dict &visibleActBoss,
         const std::vector<LightSpeedAction> &actions,
         const pybind11::list &mapGraph,
         const pybind11::dict &currentMapNode,
@@ -1229,15 +1267,20 @@ pybind11::dict publicScreenPayload(
             return publicEventScreenPayload(gc, actions);
         case ScreenState::REWARDS:
             return publicRewardScreenPayload(gc, actions);
-        case ScreenState::MAP_SCREEN:
-            payload["coverage_status"] = "partial";
+        case ScreenState::MAP_SCREEN: {
+            const bool bossAvailable = visibleActBoss["availability"]
+                    .cast<std::string>() == "available";
+            payload["coverage_status"] = bossAvailable ? "supported" : "partial";
             payload["source"] = "GameContext::map and StepSimulator::legalActions";
             payload["map_graph"] = mapGraph;
             payload["current_map_node"] = currentMapNode;
             payload["legal_routes"] = legalRoutes;
-            payload["missing_facts"] = pybind11::make_tuple(
-                    "revealed_act_boss_identity_not_tracked_by_the_native_public_view");
+            if (!bossAvailable) {
+                payload["missing_facts"] = pybind11::make_tuple(
+                        "current_act_boss_identity_not_validated_for_the_public_map");
+            }
             return payload;
+        }
         case ScreenState::BATTLE:
             payload["coverage_status"] = "supported";
             payload["source"] = "StepSimulator::publicBattleState";
@@ -1523,9 +1566,8 @@ struct StepSimulator {
         ret["screen_identity"] = publicProjectionAvailable(
                 pybind11::str(screenStateLabel(gc.screenState)),
                 "GameContext::screenState");
-        ret["visible_act_boss"] = publicProjectionUnavailable(
-                "unavailable",
-                "the native map view does not track boss-name reveal state; exposing GameContext::boss or secondBoss could reveal hidden selection");
+        const auto visibleActBoss = publicVisibleActBoss(gc);
+        ret["visible_act_boss"] = visibleActBoss;
 
         const auto actions = legalActions();
         pybind11::list mapGraph;
@@ -1596,7 +1638,9 @@ struct StepSimulator {
                 resourceFields, "StepSimulator::publicProjection");
 
         ret["screen_payload"] = publicProjectionAvailable(
-                publicScreenPayload(gc, actions, mapGraph, currentMapNode, legalRoutes),
+                publicScreenPayload(
+                        gc, visibleActBoss, actions, mapGraph,
+                        currentMapNode, legalRoutes),
                 "StepSimulator::publicProjection screen coverage and choices");
 
         pybind11::list candidates;
@@ -2844,5 +2888,3 @@ PYBIND11_MODULE(slaythespire, m) {
 #endif
 
 // os.add_dll_directory("C:\\Program Files\\mingw-w64\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\mingw64\\bin")
-
-

@@ -11,6 +11,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
+#define STS_LIGHTSPEED_TESTED_SOURCE_COMMIT "unknown"
+#endif
+
 namespace {
 
 using namespace pybind11;
@@ -25,6 +29,30 @@ dict screenPayload(const dict &projectionValue) {
         throw std::logic_error("screen coverage metadata is unavailable");
     }
     return field["value"].cast<dict>();
+}
+
+std::string visibleActBossName(const dict &projectionValue) {
+    const auto field = projectionValue["visible_act_boss"].cast<dict>();
+    if (field["availability"].cast<std::string>() != "available") {
+        throw std::logic_error("current Act boss is not available in the public projection");
+    }
+    if (!field.contains("source") || field["source"].cast<std::string>().empty()) {
+        throw std::logic_error("current Act boss omitted public provenance");
+    }
+    return field["value"].cast<std::string>();
+}
+
+void verifyVisibleBossMatchesCurrentAct(
+        StepSimulator &simulator,
+        const dict &projectionValue,
+        const char *boundary) {
+    const auto value = visibleActBossName(projectionValue);
+    const auto expectedName = std::string(
+            monsterEncounterStrings[static_cast<int>(simulator.gc.boss)]);
+    if (value != expectedName) {
+        throw std::logic_error(std::string(boundary)
+                + " public boss identity does not match the current Act map boss");
+    }
 }
 
 std::vector<LightSpeedAction> checkCandidateParity(
@@ -77,7 +105,23 @@ dict withDifferentHiddenFuture(const StepSimulator &simulator) {
     hiddenFuture.gc.monsterRng = sts::Random(0x22022026ULL);
     hiddenFuture.gc.cardRng = sts::Random(0x22032026ULL);
     hiddenFuture.gc.relicRng = sts::Random(0x22042026ULL);
-    hiddenFuture.gc.secondBoss = MonsterEncounter::AWAKENED_ONE;
+    const MonsterEncounter actThreeBosses[] = {
+        MonsterEncounter::AWAKENED_ONE,
+        MonsterEncounter::TIME_EATER,
+        MonsterEncounter::DONU_AND_DECA,
+    };
+    bool changedSecondBoss = false;
+    for (const auto candidate : actThreeBosses) {
+        if (candidate != simulator.gc.boss
+                && candidate != simulator.gc.secondBoss) {
+            hiddenFuture.gc.secondBoss = candidate;
+            changedSecondBoss = true;
+            break;
+        }
+    }
+    if (!changedSecondBoss) {
+        hiddenFuture.gc.secondBoss = MonsterEncounter::AWAKENED_ONE;
+    }
     return projection(hiddenFuture);
 }
 
@@ -85,6 +129,78 @@ void checkHiddenFutureInvariance(StepSimulator &simulator, const dict &baseline)
     if (!baseline.equal(withDifferentHiddenFuture(simulator))) {
         throw std::logic_error("noncombat public projection changed with hidden future state");
     }
+}
+
+nlohmann::json verifyActBossTransitions() {
+    StepSimulator simulator(CharacterClass::IRONCLAD, 49, 20);
+    const auto neowProjection = projection(simulator);
+    verifyVisibleBossMatchesCurrentAct(simulator, neowProjection, "Act 1 Neow");
+
+    const auto firstActBoss = simulator.gc.boss;
+    auto alternateFirstBoss = simulator;
+    alternateFirstBoss.gc.boss = firstActBoss == MonsterEncounter::THE_GUARDIAN
+            ? MonsterEncounter::HEXAGHOST : MonsterEncounter::THE_GUARDIAN;
+    const auto alternateProjection = projection(alternateFirstBoss);
+    if (visibleActBossName(neowProjection)
+            == visibleActBossName(alternateProjection)) {
+        throw std::logic_error("different public Act 1 boss selections were not reflected");
+    }
+
+    simulator.gc.transitionToAct(2);
+    const auto actTwoProjection = projection(simulator);
+    verifyVisibleBossMatchesCurrentAct(simulator, actTwoProjection, "Act 2 map");
+    const auto actTwoBoss = simulator.gc.boss;
+    if (screenPayload(actTwoProjection)["coverage_status"].cast<std::string>()
+            != "supported") {
+        throw std::logic_error("Act 2 map stayed partial despite a validated public boss");
+    }
+
+    simulator.gc.transitionToAct(3);
+    if (simulator.gc.secondBoss == MonsterEncounter::INVALID
+            || simulator.gc.secondBoss == simulator.gc.boss) {
+        throw std::logic_error("A20 Act 3 did not create a distinct hidden second boss");
+    }
+    const auto actThreeProjection = projection(simulator);
+    verifyVisibleBossMatchesCurrentAct(simulator, actThreeProjection, "Act 3 map");
+    const auto actThreeFirstBoss = simulator.gc.boss;
+    checkHiddenFutureInvariance(simulator, actThreeProjection);
+
+    const auto hiddenSecondBoss = simulator.gc.secondBoss;
+    simulator.gc.curRoom = Room::BOSS;
+    simulator.gc.info.encounter = simulator.gc.boss;
+    simulator.gc.afterBattle();
+    if (simulator.gc.screenState != ScreenState::BATTLE
+            || simulator.gc.info.encounter != hiddenSecondBoss) {
+        throw std::logic_error("A20 second boss did not become the actual next Battle encounter");
+    }
+    const auto secondBossBattle = simulator.publicBattleState();
+    if (secondBossBattle["encounter_id"].cast<std::string>()
+            != monsterEncounterEnumNames[static_cast<int>(hiddenSecondBoss)]) {
+        throw std::logic_error("the revealed A20 second boss is absent from public Battle state");
+    }
+    const auto secondBattleProjection = projection(simulator);
+    if (visibleActBossName(secondBattleProjection)
+            != monsterEncounterStrings[static_cast<int>(simulator.gc.boss)]) {
+        throw std::logic_error("Act map boss identity changed to the hidden second boss field");
+    }
+
+    simulator.gc.transitionToAct(4);
+    const auto actFourProjection = projection(simulator);
+    verifyVisibleBossMatchesCurrentAct(simulator, actFourProjection, "Act 4 map");
+    if (simulator.gc.boss != MonsterEncounter::THE_HEART) {
+        throw std::logic_error("Act 4 public boss is not the Heart");
+    }
+
+    return {
+        {"act_1_neow", monsterEncounterStrings[static_cast<int>(firstActBoss)]},
+        {"act_2_map", monsterEncounterStrings[static_cast<int>(actTwoBoss)]},
+        {"act_3_map_first_boss", monsterEncounterStrings[static_cast<int>(actThreeFirstBoss)]},
+        {"a20_second_boss_hidden_until_battle", true},
+        {"a20_second_boss_public_battle_identity", monsterEncounterEnumNames[
+                static_cast<int>(hiddenSecondBoss)]},
+        {"act_4_map", monsterEncounterStrings[static_cast<int>(MonsterEncounter::THE_HEART)]},
+        {"different_valid_act_1_boss_changes_public_identity", true},
+    };
 }
 
 void advanceFirstLegal(StepSimulator &simulator) {
@@ -117,17 +233,20 @@ int main() {
         constexpr int ascension = 20;
         constexpr std::uint64_t firstSeed = 49;
         constexpr std::uint64_t secondSeed = 50;
+        const auto actBossTransitions = verifyActBossTransitions();
         nlohmann::json evidence = {
             {"schema_id", "native-public-noncombat-projection-smoke-v1"},
-            {"native_base_commit", "ab2b11bc3b5b6c6b68d9d855bc9545e9aca62a28"},
+            {"tested_native_source_commit", STS_LIGHTSPEED_TESTED_SOURCE_COMMIT},
             {"character", "IRONCLAD"},
             {"ascension", ascension},
             {"seeds", nlohmann::json::array({firstSeed, secondSeed})},
             {"outcome_claim", "none"}
         };
+        evidence["act_boss_visibility"] = actBossTransitions;
 
         StepSimulator run(CharacterClass::IRONCLAD, firstSeed, ascension);
         auto eventProjection = projection(run);
+        verifyVisibleBossMatchesCurrentAct(run, eventProjection, "seed 49 Neow");
         if (eventProjection["schema_id"].cast<std::string>()
                 != "native-public-projection-v3") {
             throw std::logic_error("public projection schema was not advanced to v3");
@@ -405,6 +524,7 @@ int main() {
         // second-boss selector must not enter its projection.
         advanceToMap(run, 8);
         const auto mapProjection = projection(run);
+        verifyVisibleBossMatchesCurrentAct(run, mapProjection, "seed 49 Map");
         const auto mapActions = checkCandidateParity(run, mapProjection);
         const auto mapField = mapProjection["visible_map_graph"].cast<dict>();
         const auto graph = mapField["value"].cast<list>();
@@ -414,8 +534,8 @@ int main() {
         }
         const auto routes = routeField["value"].cast<list>();
         const auto screen = screenPayload(mapProjection);
-        if (screen["coverage_status"].cast<std::string>() != "partial") {
-            throw std::logic_error("Map screen must state its unrevealed boss limitation");
+        if (screen["coverage_status"].cast<std::string>() != "supported") {
+            throw std::logic_error("Map screen is not fully described with its visible boss identity");
         }
         if (routes.size() < 2) {
             throw std::logic_error("native Map screen did not expose multiple legal route branches");
@@ -472,17 +592,23 @@ int main() {
         if (currentNode["location"].cast<std::string>() != "before_first_route") {
             throw std::logic_error("seed 49 starting map location was not exposed faithfully");
         }
-        if (mapProjection["visible_act_boss"].cast<dict>()
-                ["availability"].cast<std::string>() != "unavailable") {
-            throw std::logic_error("untracked boss identity was exposed from hidden simulator state");
+        const auto mapBossName = visibleActBossName(mapProjection);
+        auto inconsistentBoss = run;
+        inconsistentBoss.gc.boss = MonsterEncounter::COLLECTOR;
+        const auto inconsistentBossProjection = projection(inconsistentBoss);
+        if (inconsistentBossProjection["visible_act_boss"].cast<dict>()
+                    ["availability"].cast<std::string>() != "unavailable"
+                || coverageStatus(inconsistentBossProjection) != "partial") {
+            throw std::logic_error("out-of-Act boss data did not fail closed");
         }
         evidence["map_screen"] = {
-            {"coverage_status", "partial"},
+            {"coverage_status", "supported"},
             {"visible_node_count", graph.size()},
             {"legal_route_count", routes.size()},
             {"contains_unknown_room_symbol", true},
             {"candidate_route_bindings_valid", true},
-            {"act_boss_identity", "unavailable; reveal state is not tracked"},
+            {"act_boss_identity", mapBossName},
+            {"invalid_act_boss_fails_closed", true},
             {"candidate_order_matches_legal_actions", true}
         };
         checkHiddenFutureInvariance(run, mapProjection);

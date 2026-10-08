@@ -56,3 +56,16 @@ target_include_directories(test-public-noncombat-projection PUBLIC include)
 target_include_directories(test-public-noncombat-projection PUBLIC json/single_include)
 target_include_directories(test-public-noncombat-projection PUBLIC bindings)
 target_link_libraries(test-public-noncombat-projection PRIVATE pybind11::embed)
+
+execute_process(
+        COMMAND git rev-parse --verify HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE STS_LIGHTSPEED_GIT_RESULT
+        ERROR_QUIET)
+if(NOT STS_LIGHTSPEED_GIT_RESULT EQUAL 0 OR NOT STS_LIGHTSPEED_TESTED_SOURCE_COMMIT)
+    set(STS_LIGHTSPEED_TESTED_SOURCE_COMMIT "unknown")
+endif()
+target_compile_definitions(test-public-noncombat-projection PRIVATE
+        STS_LIGHTSPEED_TESTED_SOURCE_COMMIT="${STS_LIGHTSPEED_TESTED_SOURCE_COMMIT}")
