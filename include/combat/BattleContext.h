@@ -139,7 +139,7 @@ namespace sts {
         std::int32_t knownDrawInsertionBaseSize = -1;
         std::vector<DrawKnowledgeAnchor> knownDrawInsertionAnchors;
         std::vector<DrawKnowledgeInsertion> knownDrawInsertionCards;
-        std::map<std::int16_t, bool> knownGeneratedCardPublicIdentity;
+
 
         CardQueueItem curCardQueueItem;
 

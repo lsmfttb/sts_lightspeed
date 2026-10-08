@@ -15,7 +15,9 @@ using namespace sts;
 void CardManager::init(const sts::GameContext &gc, BattleContext &bc) {
 
 //    masterDeckSize = gc.deck.size();
-    nextUniqueCardId = gc.deck.size();
+    persistentDeckSize = static_cast<int>(gc.deck.size());
+    nextUniqueCardId = persistentDeckSize;
+    knownGeneratedCardPublicIdentity.clear();
     handPainCount = false;
     handNormalityCount = false;
     strikeCount = 0;
@@ -180,6 +182,7 @@ void CardManager::moveToHand(const CardInstance &c) {
 }
 
 void CardManager::moveToExhaustPile(const CardInstance &c) {
+    notePublicGeneratedCardIdentity(c);
     notifyRemoveFromCombat(c);
     exhaustPile.push_back(c);
 }
@@ -255,6 +258,12 @@ void CardManager::moveDiscardPileIntoToDrawPile() {
 
 // **************** BEGIN NOTIFY METHODS ****************
 
+void CardManager::notePublicGeneratedCardIdentity(const CardInstance &c) {
+    if (c.getUniqueId() >= persistentDeckSize) {
+        knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    }
+}
+
 void CardManager::notifyAddCardToCombat(const CardInstance &c) {
     if (c.isStrikeCard()) {
         ++strikeCount;
@@ -268,6 +277,7 @@ void CardManager::notifyRemoveFromCombat(const CardInstance &c) {
 }
 
 void CardManager::notifyAddToHand(const CardInstance &c) {
+    notePublicGeneratedCardIdentity(c);
 #ifdef sts_asserts
     if (c.getId() == CardId::INVALID) {
         std::cerr << *g_debug_bc << '\n';
@@ -337,6 +347,7 @@ void CardManager::notifyRemoveFromDrawPile(const CardInstance &c) {
 }
 
 void CardManager::notifyAddToDiscardPile(const CardInstance &c) {
+    notePublicGeneratedCardIdentity(c);
 #ifdef sts_asserts
     if (c.getId() == CardId::INVALID) {
         std::cerr << *g_debug_bc << '\n';

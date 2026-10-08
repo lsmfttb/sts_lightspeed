@@ -45,8 +45,8 @@ bool drawPilePublicMembershipKnown(const GameContext &gc, const BattleContext &b
         if (persistent) {
             continue;
         }
-        const auto known = bc.knownGeneratedCardPublicIdentity.find(card.getUniqueId());
-        if (known == bc.knownGeneratedCardPublicIdentity.end() || !known->second) {
+        const auto known = bc.cards.knownGeneratedCardPublicIdentity.find(card.getUniqueId());
+        if (known == bc.cards.knownGeneratedCardPublicIdentity.end() || !known->second) {
             return false;
         }
     }

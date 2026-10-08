@@ -627,7 +627,7 @@ void verifySamplerPreservesKnownDrawConstraints() {
     const auto insertionIdx = baselineSize - minimumPosition;
     inserted.bc.cards.drawPile.insert(
             inserted.bc.cards.drawPile.begin() + insertionIdx, generated);
-    inserted.bc.knownGeneratedCardPublicIdentity[generated.getUniqueId()] = true;
+    inserted.bc.cards.knownGeneratedCardPublicIdentity[generated.getUniqueId()] = true;
     inserted.bc.knownDrawInsertionBaseSize = static_cast<std::int32_t>(baselineSize);
     inserted.bc.knownDrawInsertionCards.push_back(
             {generated.getUniqueId(), minimumPosition, -1});
@@ -651,6 +651,190 @@ void verifySamplerPreservesKnownDrawConstraints() {
     }
 }
 
+void moveCurrentDrawPileToDiscard(StepSimulator &simulator) {
+    auto &cards = simulator.bc.cards;
+    for (const auto &card : cards.drawPile) {
+        cards.notifyRemoveFromDrawPile(card);
+        cards.moveToDiscardPile(card);
+    }
+    cards.drawPile.clear();
+}
+
+void shuffleDiscardIntoEmptyDrawPile(StepSimulator &simulator) {
+    require(simulator.bc.cards.drawPile.empty(),
+            "shuffle fixture did not have an empty draw pile");
+    simulator.bc.onShuffle();
+    const auto shuffle = Actions::EmptyDeckShuffle();
+    shuffle.actFunc(simulator.bc);
+}
+
+std::string publicDrawOrderClassification(const pybind11::dict &state) {
+    const auto visibility = pybind11::cast<pybind11::dict>(state["visibility"]);
+    const auto drawOrder = pybind11::cast<pybind11::dict>(visibility["draw_order"]);
+    return pybind11::cast<std::string>(drawOrder["classification"]);
+}
+
+int publicDrawCountForCard(const pybind11::dict &state, CardId cardId) {
+    const auto membership = pybind11::cast<pybind11::dict>(
+            state["draw_pile_membership"]);
+    if (!membership.contains("multiset_counts")) {
+        return 0;
+    }
+    const auto counts = pybind11::cast<pybind11::list>(membership["multiset_counts"]);
+    for (const auto &item : counts) {
+        const auto row = pybind11::cast<pybind11::dict>(item);
+        if (pybind11::cast<int>(row["id"]) == static_cast<int>(cardId)) {
+            return pybind11::cast<int>(row["count"]);
+        }
+    }
+    return 0;
+}
+
+bool listContainsString(const pybind11::list &values, const std::string &expected) {
+    for (const auto &value : values) {
+        if (pybind11::cast<std::string>(value) == expected) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void requireGeneratedCardIdentityKnown(
+        const CardManager &cards, const CardInstance &card,
+        const std::string &caseName) {
+    const auto known = cards.knownGeneratedCardPublicIdentity.find(card.getUniqueId());
+    require(known != cards.knownGeneratedCardPublicIdentity.end() && known->second,
+            caseName + " did not retain public generated-card identity knowledge");
+}
+
+void verifyGeneratedCardMembershipSurvivesPublicPileTransitions() {
+    auto first = makePublicBattleFixture();
+    auto second = makePublicBattleFixture();
+    second.bc.cards.nextUniqueCardId += 13;
+
+    const auto addSmallSlimesCards =
+            Actions::MakeTempCardInDiscard({CardId::SLIMED}, 2);
+    addSmallSlimesCards.actFunc(first.bc);
+    addSmallSlimesCards.actFunc(second.bc);
+    require(first.bc.cards.discardPile.size() == 2
+                    && second.bc.cards.discardPile.size() == 2,
+            "Small Slimes Slimed-card fixture did not create two discard cards");
+    require(first.bc.cards.discardPile.front().getUniqueId()
+                    != second.bc.cards.discardPile.front().getUniqueId(),
+            "public-equivalent fixtures did not vary private generated-card ids");
+    for (const auto &card : first.bc.cards.discardPile) {
+        requireGeneratedCardIdentityKnown(
+                first.bc.cards, card, "generated discard pile card");
+    }
+
+    moveCurrentDrawPileToDiscard(first);
+    moveCurrentDrawPileToDiscard(second);
+    shuffleDiscardIntoEmptyDrawPile(first);
+    shuffleDiscardIntoEmptyDrawPile(second);
+
+    const auto firstState = first.publicBattleState();
+    const auto secondState = second.publicBattleState();
+    require(firstState.equal(secondState),
+            "public state exposed anchor-specific generated-card ids");
+    require(pybind11::cast<std::string>(firstState["information_fidelity"])
+                    == "supported",
+            "publicly known Slimed membership remained unsupported after shuffle");
+    require(publicDrawOrderClassification(firstState) == "hidden",
+            "public pile shuffle exposed hidden draw order");
+    require(publicDrawCountForCard(firstState, CardId::SLIMED) == 2,
+            "duplicate generated Slimed faces were not represented as a public multiset");
+    require(!containsPrivatePublicStateKey(firstState),
+            "public state exposed a generated card's native unique id");
+
+    auto firstParticle = first.samplePublicConsistentHiddenFuture(1201, 7);
+    auto secondParticle = second.samplePublicConsistentHiddenFuture(1201, 7);
+    requirePublicConsistentSample(first, firstParticle, "generated-membership sample A");
+    requirePublicConsistentSample(second, secondParticle, "generated-membership sample B");
+    require(firstParticle.publicBattleState().equal(secondParticle.publicBattleState()),
+            "generated-card sampling depended on the private anchor ids");
+    require(publicDrawCountForCard(
+                    firstParticle.publicBattleState(), CardId::SLIMED) == 2,
+            "sampler did not preserve known generated-card membership");
+
+    const auto generated = std::find_if(
+            first.bc.cards.drawPile.begin(), first.bc.cards.drawPile.end(),
+            [](const CardInstance &card) { return card.getId() == CardId::SLIMED; });
+    require(generated != first.bc.cards.drawPile.end(),
+            "generated Slimed card was missing from shuffled draw pile");
+    const auto drawPileIdx = static_cast<int>(
+            std::distance(first.bc.cards.drawPile.begin(), generated));
+    const auto drawn = *generated;
+    first.bc.consumeKnownDrawAtIndex(drawPileIdx, drawn);
+    first.bc.cards.removeFromDrawPileAtIdx(drawPileIdx);
+    first.bc.cards.moveToHand(drawn);
+    const auto afterDrawState = first.publicBattleState();
+    require(pybind11::cast<std::string>(afterDrawState["information_fidelity"])
+                    == "supported"
+                    && publicDrawCountForCard(afterDrawState, CardId::SLIMED) == 1,
+            "drawing one duplicate generated card did not remove just its draw membership");
+}
+
+void verifyHiddenGeneratedIdentityRemainsFailClosedUntilObserved() {
+    auto simulator = makePublicBattleFixture();
+    moveCurrentDrawPileToDiscard(simulator);
+    CardInstance hidden(CardId::SLIMED);
+    simulator.bc.insertTempCardRandomlyIntoDrawPile(hidden, false);
+    const auto hiddenCard = simulator.bc.cards.drawPile.back();
+    const auto hiddenIdentity = simulator.bc.cards.knownGeneratedCardPublicIdentity.find(
+            hiddenCard.getUniqueId());
+    require(hiddenIdentity != simulator.bc.cards.knownGeneratedCardPublicIdentity.end()
+                    && !hiddenIdentity->second,
+            "hidden random draw insertion was marked publicly known");
+    const auto hiddenState = simulator.publicBattleState();
+    require(pybind11::cast<std::string>(hiddenState["information_fidelity"])
+                    == "unsupported_fidelity",
+            "hidden random generated identity did not remain fail-closed");
+    const auto hiddenMembership = pybind11::cast<pybind11::dict>(
+            hiddenState["draw_pile_membership"]);
+    require(listContainsString(
+                    pybind11::cast<pybind11::list>(hiddenMembership["unsupported_reasons"]),
+                    "insertion_membership_unrepresented"),
+            "hidden random generated identity lost its membership failure reason");
+    requireSamplerRejected(simulator, "hidden generated-card membership");
+
+    const auto handSizeBeforeDraw = simulator.bc.cards.cardsInHand;
+    simulator.bc.drawCards(1);
+    require(simulator.bc.cards.cardsInHand == handSizeBeforeDraw + 1,
+            "visible generated card was not drawn into hand");
+    const auto revealed = simulator.bc.cards.hand[handSizeBeforeDraw];
+    requireGeneratedCardIdentityKnown(
+            simulator.bc.cards, revealed, "drawn generated hand card");
+    simulator.bc.cards.removeFromHandAtIdx(handSizeBeforeDraw);
+    simulator.bc.cards.moveToDiscardPile(revealed);
+    requireGeneratedCardIdentityKnown(
+            simulator.bc.cards, revealed, "revealed generated discard card");
+    shuffleDiscardIntoEmptyDrawPile(simulator);
+    const auto publicState = simulator.publicBattleState();
+    require(pybind11::cast<std::string>(publicState["information_fidelity"])
+                    == "supported"
+                    && publicDrawOrderClassification(publicState) == "hidden"
+                    && publicDrawCountForCard(publicState, CardId::SLIMED) == 1,
+            "revealed generated identity did not retain membership through discard shuffle");
+}
+
+void verifyGeneratedCardIdentityIsRecordedInVisiblePiles() {
+    auto simulator = makePublicBattleFixture();
+    auto &cards = simulator.bc.cards;
+
+    cards.createTempCardInHand(CardInstance(CardId::SLIMED));
+    requireGeneratedCardIdentityKnown(
+            cards, cards.hand[cards.cardsInHand - 1], "generated hand card");
+
+    cards.createTempCardInDiscard(CardInstance(CardId::SLIMED));
+    requireGeneratedCardIdentityKnown(
+            cards, cards.discardPile.back(), "generated discard card");
+
+    CardInstance exhausted(CardId::SLIMED);
+    exhausted.setUniqueId(cards.nextUniqueCardId++);
+    cards.moveToExhaustPile(exhausted);
+    requireGeneratedCardIdentityKnown(
+            cards, cards.exhaustPile.back(), "generated exhaust card");
+}
 void verifySamplerFailsClosedForUnsupportedFidelity() {
     auto unsupported = makePublicBattleFixture();
     unsupported.bc.player.cc = CharacterClass::DEFECT;
@@ -914,6 +1098,9 @@ int main() {
     verifyPublicActionIdentitiesExecute();
     verifyPublicConsistentSamplerDiversityAndReproducibility();
     verifySamplerPreservesKnownDrawConstraints();
+    verifyGeneratedCardMembershipSurvivesPublicPileTransitions();
+    verifyHiddenGeneratedIdentityRemainsFailClosedUntilObserved();
+    verifyGeneratedCardIdentityIsRecordedInVisiblePiles();
     verifySamplerFailsClosedForUnsupportedFidelity();
     verifyPrivateMonsterFutureStillFailsClosed();
     verifyPublicStatusTimingSemantics();

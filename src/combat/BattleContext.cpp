@@ -25,7 +25,6 @@ void BattleContext::init(const GameContext &gc, MonsterEncounter encounterToInit
     knownDrawInsertionBaseSize = -1;
     knownDrawInsertionAnchors.clear();
     knownDrawInsertionCards.clear();
-    knownGeneratedCardPublicIdentity.clear();
     undefinedBehaviorEvoked = false;
     haveUsedDiscoveryAction = false;
     seed = gc.seed;
@@ -2825,7 +2824,7 @@ void BattleContext::clearKnownDrawOrder() {
 }
 
 void BattleContext::noteKnownDrawTop(const CardInstance &c) {
-    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    cards.notePublicGeneratedCardIdentity(c);
     if (knownDrawInsertionBaseSize >= 0) {
         ++knownDrawInsertionBaseSize;
         for (auto &anchor : knownDrawInsertionAnchors) {
@@ -2856,7 +2855,7 @@ void BattleContext::noteKnownDrawTop(const CardInstance &c) {
 }
 
 void BattleContext::noteKnownDrawBottom(const CardInstance &c) {
-    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    cards.notePublicGeneratedCardIdentity(c);
     if (knownDrawInsertionBaseSize >= 0) {
         const auto bottomPosition = knownDrawInsertionBaseSize;
         knownDrawInsertionAnchors.push_back({bottomPosition, c.getUniqueId()});
@@ -2882,13 +2881,13 @@ void BattleContext::noteKnownDrawBottom(const CardInstance &c) {
 }
 
 void BattleContext::consumeKnownDrawTop(const CardInstance &c) {
-    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    cards.notePublicGeneratedCardIdentity(c);
     const bool hasUnrepresentedMembership = std::any_of(
             cards.drawPile.begin(), cards.drawPile.end(),
             [&](const CardInstance &candidate) {
-                const auto known = knownGeneratedCardPublicIdentity.find(
+                const auto known = cards.knownGeneratedCardPublicIdentity.find(
                         candidate.getUniqueId());
-                return known != knownGeneratedCardPublicIdentity.end()
+                return known != cards.knownGeneratedCardPublicIdentity.end()
                         && !known->second;
             });
     if (!hasUnrepresentedMembership) {
@@ -3080,16 +3079,16 @@ void BattleContext::consumeKnownDrawTop(const CardInstance &c) {
 }
 
 void BattleContext::consumeKnownDrawAtIndex(int drawPileIdx, const CardInstance &c) {
-    knownGeneratedCardPublicIdentity[c.getUniqueId()] = true;
+    cards.notePublicGeneratedCardIdentity(c);
     const bool hasOtherUnrepresentedMembership = std::any_of(
             cards.drawPile.begin(), cards.drawPile.end(),
             [&](const CardInstance &candidate) {
                 if (candidate.getUniqueId() == c.getUniqueId()) {
                     return false;
                 }
-                const auto known = knownGeneratedCardPublicIdentity.find(
+                const auto known = cards.knownGeneratedCardPublicIdentity.find(
                         candidate.getUniqueId());
-                return known != knownGeneratedCardPublicIdentity.end()
+                return known != cards.knownGeneratedCardPublicIdentity.end()
                         && !known->second;
             });
     if (!hasOtherUnrepresentedMembership) {
@@ -3149,7 +3148,7 @@ void BattleContext::markDrawKnowledgeUnsupported(
 void BattleContext::noteRandomDrawInsertion(
         const CardInstance &card, const int previousPileSize,
         const bool publicIdentityKnown) {
-    knownGeneratedCardPublicIdentity[card.getUniqueId()] = publicIdentityKnown;
+    cards.knownGeneratedCardPublicIdentity[card.getUniqueId()] = publicIdentityKnown;
     if (!publicIdentityKnown) {
         markDrawKnowledgeUnsupported(
                 DrawKnowledgeUnsupportedReason::INSERTION_MEMBERSHIP_UNREPRESENTED);
@@ -3158,7 +3157,7 @@ void BattleContext::noteRandomDrawInsertion(
         if (publicIdentityKnown) {
             noteKnownDrawTop(card);
         }
-        knownGeneratedCardPublicIdentity[card.getUniqueId()] = publicIdentityKnown;
+        cards.knownGeneratedCardPublicIdentity[card.getUniqueId()] = publicIdentityKnown;
         return;
     }
 
@@ -3214,7 +3213,7 @@ void BattleContext::insertTempCardRandomlyIntoDrawPile(
 }
 
 void BattleContext::shuffleCardIntoDrawPile(const CardInstance &card) {
-    knownGeneratedCardPublicIdentity[card.getUniqueId()] = true;
+    cards.notePublicGeneratedCardIdentity(card);
     const auto previousPileSize = static_cast<int>(cards.drawPile.size());
     cards.shuffleIntoDrawPile(cardRandomRng, card);
     if (previousPileSize == 0) {
@@ -3402,6 +3401,7 @@ void BattleContext::chooseDualWieldCard(int handIdx) {
     }
 
     dualWieldCard.uniqueId = static_cast<std::int16_t>(cards.nextUniqueCardId++); // dual wield buggy
+    cards.notePublicGeneratedCardIdentity(dualWieldCard);
     cards.hand[i++] = dualWieldCard;
 
     for (int x = 0; x < copyCount; ++x) {

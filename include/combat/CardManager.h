@@ -7,6 +7,7 @@
 
 #include <vector>
 #include <array>
+#include <map>
 
 #include "sts_common.h"
 
@@ -24,7 +25,10 @@ namespace sts {
         static constexpr int MAX_HAND_SIZE = 10;
         static constexpr int MAX_GROUP_SIZE = 64;
 
-        int nextUniqueCardId = 0; // unique card ids that are less than the masterDeckSize are non-temporary
+        int persistentDeckSize = 0;
+        int nextUniqueCardId = 0; // ids below persistentDeckSize are persistent
+        // Runtime-only identity knowledge for generated cards; unique ids never enter public state.
+        std::map<std::int16_t, bool> knownGeneratedCardPublicIdentity;
 
         int cardsInHand = 0;
         std::array<CardInstance, MAX_HAND_SIZE> hand;
@@ -53,6 +57,7 @@ namespace sts {
         void createTempCardInDrawPile(int insertIdx, CardInstance c);
         void createTempCardInDiscard(CardInstance c);
         void createTempCardInHand(CardInstance c);
+        void notePublicGeneratedCardIdentity(const CardInstance &c);
 
         void removeFromDrawPileAtIdx(int idx);
         CardInstance popFromDrawPile();
