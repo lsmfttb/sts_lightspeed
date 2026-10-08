@@ -1,0 +1,366 @@
+{
+  "ascension": 20,
+  "disposition": "STUDY_ONLY",
+  "driver_seed": 21021,
+  "firewall_tests": {
+    "hidden_future_input_invariance": {
+      "candidate_count": 9,
+      "derived_feature_count": 8,
+      "distinct_private_futures": true,
+      "native_battle_observation_equal": true,
+      "native_v3_projection_equal": true,
+      "policy_input_bytes": 48512,
+      "policy_input_sha256": "ffc44a3ee13389bd699e296addcbef34a27472e189b49baa960378c98217ce69",
+      "public_history_entries": 4,
+      "serialized_policy_input_equal": true
+    },
+    "mismatched_identity_rejected": true,
+    "poisoned_privileged_arguments": {
+      "callback_argument_type": "bytes",
+      "poisoned_adapter_snapshot_actions_not_read": true,
+      "selected_public_ordinal": 3,
+      "simulator_extension_importable": false,
+      "worker_pid": 463
+    },
+    "selected_public_identity_equals_executed_legal_identity": true,
+    "stale_after_arming_rejected": true,
+    "stale_cross_state_identity_rejected": true
+  },
+  "legacy_base_commit": "3037b75eca4bd73fa70d018ffd4442a1f2d65628",
+  "limitations": [
+    "ordinary A20 run stops at MAP_SCREEN because visible_act_boss is unavailable",
+    "mechanics-only Battle fixture uses four first-legal setup transitions; these are not policy decisions",
+    "no complete run, win-rate, or A20 strength claim"
+  ],
+  "mechanics_only_fixture": {
+    "bounded_public_battle_comparison": {
+      "baseline": "Issue 17 public tactical heuristic",
+      "root_action_mapping": {
+        "baseline_public_identity_matches_native_legal_action": true,
+        "baseline_selected_ordinal": 5,
+        "baseline_selected_public_identity": {
+          "idx1": 2,
+          "idx2": 1,
+          "idx3": 2,
+          "kind": "card",
+          "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+          "scope": "battle"
+        },
+        "both_public_identities_accepted_by_step_public_action": true,
+        "ordered_public_candidate_count": 9,
+        "search_public_identity_matches_native_legal_action": true,
+        "search_selected_ordinal": 5,
+        "search_selected_public_identity": {
+          "idx1": 2,
+          "idx2": 1,
+          "idx3": 2,
+          "kind": "card",
+          "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+          "scope": "battle"
+        }
+      },
+      "shared_public_search": {
+        "action_choice_source": "shared public root visits and values only",
+        "distinct_particles_used": 32,
+        "native_public_action_steps": 3345,
+        "particle_count": 32,
+        "root_action_count": 9,
+        "root_actions_visited": 9,
+        "selected_action_mean_value": 0.93871921182266,
+        "selected_action_visits": 28,
+        "selected_public_action": {
+          "idx1": 2,
+          "idx2": 1,
+          "idx3": 2,
+          "kind": "card",
+          "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+          "scope": "battle"
+        },
+        "shared_public_nodes": 2862,
+        "simulations": 192,
+        "terminal_rollouts": 172,
+        "tree_key_source": "public state and public action/result history only",
+        "truncated_rollouts": 20
+      },
+      "shared_public_search_wall_seconds": 1.996540006
+    },
+    "controlled_run_steps": 1,
+    "policy_role": "battle_input_probe",
+    "prelude_is_not_policy_evidence": true,
+    "prelude_steps": 4,
+    "public_action_mapping": {
+      "executed_legal_identity_matches": true,
+      "selected_public_identity": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 1,
+        "kind": "card",
+        "label": "{ use card (1) (Defend,8,1,1) }",
+        "scope": "battle"
+      },
+      "selected_public_ordinal": 3
+    }
+  },
+  "native_base_commit": "a655dbb264b2274c54acf0426cd5df19a8c8ec96",
+  "normal_public_run": {
+    "first_fail_closed_boundary": "PUBLIC_SCREEN_COVERAGE_GAP screen=MAP_SCREEN field=visible_act_boss availability=unavailable reason=the native map view does not track boss-name reveal state; exposing GameContext::boss or secondBoss could reveal hidden selection",
+    "map_projection_coverage_status": "partial",
+    "policy_decisions": [
+      {
+        "policy_input_sha256": "8f2c502888e8816bda10cebf38cd0fd7b9896638c1e809d52318740ecd7c494f",
+        "policy_role": "expert_non_combat",
+        "screen": "EVENT_SCREEN",
+        "selected_public_identity": {
+          "idx1": 2,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "event",
+          "label": "game.event idx1=2 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 2,
+        "step_index": 0
+      },
+      {
+        "policy_input_sha256": "10adebd190efa6f6a11b74c1ec72fafcc1da9cee9bd68b04c3431c35f327a806",
+        "policy_role": "expert_non_combat",
+        "screen": "REWARDS",
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "reward_card",
+          "label": "game.reward_card idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0,
+        "step_index": 1
+      },
+      {
+        "policy_input_sha256": "e54020966cac9a287816e527e20f42608b43489432b0d5ed719f796cebda29a8",
+        "policy_role": "expert_non_combat",
+        "screen": "REWARDS",
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "skip",
+          "label": "game.skip idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0,
+        "step_index": 2
+      }
+    ],
+    "policy_input_sha256": "8f2c502888e8816bda10cebf38cd0fd7b9896638c1e809d52318740ecd7c494f",
+    "policy_process_has_simulator_import": false,
+    "policy_process_pid": 463,
+    "public_action_mapping": {
+      "executed_legal_identity_matches": true,
+      "selected_public_identity": {
+        "idx1": 2,
+        "idx2": 0,
+        "idx3": 0,
+        "kind": "event",
+        "label": "game.event idx1=2 idx2=0 idx3=0",
+        "scope": "game"
+      },
+      "selected_public_ordinal": 2
+    },
+    "public_action_mappings": [
+      {
+        "executed_legal_identity_matches": true,
+        "selected_public_identity": {
+          "idx1": 2,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "event",
+          "label": "game.event idx1=2 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 2
+      },
+      {
+        "executed_legal_identity_matches": true,
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "reward_card",
+          "label": "game.reward_card idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0
+      },
+      {
+        "executed_legal_identity_matches": true,
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "skip",
+          "label": "game.skip idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0
+      }
+    ],
+    "screens_with_policy_decisions": [
+      "EVENT_SCREEN",
+      "REWARDS",
+      "REWARDS"
+    ],
+    "stale_previous_action_rejected_at_map": true,
+    "steps_executed": 3,
+    "supported_event_policy": "expert_non_combat",
+    "supported_policy_decision_count": 3
+  },
+  "normal_public_seed": 49,
+  "normal_public_seeds": [
+    49,
+    50
+  ],
+  "ordinary_run_disposition_counts": {
+    "coverage_stops": 2,
+    "partial_screen_stops": 2,
+    "terminal_runs": 0,
+    "timed_out_runs": 0,
+    "unsupported_screen_stops": 0
+  },
+  "schema_id": "issue21-public-run-firewall-result-v1",
+  "screen_to_policy_input_provenance": [
+    {
+      "coverage": "supported",
+      "decision_count": 2,
+      "input": "canonical JSON bytes in isolated worker; native extension unavailable",
+      "policy": "seeded ExpertNonCombatDriver",
+      "screen": "EVENT_SCREEN",
+      "seed_count": 2
+    },
+    {
+      "coverage": "supported",
+      "decision_count": 4,
+      "input": "canonical JSON bytes in isolated worker; native extension unavailable",
+      "policy": "seeded ExpertNonCombatDriver",
+      "screen": "REWARDS",
+      "seed_count": 2
+    },
+    {
+      "coverage": "partial",
+      "first_missing_field": "visible_act_boss",
+      "policy_invoked": false,
+      "screen": "MAP_SCREEN"
+    },
+    {
+      "coverage": "supported mechanics-only fixture",
+      "normal_seed_decisions": 0,
+      "policy": "public-input probe for executor firewall; separate Issue 17 baseline and B=192 search evidence above",
+      "screen": "BATTLE"
+    }
+  ],
+  "seed_50_normal_public_run": {
+    "first_fail_closed_boundary": "PUBLIC_SCREEN_COVERAGE_GAP screen=MAP_SCREEN field=visible_act_boss availability=unavailable reason=the native map view does not track boss-name reveal state; exposing GameContext::boss or secondBoss could reveal hidden selection",
+    "policy_decision_count": 3,
+    "policy_decisions": [
+      {
+        "policy_input_sha256": "22b35a9a5af6af05fac7c73927619dde5125d1a31e0321e1349e6965e74ea0d4",
+        "policy_role": "expert_non_combat",
+        "screen": "EVENT_SCREEN",
+        "selected_public_identity": {
+          "idx1": 2,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "event",
+          "label": "game.event idx1=2 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 2,
+        "step_index": 0
+      },
+      {
+        "policy_input_sha256": "11fde36cb5ffbcdf8c28615263697aefc9f0390a851c93d437608e0343159ac0",
+        "policy_role": "expert_non_combat",
+        "screen": "REWARDS",
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "reward_card",
+          "label": "game.reward_card idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0,
+        "step_index": 1
+      },
+      {
+        "policy_input_sha256": "f128c7014ec1fd192fdd3cb9202348f6728defc032fa253fe0bd9db28ca690b3",
+        "policy_role": "expert_non_combat",
+        "screen": "REWARDS",
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "skip",
+          "label": "game.skip idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0,
+        "step_index": 2
+      }
+    ],
+    "policy_input_sha256": "22b35a9a5af6af05fac7c73927619dde5125d1a31e0321e1349e6965e74ea0d4",
+    "public_action_mapping_count": 3,
+    "public_action_mappings": [
+      {
+        "executed_legal_identity_matches": true,
+        "selected_public_identity": {
+          "idx1": 2,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "event",
+          "label": "game.event idx1=2 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 2
+      },
+      {
+        "executed_legal_identity_matches": true,
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "reward_card",
+          "label": "game.reward_card idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0
+      },
+      {
+        "executed_legal_identity_matches": true,
+        "selected_public_identity": {
+          "idx1": 0,
+          "idx2": 0,
+          "idx3": 0,
+          "kind": "skip",
+          "label": "game.skip idx1=0 idx2=0 idx3=0",
+          "scope": "game"
+        },
+        "selected_public_ordinal": 0
+      }
+    ],
+    "screens_with_policy_decisions": [
+      "EVENT_SCREEN",
+      "REWARDS",
+      "REWARDS"
+    ],
+    "steps_executed": 3
+  },
+  "source_reuse": {
+    "adapter": "sts_combat_rl.sim.lightspeed.LightSpeedAdapter",
+    "battle_baseline_and_shared_tree": "Issue 17 study-only source at 9a2792e1e02157124b4f90edc91b7ad8765d5d10",
+    "executor": "sts_combat_rl.sim.controlled_run.execute_controlled_run",
+    "noncombat_policy": "sts_combat_rl.sim.non_combat_policy.ExpertNonCombatDriver",
+    "permanent_core_promotion": false
+  },
+  "study_outcome": "PUBLIC_RUN_FIREWALL_ESTABLISHED"
+}

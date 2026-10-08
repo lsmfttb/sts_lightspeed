@@ -56,3 +56,14 @@ target_include_directories(test-public-noncombat-projection PUBLIC include)
 target_include_directories(test-public-noncombat-projection PUBLIC json/single_include)
 target_include_directories(test-public-noncombat-projection PUBLIC bindings)
 target_link_libraries(test-public-noncombat-projection PRIVATE pybind11::embed)
+
+add_executable(study-issue21-v3-firewall EXCLUDE_FROM_ALL
+        apps/study_issue21_v3_firewall.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_compile_definitions(study-issue21-v3-firewall PRIVATE
+        STS_LIGHTSPEED_NO_PYBIND_MODULE)
+target_include_directories(study-issue21-v3-firewall PUBLIC include)
+target_include_directories(study-issue21-v3-firewall PUBLIC json/single_include)
+target_include_directories(study-issue21-v3-firewall PUBLIC bindings)
+target_link_libraries(study-issue21-v3-firewall PRIVATE pybind11::embed)

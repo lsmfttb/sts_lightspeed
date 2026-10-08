@@ -1,0 +1,10 @@
+{
+  "details": {
+    "controlled_decisions": 1,
+    "fixture_prelude_steps": 4,
+    "shared_public_search_simulations": 192
+  },
+  "last_completed_boundary": "mechanics_only_battle_mapping_and_search_verified",
+  "schema_id": "issue21-run-progress-v1",
+  "status": "complete"
+}

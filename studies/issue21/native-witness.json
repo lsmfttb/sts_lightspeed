@@ -1,0 +1,3187 @@
+{
+  "ascension": 20,
+  "baseline_controller_source": "Issue 17 public tactical heuristic at 9a2792e1e02157124b4f90edc91b7ad8765d5d10",
+  "fixture_mode": "mechanics_only_fixture",
+  "game_seed": 49,
+  "mechanics_prelude_actions_are_policy_decisions": false,
+  "mechanics_prelude_steps": 4,
+  "native_base_commit": "a655dbb264b2274c54acf0426cd5df19a8c8ec96",
+  "native_battle_observation_equal_across_hidden_futures": true,
+  "native_sampled_hidden_futures_differ": true,
+  "native_v3_projection_equal_across_hidden_futures": true,
+  "normal_public_run_claim": false,
+  "policy_input_witnesses": [
+    {
+      "native_public_battle_observation": {
+        "act": 1,
+        "battle_outcome": "UNDECIDED",
+        "discard_pile": [],
+        "draw_knowledge_unsupported_reasons": [],
+        "draw_pile_membership": {
+          "classification": "public_constraint",
+          "multiset_counts": [
+            {
+              "count": 1,
+              "id": 15,
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "count": 2,
+              "id": 104,
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "count": 1,
+              "id": 150,
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "count": 3,
+              "id": 321,
+              "upgrade_count": 0,
+              "upgraded": false
+            }
+          ]
+        },
+        "draw_pile_size": 7,
+        "encounter_id": "SMALL_SLIMES",
+        "exhaust_pile": [],
+        "floor_num": 1,
+        "hand": [
+          {
+            "cost": 2,
+            "cost_for_turn": 2,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 25,
+            "name": "Bash",
+            "pile_index": 0,
+            "playable": true,
+            "requires_target": true,
+            "retain": false,
+            "type": "ATTACK",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 104,
+            "name": "Defend",
+            "pile_index": 1,
+            "playable": true,
+            "requires_target": false,
+            "retain": false,
+            "type": "SKILL",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 321,
+            "name": "Strike",
+            "pile_index": 2,
+            "playable": true,
+            "requires_target": true,
+            "retain": false,
+            "type": "ATTACK",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 104,
+            "name": "Defend",
+            "pile_index": 3,
+            "playable": true,
+            "requires_target": false,
+            "retain": false,
+            "type": "SKILL",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 321,
+            "name": "Strike",
+            "pile_index": 4,
+            "playable": true,
+            "requires_target": true,
+            "retain": false,
+            "type": "ATTACK",
+            "upgrade_count": 0,
+            "upgraded": false
+          }
+        ],
+        "information_fidelity": "supported",
+        "information_regime": "normal_public",
+        "input_state": "PLAYER_NORMAL",
+        "monsters": [
+          {
+            "alive": true,
+            "artifact": 0,
+            "attacking": true,
+            "block": 0,
+            "current_hp": 12,
+            "current_move": "SPIKE_SLIME_S_TACKLE",
+            "half_dead": false,
+            "id": 53,
+            "id_label": "SPIKE_SLIME_S",
+            "information_fidelity": "supported",
+            "intent_category": "ATTACK",
+            "last_move_id": 0,
+            "max_hp": 12,
+            "metallicize": 0,
+            "monster_index": 0,
+            "move_base_damage": 6,
+            "move_hits": 1,
+            "move_id": 153,
+            "name": "SPIKE_SLIME_S",
+            "plated_armor": 0,
+            "poison": 0,
+            "public_statuses": [],
+            "regen": 0,
+            "strength": 0,
+            "targetable": true,
+            "vulnerable": 0,
+            "weak": 0
+          },
+          {
+            "alive": true,
+            "artifact": 0,
+            "attacking": true,
+            "block": 0,
+            "current_hp": 29,
+            "current_move": "ACID_SLIME_M_CORROSIVE_SPIT",
+            "half_dead": false,
+            "id": 2,
+            "id_label": "ACID_SLIME_M",
+            "information_fidelity": "supported",
+            "intent_category": "ATTACK",
+            "last_move_id": 0,
+            "max_hp": 29,
+            "metallicize": 0,
+            "monster_index": 1,
+            "move_base_damage": 8,
+            "move_hits": 1,
+            "move_id": 6,
+            "name": "ACID_SLIME_M",
+            "plated_armor": 0,
+            "poison": 0,
+            "public_statuses": [],
+            "regen": 0,
+            "strength": 0,
+            "targetable": true,
+            "vulnerable": 0,
+            "weak": 0
+          }
+        ],
+        "ordered_public_legal_actions": [
+          {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Bash,10,2,2) -> (0) SPIKE_SLIME_S }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 0,
+            "idx2": 1,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Bash,10,2,2) -> (1) ACID_SLIME_M }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,4,1,1) -> (0) SPIKE_SLIME_S }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 2,
+            "idx2": 1,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Defend,6,1,1) }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Strike,5,1,1) -> (0) SPIKE_SLIME_S }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 4,
+            "idx2": 1,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Strike,5,1,1) -> (1) ACID_SLIME_M }",
+            "scope": "battle"
+          }
+        ],
+        "persistent_resources": {
+          "blue_key": false,
+          "deck": [
+            {
+              "deck_index": 0,
+              "id": 15,
+              "id_label": "ASCENDERS_BANE",
+              "misc": 0,
+              "name": "Ascender's Bane",
+              "rarity": "SPECIAL",
+              "type": "CURSE",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 1,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 2,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 3,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 4,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 5,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 6,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 7,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 8,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 9,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 10,
+              "id": 25,
+              "id_label": "BASH",
+              "misc": 0,
+              "name": "Bash",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 11,
+              "id": 150,
+              "id_label": "FINESSE",
+              "misc": 0,
+              "name": "Finesse",
+              "rarity": "UNCOMMON",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            }
+          ],
+          "gold": 99,
+          "green_key": false,
+          "potions": [
+            {
+              "id": 1,
+              "id_label": "EMPTY_POTION_ID",
+              "name": "EMPTY_POTION_SLOT",
+              "potion_index": 0
+            },
+            {
+              "id": 1,
+              "id_label": "EMPTY_POTION_ID",
+              "name": "EMPTY_POTION_SLOT",
+              "potion_index": 1
+            }
+          ],
+          "red_key": false,
+          "relics": [
+            {
+              "counter": 0,
+              "id": 86,
+              "id_label": "Burning Blood",
+              "name": "Burning Blood",
+              "relic_index": 0
+            }
+          ]
+        },
+        "player": {
+          "active_statuses": [],
+          "artifact": 0,
+          "attacks_played_this_turn": 0,
+          "block": 0,
+          "cards_discarded_this_turn": 0,
+          "cards_played_this_turn": 0,
+          "current_hp": 68,
+          "dexterity": 0,
+          "energy": 3,
+          "energy_per_turn": 3,
+          "focus": 0,
+          "frail": 0,
+          "max_hp": 75,
+          "orb_slots": 0,
+          "orb_state": {
+            "availability": "available",
+            "current_orbs": []
+          },
+          "skills_played_this_turn": 0,
+          "stance": "NEUTRAL",
+          "stance_id": 0,
+          "strength": 0,
+          "times_damaged_this_combat": 0,
+          "vulnerable": 0,
+          "weak": 0
+        },
+        "schema_id": "native-public-battle-state-v1",
+        "screen_identity": "BATTLE",
+        "turn": 0,
+        "visibility": {
+          "draw_order": {
+            "classification": "hidden",
+            "constraint": "ordinary draw order is not exposed",
+            "fidelity": "native-current-information-v3"
+          },
+          "enemy_intent": {
+            "classification": "public_exact",
+            "fidelity": "native-current-information-v3",
+            "source": "native Monster move state"
+          },
+          "information_fidelity": "supported"
+        }
+      },
+      "native_public_projection": {
+        "candidate_actions": {
+          "availability": "available",
+          "source": "StepSimulator::legalActions",
+          "value": [
+            {
+              "idx1": 0,
+              "idx2": 0,
+              "idx3": 0,
+              "kind": "end_turn",
+              "label": "{ end turn }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 0,
+              "idx2": 0,
+              "idx3": 0,
+              "kind": "card",
+              "label": "{ use card (0) (Bash,10,2,2) -> (0) SPIKE_SLIME_S }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 0,
+              "idx2": 1,
+              "idx3": 0,
+              "kind": "card",
+              "label": "{ use card (0) (Bash,10,2,2) -> (1) ACID_SLIME_M }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 1,
+              "idx2": 0,
+              "idx3": 1,
+              "kind": "card",
+              "label": "{ use card (1) (Defend,8,1,1) }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 2,
+              "idx2": 0,
+              "idx3": 2,
+              "kind": "card",
+              "label": "{ use card (2) (Strike,4,1,1) -> (0) SPIKE_SLIME_S }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 2,
+              "idx2": 1,
+              "idx3": 2,
+              "kind": "card",
+              "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 3,
+              "idx2": 0,
+              "idx3": 3,
+              "kind": "card",
+              "label": "{ use card (3) (Defend,6,1,1) }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 4,
+              "idx2": 0,
+              "idx3": 4,
+              "kind": "card",
+              "label": "{ use card (4) (Strike,5,1,1) -> (0) SPIKE_SLIME_S }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 4,
+              "idx2": 1,
+              "idx3": 4,
+              "kind": "card",
+              "label": "{ use card (4) (Strike,5,1,1) -> (1) ACID_SLIME_M }",
+              "scope": "battle"
+            }
+          ]
+        },
+        "current_map_node": {
+          "availability": "available",
+          "source": "GameContext::curMapNodeX/curMapNodeY and current public room symbol",
+          "value": {
+            "location": "map_node",
+            "room_symbol": "M",
+            "x": 1,
+            "y": 0
+          }
+        },
+        "immediately_legal_routes": {
+          "availability": "unavailable",
+          "reason": "route candidates are only defined at MAP_SCREEN"
+        },
+        "persistent_resources": {
+          "availability": "available",
+          "source": "StepSimulator::publicProjection",
+          "value": {
+            "current_hp": {
+              "availability": "available",
+              "source": "BattleContext::player.curHp",
+              "value": 68
+            },
+            "deck": {
+              "availability": "available",
+              "source": "GameContext::deck",
+              "value": [
+                {
+                  "deck_index": 0,
+                  "id": 15,
+                  "id_label": "ASCENDERS_BANE",
+                  "misc": 0,
+                  "name": "Ascender's Bane",
+                  "rarity": "SPECIAL",
+                  "type": "CURSE",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 1,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 2,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 3,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 4,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 5,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 6,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 7,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 8,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 9,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 10,
+                  "id": 25,
+                  "id_label": "BASH",
+                  "misc": 0,
+                  "name": "Bash",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 11,
+                  "id": 150,
+                  "id_label": "FINESSE",
+                  "misc": 0,
+                  "name": "Finesse",
+                  "rarity": "UNCOMMON",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                }
+              ]
+            },
+            "gold": {
+              "availability": "available",
+              "source": "BattleContext::player.gold",
+              "value": 99
+            },
+            "keys": {
+              "availability": "available",
+              "source": "GameContext::keyFlags",
+              "value": {
+                "blue_key": false,
+                "green_key": false,
+                "red_key": false
+              }
+            },
+            "max_hp": {
+              "availability": "available",
+              "source": "BattleContext::player.maxHp",
+              "value": 75
+            },
+            "potion_capacity": {
+              "availability": "available",
+              "source": "BattleContext::potionCapacity",
+              "value": 2
+            },
+            "potion_count": {
+              "availability": "available",
+              "source": "BattleContext::potionCount",
+              "value": 0
+            },
+            "potion_identities": {
+              "availability": "available",
+              "source": "BattleContext::potions",
+              "value": [
+                {
+                  "id": 1,
+                  "id_label": "EMPTY_POTION_ID",
+                  "name": "EMPTY_POTION_SLOT",
+                  "potion_index": 0
+                },
+                {
+                  "id": 1,
+                  "id_label": "EMPTY_POTION_ID",
+                  "name": "EMPTY_POTION_SLOT",
+                  "potion_index": 1
+                }
+              ]
+            },
+            "relics": {
+              "availability": "available",
+              "source": "GameContext::relics",
+              "value": [
+                {
+                  "counter": 0,
+                  "id": 86,
+                  "id_label": "Burning Blood",
+                  "name": "Burning Blood",
+                  "relic_index": 0
+                }
+              ]
+            }
+          }
+        },
+        "schema_id": "native-public-projection-v3",
+        "screen_identity": {
+          "availability": "available",
+          "source": "GameContext::screenState",
+          "value": "BATTLE"
+        },
+        "screen_payload": {
+          "availability": "available",
+          "source": "StepSimulator::publicProjection screen coverage and choices",
+          "value": {
+            "coverage_status": "supported",
+            "source": "StepSimulator::publicBattleState"
+          }
+        },
+        "visible_act_boss": {
+          "availability": "unavailable",
+          "reason": "the native map view does not track boss-name reveal state; exposing GameContext::boss or secondBoss could reveal hidden selection"
+        },
+        "visible_map_graph": {
+          "availability": "available",
+          "source": "GameContext::map via MapNode::getRoomSymbol, coordinates, and edges",
+          "value": [
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 1,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 2,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "M",
+              "x": 0,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "?",
+              "x": 3,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "M",
+              "x": 4,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 2
+                },
+                {
+                  "x": 5,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 3
+                }
+              ],
+              "room_symbol": "?",
+              "x": 0,
+              "y": 2
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 3
+                },
+                {
+                  "x": 5,
+                  "y": 3
+                }
+              ],
+              "room_symbol": "M",
+              "x": 4,
+              "y": 2
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 3
+                }
+              ],
+              "room_symbol": "?",
+              "x": 5,
+              "y": 2
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "$",
+              "x": 0,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 4
+                },
+                {
+                  "x": 4,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "?",
+              "x": 3,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "$",
+              "x": 5,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "?",
+              "x": 6,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 5
+                },
+                {
+                  "x": 2,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "?",
+              "x": 1,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "$",
+              "x": 3,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "M",
+              "x": 4,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "M",
+              "x": 6,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "R",
+              "x": 0,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "E",
+              "x": 2,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "R",
+              "x": 4,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 6
+                },
+                {
+                  "x": 6,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "E",
+              "x": 6,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "E",
+              "x": 1,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "R",
+              "x": 5,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "M",
+              "x": 6,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "?",
+              "x": 1,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 8
+                },
+                {
+                  "x": 3,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "E",
+              "x": 2,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "E",
+              "x": 4,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "E",
+              "x": 5,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 9
+                },
+                {
+                  "x": 3,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 2,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 3,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 5,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 6,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "E",
+              "x": 1,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "?",
+              "x": 4,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 11
+                }
+              ],
+              "room_symbol": "M",
+              "x": 0,
+              "y": 10
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 11
+                },
+                {
+                  "x": 3,
+                  "y": 11
+                }
+              ],
+              "room_symbol": "R",
+              "x": 2,
+              "y": 10
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 11
+                },
+                {
+                  "x": 6,
+                  "y": 11
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 10
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "M",
+              "x": 0,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "M",
+              "x": 1,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "?",
+              "x": 3,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "?",
+              "x": 6,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "M",
+              "x": 1,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "?",
+              "x": 2,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "R",
+              "x": 5,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "R",
+              "x": 6,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 14
+                }
+              ],
+              "room_symbol": "?",
+              "x": 2,
+              "y": 13
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 14
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 13
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 14
+                }
+              ],
+              "room_symbol": "M",
+              "x": 6,
+              "y": 13
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 15
+                }
+              ],
+              "room_symbol": "R",
+              "x": 1,
+              "y": 14
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 15
+                }
+              ],
+              "room_symbol": "R",
+              "x": 2,
+              "y": 14
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 15
+                }
+              ],
+              "room_symbol": "R",
+              "x": 5,
+              "y": 14
+            }
+          ]
+        }
+      },
+      "public_history": [
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "EVENT_SCREEN",
+          "history_index": 0,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "event",
+            "label": "game.event idx1=0 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "REWARDS"
+        },
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "REWARDS",
+          "history_index": 1,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "reward_card",
+            "label": "game.reward_card idx1=0 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "REWARDS"
+        },
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "REWARDS",
+          "history_index": 2,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "skip",
+            "label": "game.skip idx1=0 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "MAP_SCREEN"
+        },
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "MAP_SCREEN",
+          "history_index": 3,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "map",
+            "label": "game.map idx1=1 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "BATTLE"
+        }
+      ]
+    },
+    {
+      "native_public_battle_observation": {
+        "act": 1,
+        "battle_outcome": "UNDECIDED",
+        "discard_pile": [],
+        "draw_knowledge_unsupported_reasons": [],
+        "draw_pile_membership": {
+          "classification": "public_constraint",
+          "multiset_counts": [
+            {
+              "count": 1,
+              "id": 15,
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "count": 2,
+              "id": 104,
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "count": 1,
+              "id": 150,
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "count": 3,
+              "id": 321,
+              "upgrade_count": 0,
+              "upgraded": false
+            }
+          ]
+        },
+        "draw_pile_size": 7,
+        "encounter_id": "SMALL_SLIMES",
+        "exhaust_pile": [],
+        "floor_num": 1,
+        "hand": [
+          {
+            "cost": 2,
+            "cost_for_turn": 2,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 25,
+            "name": "Bash",
+            "pile_index": 0,
+            "playable": true,
+            "requires_target": true,
+            "retain": false,
+            "type": "ATTACK",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 104,
+            "name": "Defend",
+            "pile_index": 1,
+            "playable": true,
+            "requires_target": false,
+            "retain": false,
+            "type": "SKILL",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 321,
+            "name": "Strike",
+            "pile_index": 2,
+            "playable": true,
+            "requires_target": true,
+            "retain": false,
+            "type": "ATTACK",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 104,
+            "name": "Defend",
+            "pile_index": 3,
+            "playable": true,
+            "requires_target": false,
+            "retain": false,
+            "type": "SKILL",
+            "upgrade_count": 0,
+            "upgraded": false
+          },
+          {
+            "cost": 1,
+            "cost_for_turn": 1,
+            "ethereal": false,
+            "exhausts": false,
+            "free_to_play_once": false,
+            "id": 321,
+            "name": "Strike",
+            "pile_index": 4,
+            "playable": true,
+            "requires_target": true,
+            "retain": false,
+            "type": "ATTACK",
+            "upgrade_count": 0,
+            "upgraded": false
+          }
+        ],
+        "information_fidelity": "supported",
+        "information_regime": "normal_public",
+        "input_state": "PLAYER_NORMAL",
+        "monsters": [
+          {
+            "alive": true,
+            "artifact": 0,
+            "attacking": true,
+            "block": 0,
+            "current_hp": 12,
+            "current_move": "SPIKE_SLIME_S_TACKLE",
+            "half_dead": false,
+            "id": 53,
+            "id_label": "SPIKE_SLIME_S",
+            "information_fidelity": "supported",
+            "intent_category": "ATTACK",
+            "last_move_id": 0,
+            "max_hp": 12,
+            "metallicize": 0,
+            "monster_index": 0,
+            "move_base_damage": 6,
+            "move_hits": 1,
+            "move_id": 153,
+            "name": "SPIKE_SLIME_S",
+            "plated_armor": 0,
+            "poison": 0,
+            "public_statuses": [],
+            "regen": 0,
+            "strength": 0,
+            "targetable": true,
+            "vulnerable": 0,
+            "weak": 0
+          },
+          {
+            "alive": true,
+            "artifact": 0,
+            "attacking": true,
+            "block": 0,
+            "current_hp": 29,
+            "current_move": "ACID_SLIME_M_CORROSIVE_SPIT",
+            "half_dead": false,
+            "id": 2,
+            "id_label": "ACID_SLIME_M",
+            "information_fidelity": "supported",
+            "intent_category": "ATTACK",
+            "last_move_id": 0,
+            "max_hp": 29,
+            "metallicize": 0,
+            "monster_index": 1,
+            "move_base_damage": 8,
+            "move_hits": 1,
+            "move_id": 6,
+            "name": "ACID_SLIME_M",
+            "plated_armor": 0,
+            "poison": 0,
+            "public_statuses": [],
+            "regen": 0,
+            "strength": 0,
+            "targetable": true,
+            "vulnerable": 0,
+            "weak": 0
+          }
+        ],
+        "ordered_public_legal_actions": [
+          {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "end_turn",
+            "label": "{ end turn }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Bash,10,2,2) -> (0) SPIKE_SLIME_S }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 0,
+            "idx2": 1,
+            "idx3": 0,
+            "kind": "card",
+            "label": "{ use card (0) (Bash,10,2,2) -> (1) ACID_SLIME_M }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 1,
+            "kind": "card",
+            "label": "{ use card (1) (Defend,8,1,1) }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 2,
+            "idx2": 0,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,4,1,1) -> (0) SPIKE_SLIME_S }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 2,
+            "idx2": 1,
+            "idx3": 2,
+            "kind": "card",
+            "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 3,
+            "idx2": 0,
+            "idx3": 3,
+            "kind": "card",
+            "label": "{ use card (3) (Defend,6,1,1) }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 4,
+            "idx2": 0,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Strike,5,1,1) -> (0) SPIKE_SLIME_S }",
+            "scope": "battle"
+          },
+          {
+            "idx1": 4,
+            "idx2": 1,
+            "idx3": 4,
+            "kind": "card",
+            "label": "{ use card (4) (Strike,5,1,1) -> (1) ACID_SLIME_M }",
+            "scope": "battle"
+          }
+        ],
+        "persistent_resources": {
+          "blue_key": false,
+          "deck": [
+            {
+              "deck_index": 0,
+              "id": 15,
+              "id_label": "ASCENDERS_BANE",
+              "misc": 0,
+              "name": "Ascender's Bane",
+              "rarity": "SPECIAL",
+              "type": "CURSE",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 1,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 2,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 3,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 4,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 5,
+              "id": 321,
+              "id_label": "STRIKE_RED",
+              "misc": 0,
+              "name": "Strike",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 6,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 7,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 8,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 9,
+              "id": 104,
+              "id_label": "DEFEND_RED",
+              "misc": 0,
+              "name": "Defend",
+              "rarity": "BASIC",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 10,
+              "id": 25,
+              "id_label": "BASH",
+              "misc": 0,
+              "name": "Bash",
+              "rarity": "BASIC",
+              "type": "ATTACK",
+              "upgrade_count": 0,
+              "upgraded": false
+            },
+            {
+              "deck_index": 11,
+              "id": 150,
+              "id_label": "FINESSE",
+              "misc": 0,
+              "name": "Finesse",
+              "rarity": "UNCOMMON",
+              "type": "SKILL",
+              "upgrade_count": 0,
+              "upgraded": false
+            }
+          ],
+          "gold": 99,
+          "green_key": false,
+          "potions": [
+            {
+              "id": 1,
+              "id_label": "EMPTY_POTION_ID",
+              "name": "EMPTY_POTION_SLOT",
+              "potion_index": 0
+            },
+            {
+              "id": 1,
+              "id_label": "EMPTY_POTION_ID",
+              "name": "EMPTY_POTION_SLOT",
+              "potion_index": 1
+            }
+          ],
+          "red_key": false,
+          "relics": [
+            {
+              "counter": 0,
+              "id": 86,
+              "id_label": "Burning Blood",
+              "name": "Burning Blood",
+              "relic_index": 0
+            }
+          ]
+        },
+        "player": {
+          "active_statuses": [],
+          "artifact": 0,
+          "attacks_played_this_turn": 0,
+          "block": 0,
+          "cards_discarded_this_turn": 0,
+          "cards_played_this_turn": 0,
+          "current_hp": 68,
+          "dexterity": 0,
+          "energy": 3,
+          "energy_per_turn": 3,
+          "focus": 0,
+          "frail": 0,
+          "max_hp": 75,
+          "orb_slots": 0,
+          "orb_state": {
+            "availability": "available",
+            "current_orbs": []
+          },
+          "skills_played_this_turn": 0,
+          "stance": "NEUTRAL",
+          "stance_id": 0,
+          "strength": 0,
+          "times_damaged_this_combat": 0,
+          "vulnerable": 0,
+          "weak": 0
+        },
+        "schema_id": "native-public-battle-state-v1",
+        "screen_identity": "BATTLE",
+        "turn": 0,
+        "visibility": {
+          "draw_order": {
+            "classification": "hidden",
+            "constraint": "ordinary draw order is not exposed",
+            "fidelity": "native-current-information-v3"
+          },
+          "enemy_intent": {
+            "classification": "public_exact",
+            "fidelity": "native-current-information-v3",
+            "source": "native Monster move state"
+          },
+          "information_fidelity": "supported"
+        }
+      },
+      "native_public_projection": {
+        "candidate_actions": {
+          "availability": "available",
+          "source": "StepSimulator::legalActions",
+          "value": [
+            {
+              "idx1": 0,
+              "idx2": 0,
+              "idx3": 0,
+              "kind": "end_turn",
+              "label": "{ end turn }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 0,
+              "idx2": 0,
+              "idx3": 0,
+              "kind": "card",
+              "label": "{ use card (0) (Bash,10,2,2) -> (0) SPIKE_SLIME_S }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 0,
+              "idx2": 1,
+              "idx3": 0,
+              "kind": "card",
+              "label": "{ use card (0) (Bash,10,2,2) -> (1) ACID_SLIME_M }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 1,
+              "idx2": 0,
+              "idx3": 1,
+              "kind": "card",
+              "label": "{ use card (1) (Defend,8,1,1) }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 2,
+              "idx2": 0,
+              "idx3": 2,
+              "kind": "card",
+              "label": "{ use card (2) (Strike,4,1,1) -> (0) SPIKE_SLIME_S }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 2,
+              "idx2": 1,
+              "idx3": 2,
+              "kind": "card",
+              "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 3,
+              "idx2": 0,
+              "idx3": 3,
+              "kind": "card",
+              "label": "{ use card (3) (Defend,6,1,1) }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 4,
+              "idx2": 0,
+              "idx3": 4,
+              "kind": "card",
+              "label": "{ use card (4) (Strike,5,1,1) -> (0) SPIKE_SLIME_S }",
+              "scope": "battle"
+            },
+            {
+              "idx1": 4,
+              "idx2": 1,
+              "idx3": 4,
+              "kind": "card",
+              "label": "{ use card (4) (Strike,5,1,1) -> (1) ACID_SLIME_M }",
+              "scope": "battle"
+            }
+          ]
+        },
+        "current_map_node": {
+          "availability": "available",
+          "source": "GameContext::curMapNodeX/curMapNodeY and current public room symbol",
+          "value": {
+            "location": "map_node",
+            "room_symbol": "M",
+            "x": 1,
+            "y": 0
+          }
+        },
+        "immediately_legal_routes": {
+          "availability": "unavailable",
+          "reason": "route candidates are only defined at MAP_SCREEN"
+        },
+        "persistent_resources": {
+          "availability": "available",
+          "source": "StepSimulator::publicProjection",
+          "value": {
+            "current_hp": {
+              "availability": "available",
+              "source": "BattleContext::player.curHp",
+              "value": 68
+            },
+            "deck": {
+              "availability": "available",
+              "source": "GameContext::deck",
+              "value": [
+                {
+                  "deck_index": 0,
+                  "id": 15,
+                  "id_label": "ASCENDERS_BANE",
+                  "misc": 0,
+                  "name": "Ascender's Bane",
+                  "rarity": "SPECIAL",
+                  "type": "CURSE",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 1,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 2,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 3,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 4,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 5,
+                  "id": 321,
+                  "id_label": "STRIKE_RED",
+                  "misc": 0,
+                  "name": "Strike",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 6,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 7,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 8,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 9,
+                  "id": 104,
+                  "id_label": "DEFEND_RED",
+                  "misc": 0,
+                  "name": "Defend",
+                  "rarity": "BASIC",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 10,
+                  "id": 25,
+                  "id_label": "BASH",
+                  "misc": 0,
+                  "name": "Bash",
+                  "rarity": "BASIC",
+                  "type": "ATTACK",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                },
+                {
+                  "deck_index": 11,
+                  "id": 150,
+                  "id_label": "FINESSE",
+                  "misc": 0,
+                  "name": "Finesse",
+                  "rarity": "UNCOMMON",
+                  "type": "SKILL",
+                  "upgrade_count": 0,
+                  "upgraded": false
+                }
+              ]
+            },
+            "gold": {
+              "availability": "available",
+              "source": "BattleContext::player.gold",
+              "value": 99
+            },
+            "keys": {
+              "availability": "available",
+              "source": "GameContext::keyFlags",
+              "value": {
+                "blue_key": false,
+                "green_key": false,
+                "red_key": false
+              }
+            },
+            "max_hp": {
+              "availability": "available",
+              "source": "BattleContext::player.maxHp",
+              "value": 75
+            },
+            "potion_capacity": {
+              "availability": "available",
+              "source": "BattleContext::potionCapacity",
+              "value": 2
+            },
+            "potion_count": {
+              "availability": "available",
+              "source": "BattleContext::potionCount",
+              "value": 0
+            },
+            "potion_identities": {
+              "availability": "available",
+              "source": "BattleContext::potions",
+              "value": [
+                {
+                  "id": 1,
+                  "id_label": "EMPTY_POTION_ID",
+                  "name": "EMPTY_POTION_SLOT",
+                  "potion_index": 0
+                },
+                {
+                  "id": 1,
+                  "id_label": "EMPTY_POTION_ID",
+                  "name": "EMPTY_POTION_SLOT",
+                  "potion_index": 1
+                }
+              ]
+            },
+            "relics": {
+              "availability": "available",
+              "source": "GameContext::relics",
+              "value": [
+                {
+                  "counter": 0,
+                  "id": 86,
+                  "id_label": "Burning Blood",
+                  "name": "Burning Blood",
+                  "relic_index": 0
+                }
+              ]
+            }
+          }
+        },
+        "schema_id": "native-public-projection-v3",
+        "screen_identity": {
+          "availability": "available",
+          "source": "GameContext::screenState",
+          "value": "BATTLE"
+        },
+        "screen_payload": {
+          "availability": "available",
+          "source": "StepSimulator::publicProjection screen coverage and choices",
+          "value": {
+            "coverage_status": "supported",
+            "source": "StepSimulator::publicBattleState"
+          }
+        },
+        "visible_act_boss": {
+          "availability": "unavailable",
+          "reason": "the native map view does not track boss-name reveal state; exposing GameContext::boss or secondBoss could reveal hidden selection"
+        },
+        "visible_map_graph": {
+          "availability": "available",
+          "source": "GameContext::map via MapNode::getRoomSymbol, coordinates, and edges",
+          "value": [
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 1,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 2,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 1
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 0
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "M",
+              "x": 0,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "?",
+              "x": 3,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "M",
+              "x": 4,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 2
+                },
+                {
+                  "x": 5,
+                  "y": 2
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 1
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 3
+                }
+              ],
+              "room_symbol": "?",
+              "x": 0,
+              "y": 2
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 3
+                },
+                {
+                  "x": 5,
+                  "y": 3
+                }
+              ],
+              "room_symbol": "M",
+              "x": 4,
+              "y": 2
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 3
+                }
+              ],
+              "room_symbol": "?",
+              "x": 5,
+              "y": 2
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "$",
+              "x": 0,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 4
+                },
+                {
+                  "x": 4,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "?",
+              "x": 3,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "$",
+              "x": 5,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 4
+                }
+              ],
+              "room_symbol": "?",
+              "x": 6,
+              "y": 3
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 5
+                },
+                {
+                  "x": 2,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "?",
+              "x": 1,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "$",
+              "x": 3,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "M",
+              "x": 4,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 5
+                }
+              ],
+              "room_symbol": "M",
+              "x": 6,
+              "y": 4
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "R",
+              "x": 0,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "E",
+              "x": 2,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "R",
+              "x": 4,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 6
+                },
+                {
+                  "x": 6,
+                  "y": 6
+                }
+              ],
+              "room_symbol": "E",
+              "x": 6,
+              "y": 5
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "E",
+              "x": 1,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "R",
+              "x": 5,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 7
+                }
+              ],
+              "room_symbol": "M",
+              "x": 6,
+              "y": 6
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "?",
+              "x": 1,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 8
+                },
+                {
+                  "x": 3,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "E",
+              "x": 2,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "E",
+              "x": 4,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 8
+                }
+              ],
+              "room_symbol": "E",
+              "x": 5,
+              "y": 7
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 9
+                },
+                {
+                  "x": 3,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 2,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 3,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 4,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 5,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 9
+                }
+              ],
+              "room_symbol": "T",
+              "x": 6,
+              "y": 8
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "E",
+              "x": 1,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "?",
+              "x": 4,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 10
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 9
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 0,
+                  "y": 11
+                }
+              ],
+              "room_symbol": "M",
+              "x": 0,
+              "y": 10
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 11
+                },
+                {
+                  "x": 3,
+                  "y": 11
+                }
+              ],
+              "room_symbol": "R",
+              "x": 2,
+              "y": 10
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 11
+                },
+                {
+                  "x": 6,
+                  "y": 11
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 10
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "M",
+              "x": 0,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "M",
+              "x": 1,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "?",
+              "x": 3,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "M",
+              "x": 5,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 12
+                }
+              ],
+              "room_symbol": "?",
+              "x": 6,
+              "y": 11
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "M",
+              "x": 1,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "?",
+              "x": 2,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "R",
+              "x": 5,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 6,
+                  "y": 13
+                }
+              ],
+              "room_symbol": "R",
+              "x": 6,
+              "y": 12
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 1,
+                  "y": 14
+                }
+              ],
+              "room_symbol": "?",
+              "x": 2,
+              "y": 13
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 2,
+                  "y": 14
+                }
+              ],
+              "room_symbol": "M",
+              "x": 3,
+              "y": 13
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 5,
+                  "y": 14
+                }
+              ],
+              "room_symbol": "M",
+              "x": 6,
+              "y": 13
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 15
+                }
+              ],
+              "room_symbol": "R",
+              "x": 1,
+              "y": 14
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 15
+                }
+              ],
+              "room_symbol": "R",
+              "x": 2,
+              "y": 14
+            },
+            {
+              "outgoing_edges": [
+                {
+                  "x": 3,
+                  "y": 15
+                }
+              ],
+              "room_symbol": "R",
+              "x": 5,
+              "y": 14
+            }
+          ]
+        }
+      },
+      "public_history": [
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "EVENT_SCREEN",
+          "history_index": 0,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "event",
+            "label": "game.event idx1=0 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "REWARDS"
+        },
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "REWARDS",
+          "history_index": 1,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "reward_card",
+            "label": "game.reward_card idx1=0 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "REWARDS"
+        },
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "REWARDS",
+          "history_index": 2,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 0,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "skip",
+            "label": "game.skip idx1=0 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "MAP_SCREEN"
+        },
+        {
+          "fixture_mode": "mechanics_only_first_legal_setup",
+          "from_screen": "MAP_SCREEN",
+          "history_index": 3,
+          "schema_id": "issue21-mechanics-fixture-history-v1",
+          "selected_public_candidate": {
+            "idx1": 1,
+            "idx2": 0,
+            "idx3": 0,
+            "kind": "map",
+            "label": "game.map idx1=1 idx2=0 idx3=0",
+            "scope": "game"
+          },
+          "to_screen": "BATTLE"
+        }
+      ]
+    }
+  ],
+  "private_snapshot_values_emitted": false,
+  "public_history": [
+    {
+      "fixture_mode": "mechanics_only_first_legal_setup",
+      "from_screen": "EVENT_SCREEN",
+      "history_index": 0,
+      "schema_id": "issue21-mechanics-fixture-history-v1",
+      "selected_public_candidate": {
+        "idx1": 0,
+        "idx2": 0,
+        "idx3": 0,
+        "kind": "event",
+        "label": "game.event idx1=0 idx2=0 idx3=0",
+        "scope": "game"
+      },
+      "to_screen": "REWARDS"
+    },
+    {
+      "fixture_mode": "mechanics_only_first_legal_setup",
+      "from_screen": "REWARDS",
+      "history_index": 1,
+      "schema_id": "issue21-mechanics-fixture-history-v1",
+      "selected_public_candidate": {
+        "idx1": 0,
+        "idx2": 0,
+        "idx3": 0,
+        "kind": "reward_card",
+        "label": "game.reward_card idx1=0 idx2=0 idx3=0",
+        "scope": "game"
+      },
+      "to_screen": "REWARDS"
+    },
+    {
+      "fixture_mode": "mechanics_only_first_legal_setup",
+      "from_screen": "REWARDS",
+      "history_index": 2,
+      "schema_id": "issue21-mechanics-fixture-history-v1",
+      "selected_public_candidate": {
+        "idx1": 0,
+        "idx2": 0,
+        "idx3": 0,
+        "kind": "skip",
+        "label": "game.skip idx1=0 idx2=0 idx3=0",
+        "scope": "game"
+      },
+      "to_screen": "MAP_SCREEN"
+    },
+    {
+      "fixture_mode": "mechanics_only_first_legal_setup",
+      "from_screen": "MAP_SCREEN",
+      "history_index": 3,
+      "schema_id": "issue21-mechanics-fixture-history-v1",
+      "selected_public_candidate": {
+        "idx1": 1,
+        "idx2": 0,
+        "idx3": 0,
+        "kind": "map",
+        "label": "game.map idx1=1 idx2=0 idx3=0",
+        "scope": "game"
+      },
+      "to_screen": "BATTLE"
+    }
+  ],
+  "root_action_mapping": {
+    "baseline_public_identity_matches_native_legal_action": true,
+    "baseline_selected_ordinal": 5,
+    "baseline_selected_public_identity": {
+      "idx1": 2,
+      "idx2": 1,
+      "idx3": 2,
+      "kind": "card",
+      "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+      "scope": "battle"
+    },
+    "both_public_identities_accepted_by_step_public_action": true,
+    "ordered_public_candidate_count": 9,
+    "search_public_identity_matches_native_legal_action": true,
+    "search_selected_ordinal": 5,
+    "search_selected_public_identity": {
+      "idx1": 2,
+      "idx2": 1,
+      "idx3": 2,
+      "kind": "card",
+      "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+      "scope": "battle"
+    }
+  },
+  "schema_id": "issue21-native-v3-firewall-witness-v1",
+  "second_distinct_particle_index": 1,
+  "shared_public_search": {
+    "action_choice_source": "shared public root visits and values only",
+    "distinct_particles_used": 32,
+    "native_public_action_steps": 3345,
+    "particle_count": 32,
+    "root_action_count": 9,
+    "root_actions_visited": 9,
+    "selected_action_mean_value": 0.93871921182266,
+    "selected_action_visits": 28,
+    "selected_public_action": {
+      "idx1": 2,
+      "idx2": 1,
+      "idx3": 2,
+      "kind": "card",
+      "label": "{ use card (2) (Strike,4,1,1) -> (1) ACID_SLIME_M }",
+      "scope": "battle"
+    },
+    "shared_public_nodes": 2862,
+    "simulations": 192,
+    "terminal_rollouts": 172,
+    "tree_key_source": "public state and public action/result history only",
+    "truncated_rollouts": 20
+  },
+  "shared_public_search_source": "Issue 17 searchDecision/selectSharedEdge adapted from 9a2792e1e02157124b4f90edc91b7ad8765d5d10; no Search-v2 call",
+  "shared_public_search_wall_seconds": 1.996540006
+}
