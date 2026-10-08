@@ -1420,6 +1420,39 @@ def _summarize_run(
             f"source=V3LightSpeedAdapter/execute_controlled_run reason={blocker}"
         )
 
+    battle_rows = [row for row in step_rows if row["screen"] == "BATTLE"]
+    public_acts = [
+        _value(_field(row["public_boundary"]).get("act"))
+        for row in battle_rows
+    ]
+    public_floors = [
+        _value(_field(row["public_boundary"]).get("floor"))
+        for row in battle_rows
+    ]
+    battle_turns = [
+        _value(_field(row["public_boundary"]).get("battle_turn"))
+        for row in battle_rows
+    ]
+    numeric_acts = [value for value in public_acts if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    numeric_floors = [value for value in public_floors if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    numeric_turns = [value for value in battle_turns if isinstance(value, (int, float)) and not isinstance(value, bool)]
+    encounters = list(dict.fromkeys(
+        value for row in battle_rows
+        if isinstance((value := _value(_field(row["public_boundary"]).get("encounter"))), str)
+    ))
+    stop_resources_raw = _field(_field(stop_boundary).get("public_resources"))
+    stop_resources = {
+        name: _plain(stop_resources_raw.get(name, _unavailable("stop resources unavailable")))
+        for name in ("current_hp", "max_hp", "gold", "potion_count", "potion_capacity")
+    }
+    search_evidence = _field(native_search_event.get("native_backend_evidence"))
+    search_cost = {
+        "wall_seconds": native_search_event.get("native_backend_wall_seconds"),
+        "simulations": search_evidence.get("simulations"),
+        "particles": search_evidence.get("particle_count"),
+        "native_public_action_steps": search_evidence.get("native_public_action_steps"),
+    }
+
     outcomes: list[str] = []
     if search_events:
         outcomes.append("NATURAL_PUBLIC_SEARCH_EXECUTED")
@@ -1437,6 +1470,12 @@ def _summarize_run(
             f"{screen}×{count}" for screen, count in decisions_by_screen.items()
         ],
         "run_wall_seconds": round(run_wall_seconds, 6),
+        "highest_verified_act": max(numeric_acts) if numeric_acts else None,
+        "highest_verified_floor": max(numeric_floors) if numeric_floors else None,
+        "highest_verified_battle_turn": max(numeric_turns) if numeric_turns else None,
+        "battle_encounters_seen": encounters,
+        "visible_resources_at_stop": stop_resources,
+        "first_battle_search_cost": search_cost,
         "first_battle_search_executed": bool(search_events),
         "first_battle_search_attempted": any(
             event.get("screen") == "BATTLE"
@@ -1495,6 +1534,7 @@ def _summarize_run(
         "raw_stop_detail": blocker,
         "stop_classification": stop_classification,
         "stop_disposition": stop_classification,
+        "stop_screen": stop_screen,
         "stop_boundary": stop_boundary,
         "outcomes": list(dict.fromkeys(outcomes)),
         "terminal": bool(run.terminal),
@@ -1801,6 +1841,32 @@ def main() -> int:
         "Insertion states with known top prefixes, baseline anchors, before-anchor relations, or unrepresented draw-card runtime changes remain fail-closed.",
         "The 180-second guard bounds policy-worker and native-search subprocess calls and stops at the next controlled transition boundary; a synchronous simulator transition cannot be interrupted mid-call.",
     ]
+    noncombat_gap_screens = list(dict.fromkeys(
+        summary["stop_screen"]
+        for summary in run_summaries
+        if summary["stop_classification"] == "PUBLIC_NONCOMBAT_COVERAGE_GAP"
+    ))
+    if noncombat_gap_screens:
+        causal_next_action = (
+            "After review, scope the smallest task-independent public choice renderer "
+            f"for the first unsupported screen(s) {', '.join(noncombat_gap_screens)}; "
+            "keep decisions fail-closed until that exact renderer is available."
+        )
+    elif any(summary["stop_classification"] == "PUBLIC_BATTLE_PROPOSAL_GAP" for summary in run_summaries):
+        causal_next_action = (
+            "Review the reported Battle proposal-support field and scope only that missing "
+            "native public capability; do not broaden the sampler to unsupported hidden state."
+        )
+    elif all(summary["stop_classification"] in ("FIXED_DECISION_BUDGET", "WALL_BUDGET") for summary in run_summaries):
+        causal_next_action = (
+            "The bounded runs found no earlier blocker; stop at these declared caps and do not widen the seed batch."
+        )
+    elif any(summary["stop_classification"] == "NATIVE_TERMINAL" for summary in run_summaries):
+        causal_next_action = "Review the exact terminal trace before considering any broader outcome claim."
+    else:
+        causal_next_action = (
+            "Repair the exact firewall or public identity mapping failure reported in the first-stop detail, then rerun these same seeds."
+        )
     report = {
         "schema_id": "issue25-public-run-coverage-frontier-v1",
         "disposition": "STUDY_ONLY",
@@ -1839,6 +1905,7 @@ def main() -> int:
             "simulator_extension_imported_by_policy_worker": False,
         },
         "outcomes": outcomes,
+        "causal_next_action": causal_next_action,
         "proposed_follow_up": (
             "Keep this implementation and its artifacts study-only pending independent review. "
             "Any reusable core capability requires a separate promotion decision."
@@ -1856,8 +1923,8 @@ def main() -> int:
         "",
         f"Provenance: reviewed Issue 24 source `{ISSUE24_SOURCE}`; native source `{native_revision}` (base `{NATIVE_BASE}`); STSRL executor `{LEGACY_BASE}`; public adapter `{PUBLIC_ADAPTER_SOURCE}`; tactical baseline `{BASELINE_SOURCE}`.",
         "",
-        "| Seed | Decisions | Screens | Controller modes | Wall seconds | Stop classification | First blocker |",
-        "|---:|---:|---|---|---:|---|---|",
+        "| Seed | Decisions / screen coverage | Controller modes | Highest verified act/floor; battle turns; encounters | Public HP/gold/potions at stop | Wall / search cost | Stop |",
+        "|---:|---|---|---|---|---|---|",
     ]
     for summary in run_summaries:
         screens = ", ".join(summary["decision_screen_coverage"])
@@ -1865,13 +1932,39 @@ def main() -> int:
             f"{mode}×{count}"
             for mode, count in summary["controller_decisions_by_mode"].items()
         )
+        reach = (
+            f"A{summary['highest_verified_act'] or '?'} / F{summary['highest_verified_floor'] or '?'}; "
+            f"turn≤{summary['highest_verified_battle_turn'] or '?'}; "
+            f"{', '.join(summary['battle_encounters_seen']) or 'no Battle'}"
+        )
+        visible = summary["visible_resources_at_stop"]
+        hp = _value(_field(visible.get("current_hp")))
+        max_hp = _value(_field(visible.get("max_hp")))
+        gold = _value(_field(visible.get("gold")))
+        potions = _value(_field(visible.get("potion_count")))
+        potion_capacity = _value(_field(visible.get("potion_capacity")))
+        resources = f"HP {hp}/{max_hp}; gold {gold}; potions {potions}/{potion_capacity}"
+        cost = summary["first_battle_search_cost"]
+        search = (
+            f"{cost['simulations'] or 0} sim/{cost['particles'] or 0} particles, "
+            f"{cost['native_public_action_steps'] or 0} native actions, "
+            f"{float(cost['wall_seconds'] or 0.0):.3f}s"
+        )
         markdown.append(
-            f"| {summary['seed']} | {summary['steps_executed']} | {screens} | {modes} | "
-            f"{summary['run_wall_seconds']:.3f} | `{summary['stop_classification']}` | "
-            f"{summary['first_meaningful_blocker'] or 'declared limit/terminal'} |"
+            f"| {summary['seed']} | {summary['steps_executed']} — {screens} | {modes} | {reach} | "
+            f"{resources} | {summary['run_wall_seconds']:.3f}s / {search} | "
+            f"`{summary['stop_classification']}` |"
         )
     markdown.extend(
         [
+            "",
+            "First stop detail per seed:",
+            *[
+                f"- Seed {summary['seed']}: `{summary['first_meaningful_blocker']}`"
+                for summary in run_summaries
+            ],
+            "",
+            f"Causal next action: {causal_next_action}",
             "",
             f"Each fixed seed is capped at {MAX_DECISIONS} controller decisions and {MAX_RUN_SECONDS:.0f} seconds. The unsupported Shop fixture passed with no policy callback or selected action; it is excluded from natural-run progress. Search counts as executed only if native root replay, the 32-particle public-consistent sampler, anchor invariance, and fixed B=192 search all complete.",
             "",
