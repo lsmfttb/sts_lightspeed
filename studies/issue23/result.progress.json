@@ -1,0 +1,11 @@
+{
+  "details": {
+    "executed_steps": 4,
+    "first_battle_search_executed": false,
+    "seed": 50,
+    "stop_disposition": "anchor_invariance_or_sampler_blocked"
+  },
+  "last_completed_boundary": "seed_run_complete",
+  "schema_id": "issue23-run-progress-v1",
+  "status": "complete"
+}
