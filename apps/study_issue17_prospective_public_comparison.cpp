@@ -556,6 +556,57 @@ pb::dict mockPublicState(
     return state;
 }
 
+std::string classifyStudyResultCategory(
+        const int terminalPairs192,
+        const int terminalPairs384,
+        const bool haveClusterMeans,
+        const double clusterMean192,
+        const double clusterMean384,
+        const bool haveClusterIntervals,
+        const double ciLow192,
+        const double ciLow384,
+        const bool haveCosts,
+        const double battleP50_192,
+        const double battleP50_384) {
+    if (terminalPairs192 == 0 && terminalPairs384 == 0) {
+        return "COVERAGE_BLOCKED";
+    }
+    if (haveClusterMeans && haveClusterIntervals && haveCosts
+            && clusterMean192 > 0.0 && clusterMean384 > 0.0
+            && ciLow192 > 0.0 && ciLow384 > 0.0
+            && battleP50_192 < battleP50_384) {
+        return "REPLICATED_EXPLORATORY_SIGNAL";
+    }
+    if (haveClusterMeans && clusterMean192 <= 0.0 && clusterMean384 <= 0.0) {
+        return "COMPARATOR_SENSITIVE";
+    }
+    return "NO_CLEAR_SIGNAL";
+}
+
+void runStudyResultCategorySanityChecks() {
+    // This pair-weighted/cluster-weighted disagreement must follow the complete
+    // game-seed cluster means passed to the gate, not terminal-pair averages.
+    if (classifyStudyResultCategory(47, 48, true, -0.05, -0.02,
+                true, -0.10, -0.08, true, 12.0, 25.0)
+            != "COMPARATOR_SENSITIVE") {
+        throw std::runtime_error("category gate ignored complete-cluster means");
+    }
+    if (classifyStudyResultCategory(47, 48, true, 0.15217391304347827,
+                0.16666666666666666, true, 0.021739130434782608, 0.0,
+                true, 12.319, 25.711) != "NO_CLEAR_SIGNAL") {
+        throw std::runtime_error("Issue 17 retained cluster estimates changed category");
+    }
+    if (classifyStudyResultCategory(0, 0, false, 0.0, 0.0,
+                false, 0.0, 0.0, false, 0.0, 0.0) != "COVERAGE_BLOCKED") {
+        throw std::runtime_error("category gate coverage rule changed");
+    }
+    if (classifyStudyResultCategory(48, 48, true, 0.10, 0.15,
+                true, 0.01, 0.02, true, 10.0, 20.0)
+            != "REPLICATED_EXPLORATORY_SIGNAL") {
+        throw std::runtime_error("category gate positive-signal rule changed");
+    }
+}
+
 void runHeuristicSanityChecks() {
     const auto endTurn = mockPublicAction("end_turn", 0, 0);
     {
@@ -1312,8 +1363,19 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+    if (argc == 2 && std::string(argv[1]) == "--category-check") {
+        try {
+            runStudyResultCategorySanityChecks();
+            std::cout << "ISSUE17_RESULT_CATEGORY_GATE_CHECK_PASS\n";
+            return 0;
+        } catch (const std::exception &error) {
+            std::cerr << "ISSUE17_RESULT_CATEGORY_GATE_CHECK_FAIL: "
+                    << error.what() << '\n';
+            return 1;
+        }
+    }
     if (argc != 4 && argc != 5) {
-        std::cerr << "usage: study-issue17-prospective-comparison <simulator-base-sha> <runner-sha> <output-json> [--smoke]\n";
+        std::cerr << "usage: study-issue17-prospective-comparison <simulator-base-sha> <runner-sha> <output-json> [--smoke] | --heuristic-check | --category-check\n";
         return 2;
     }
     try {
@@ -1332,11 +1394,12 @@ int main(int argc, char **argv) {
                 : std::vector<int>(std::begin(kBudgets), std::end(kBudgets));
         pb::scoped_interpreter interpreter{};
         runHeuristicSanityChecks();
+        runStudyResultCategorySanityChecks();
         const std::string simulatorCommit = argv[1];
         const std::string runnerCommit = argv[2];
         const std::string outputPath = argv[3];
         pb::dict report;
-        report["schema_id"] = "issue17-prospective-public-search-v1";
+        report["schema_id"] = "issue17-prospective-public-search-v2";
         report["simulator_base_commit"] = simulatorCommit;
         report["study_runner_commit"] = runnerCommit;
         report["native_base_branch"] = "spire/main";
@@ -1646,8 +1709,10 @@ int main(int argc, char **argv) {
             pairedSummary["search_wins_among_completed_pairs"] = searchWins;
             pairedSummary["baseline_wins_among_completed_pairs"] = baselineWins;
             pairedSummary["paired_win_outcome_changes"] = winChanges;
-            pairedSummary["mean_win_delta_search_minus_baseline"] = optionalMean(winDeltas);
-            pairedSummary["mean_hp_loss_delta_search_minus_baseline"] = optionalMean(hpLossDeltas);
+            pairedSummary["terminal_pair_weighted_mean_win_delta_search_minus_baseline"] =
+                    optionalMean(winDeltas);
+            pairedSummary["terminal_pair_weighted_mean_hp_loss_delta_search_minus_baseline"] =
+                    optionalMean(hpLossDeltas);
             pairedSummary["paired_hp_loss_delta_samples"] = static_cast<int>(hpLossDeltas.size());
             pairedSummary["win_delta_game_seed_cluster_bootstrap"] =
                     clusterBootstrapSummary(seedWinDeltas,
@@ -1712,22 +1777,26 @@ int main(int argc, char **argv) {
         if (activeBudgets.size() == 2) {
             const auto lowerBudgetSummary = pairedBudgetSummaries[0].cast<pb::dict>();
             const auto higherBudgetSummary = pairedBudgetSummaries[1].cast<pb::dict>();
-            const auto mean192Value = lowerBudgetSummary[
-                    "mean_win_delta_search_minus_baseline"].cast<pb::object>();
-            const auto mean384Value = higherBudgetSummary[
-                    "mean_win_delta_search_minus_baseline"].cast<pb::object>();
-            const bool haveMeans = !mean192Value.is_none() && !mean384Value.is_none();
-            const double mean192 = haveMeans ? mean192Value.cast<double>() : 0.0;
-            const double mean384 = haveMeans ? mean384Value.cast<double>() : 0.0;
             const auto ci192 = lowerBudgetSummary[
                     "win_delta_game_seed_cluster_bootstrap"].cast<pb::dict>();
             const auto ci384 = higherBudgetSummary[
                     "win_delta_game_seed_cluster_bootstrap"].cast<pb::dict>();
+            const auto clusterMean192Value = ci192["mean"].cast<pb::object>();
+            const auto clusterMean384Value = ci384["mean"].cast<pb::object>();
+            const bool haveClusterMeans = !clusterMean192Value.is_none()
+                    && !clusterMean384Value.is_none();
+            const double clusterMean192 = haveClusterMeans
+                    ? clusterMean192Value.cast<double>() : 0.0;
+            const double clusterMean384 = haveClusterMeans
+                    ? clusterMean384Value.cast<double>() : 0.0;
             const auto ciLow192Value = ci192["percentile_95_ci_low"].cast<pb::object>();
             const auto ciLow384Value = ci384["percentile_95_ci_low"].cast<pb::object>();
-            const bool haveIntervals = !ciLow192Value.is_none() && !ciLow384Value.is_none();
-            const double ciLow192 = haveIntervals ? ciLow192Value.cast<double>() : 0.0;
-            const double ciLow384 = haveIntervals ? ciLow384Value.cast<double>() : 0.0;
+            const bool haveClusterIntervals = !ciLow192Value.is_none()
+                    && !ciLow384Value.is_none();
+            const double ciLow192 = haveClusterIntervals
+                    ? ciLow192Value.cast<double>() : 0.0;
+            const double ciLow384 = haveClusterIntervals
+                    ? ciLow384Value.cast<double>() : 0.0;
             const auto search192 = summaries[1].cast<pb::dict>();
             const auto search384 = summaries[2].cast<pb::dict>();
             const auto battleP50_192Value = search192[
@@ -1738,22 +1807,16 @@ int main(int argc, char **argv) {
                     && !battleP50_384Value.is_none();
             const double battleP50_192 = haveCosts ? battleP50_192Value.cast<double>() : 0.0;
             const double battleP50_384 = haveCosts ? battleP50_384Value.cast<double>() : 0.0;
-            if (lowerBudgetSummary["both_battles_terminal"].cast<int>() == 0
-                    && higherBudgetSummary["both_battles_terminal"].cast<int>() == 0) {
-                resultCategory = "COVERAGE_BLOCKED";
-            } else if (haveMeans && haveIntervals && haveCosts
-                    && mean192 > 0.0 && mean384 > 0.0
-                    && ciLow192 > 0.0 && ciLow384 > 0.0
-                    && battleP50_192 < battleP50_384) {
-                resultCategory = "REPLICATED_EXPLORATORY_SIGNAL";
-            } else if (haveMeans && mean192 <= 0.0 && mean384 <= 0.0) {
-                resultCategory = "COMPARATOR_SENSITIVE";
-            } else {
-                resultCategory = "NO_CLEAR_SIGNAL";
-            }
+            resultCategory = classifyStudyResultCategory(
+                    lowerBudgetSummary["both_battles_terminal"].cast<int>(),
+                    higherBudgetSummary["both_battles_terminal"].cast<int>(),
+                    haveClusterMeans, clusterMean192, clusterMean384,
+                    haveClusterIntervals, ciLow192, ciLow384,
+                    haveCosts, battleP50_192, battleP50_384);
         }
         report["study_result_category"] = resultCategory;
-        report["study_result_category_rule"] = "COVERAGE_BLOCKED if neither budget has a terminal paired comparison; REPLICATED_EXPLORATORY_SIGNAL only if both mean win deltas and both seed-cluster 95% interval lower bounds are positive and median elapsed target-battle time is lower at B=192; COMPARATOR_SENSITIVE if both mean win deltas are nonpositive; otherwise NO_CLEAR_SIGNAL. ECONOMIC_LIMIT is left for review because no intended online latency ceiling is specified.";
+        report["study_result_category_estimand"] = "complete_game_seed_clusters";
+        report["study_result_category_rule"] = "COVERAGE_BLOCKED if neither budget has a terminal paired comparison; REPLICATED_EXPLORATORY_SIGNAL only if both complete-game-seed-cluster mean win deltas and both game-seed-cluster 95% interval lower bounds are positive and median elapsed target-battle time is lower at B=192; COMPARATOR_SENSITIVE if both complete-game-seed-cluster mean win deltas are nonpositive; otherwise NO_CLEAR_SIGNAL. ECONOMIC_LIMIT is left for review because no intended online latency ceiling is specified.";
         report["proposed_code_disposition"] = "STUDY_ONLY";
         report["limitations"] = pb::make_tuple(
                 "fixed prospective seed cohort has 24 A20 setup attempts; seed attempts that lose before the target Elite remain in denominators",
