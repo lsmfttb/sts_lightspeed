@@ -1,0 +1,23 @@
+name: Retired spire v3 boundary
+
+on:
+  pull_request:
+    branches: ["spire/main"]
+  push:
+    branches: ["spire/main"]
+
+jobs:
+  no-retired-v3-revival:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prevent accidental reintroduction of native v3
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nE 'native-public-projection-v3|test-public-noncombat-projection|publicScreenPayload\(' -- bindings apps CMakeLists.txt; then
+            echo "::error::Retired native public-projection v3 is forbidden on spire/main. See AGENTS.md and use the STSRL manifest-pinned integration."
+            exit 1
+          fi
+          test ! -e apps/test_public_noncombat_projection.cpp
+          grep -q 'native-public-projection-v2' bindings/slaythespire.cpp
