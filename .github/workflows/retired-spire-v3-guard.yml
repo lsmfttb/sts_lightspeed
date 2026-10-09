@@ -1,4 +1,4 @@
-name: Retired spire v3 boundary
+name: Prevent v3 projection regression
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
     branches: ["spire/main"]
 
 jobs:
-  no-retired-v3-revival:
+  no-v3-projection-regression:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,7 +16,7 @@ jobs:
         run: |
           set -euo pipefail
           if git grep -nE 'native-public-projection-v3|test-public-noncombat-projection|publicScreenPayload\(' -- bindings apps CMakeLists.txt; then
-            echo "::error::Retired native public-projection v3 is forbidden on spire/main. See AGENTS.md and use the STSRL manifest-pinned integration."
+            echo "::error::The v3 projection is not part of spire/main. Do not reintroduce it without explicit Planner architecture authorization."
             exit 1
           fi
           test ! -e apps/test_public_noncombat_projection.cpp
