@@ -1,0 +1,23 @@
+name: Prevent v3 projection regression
+
+on:
+  pull_request:
+    branches: ["spire/main"]
+  push:
+    branches: ["spire/main"]
+
+jobs:
+  no-v3-projection-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prevent accidental reintroduction of native v3
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nE 'native-public-projection-v3|test-public-noncombat-projection|publicScreenPayload\(' -- bindings apps CMakeLists.txt; then
+            echo "::error::The v3 projection is not part of spire/main. Do not reintroduce it without explicit Planner architecture authorization."
+            exit 1
+          fi
+          test ! -e apps/test_public_noncombat_projection.cpp
+          grep -q 'native-public-projection-v2' bindings/slaythespire.cpp
