@@ -38,3 +38,10 @@ target_include_directories(small-test PUBLIC bindings)
 # Bounded search-mechanism checks; not a cohort/canary runner.
 add_executable(test-progressive-bias apps/test-progressive-bias.cpp ${sts_lightspeed_SOURCES})
 target_include_directories(test-progressive-bias PRIVATE include json/include)
+
+# Focused regression for indexed native gold reward actions.
+add_executable(
+        test-gold-reward-actions
+        apps/test-gold-reward-actions.cpp
+        ${sts_lightspeed_SOURCES})
+target_include_directories(test-gold-reward-actions PRIVATE include json/include)
