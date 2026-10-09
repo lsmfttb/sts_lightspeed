@@ -1,3 +1,5 @@
+> **Research integration status (branch `spire/main`): RETIRED.** This experimental branch is not the authoritative STSRL simulator line. Use `lsmfttb/STSRL:main` and its manifest-pinned `lsmfttb/sts_lightspeed:stsrl/main` instead. The discarded `native-public-projection-v3` implementation is retained for reproducibility at `archive/spire-v3-2026-10-09` (`d1dcd6534ec4a1f38ac1f7f916f01a3f931fcfd0`). Do not extend or restore v3 screen coverage without separately justified new science and explicit Planner authorization. See `AGENTS.md` in this branch.
+
 # sts_lightspeed
 
 For tree search and simulation of the popular rogue-like deckbuilder game Slay The Spire
