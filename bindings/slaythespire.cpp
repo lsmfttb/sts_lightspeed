@@ -886,38 +886,63 @@ pybind11::dict publicCurrentMapNode(const GameContext &gc) {
     return node;
 }
 
-pybind11::list publicMapRouteChoices(
+pybind11::dict publicMapRouteChoice(
         const GameContext &gc,
-        const std::vector<LightSpeedAction> &actions) {
-    pybind11::list routes;
+        const std::size_t candidateIndex,
+        const LightSpeedAction &action) {
+    pybind11::dict route = publicChoiceAssociation(candidateIndex, action);
+    route["choice_type"] = "map_route";
+    pybind11::dict destination;
+    if (gc.curMapNodeY == 14) {
+        destination["location"] = "boss_entry";
+    } else {
+        const int destinationY = gc.curMapNodeY + 1;
+        const int destinationX = action.idx1;
+        if (destinationY < 0
+                || destinationY >= static_cast<int>(gc.map->nodes.size())
+                || destinationX < 0
+                || destinationX >= static_cast<int>(gc.map->nodes[0].size())) {
+            throw std::logic_error("native legal map action is outside the map graph");
+        }
+        const auto &node = gc.map->getNode(destinationX, destinationY);
+        destination["location"] = "map_node";
+        destination["x"] = node.x;
+        destination["y"] = node.y;
+        destination["room_symbol"] = std::string(1, node.getRoomSymbol());
+    }
+    route["destination"] = destination;
+    return route;
+}
+
+pybind11::list publicMapScreenChoices(
+        const GameContext &gc,
+        const std::vector<LightSpeedAction> &actions,
+        pybind11::list &legalRoutes,
+        std::string &unsupportedReason) {
+    pybind11::list choices;
     for (std::size_t index = 0; index < actions.size(); ++index) {
         const auto &action = actions[index];
-        if (action.kind != "map") {
-            continue;
-        }
-        pybind11::dict route = publicChoiceAssociation(index, action);
-        pybind11::dict destination;
-        if (gc.curMapNodeY == 14) {
-            destination["location"] = "boss_entry";
-        } else {
-            const int destinationY = gc.curMapNodeY + 1;
-            const int destinationX = action.idx1;
-            if (destinationY < 0
-                    || destinationY >= static_cast<int>(gc.map->nodes.size())
-                    || destinationX < 0
-                    || destinationX >= static_cast<int>(gc.map->nodes[0].size())) {
-                throw std::logic_error("native legal map action is outside the map graph");
+        if (action.kind == "map") {
+            const auto route = publicMapRouteChoice(gc, index, action);
+            legalRoutes.append(route);
+            choices.append(route);
+        } else if (action.kind == "game_potion_use"
+                || action.kind == "game_potion_discard") {
+            if (action.idx1 < 0 || action.idx1 >= gc.potionCapacity) {
+                unsupportedReason = "MAP_SCREEN potion action has no visible potion slot";
+                break;
             }
-            const auto &node = gc.map->getNode(destinationX, destinationY);
-            destination["location"] = "map_node";
-            destination["x"] = node.x;
-            destination["y"] = node.y;
-            destination["room_symbol"] = std::string(1, node.getRoomSymbol());
+            pybind11::dict choice = publicChoiceAssociation(index, action);
+            choice["choice_type"] = action.kind == "game_potion_use"
+                    ? "potion_use" : "potion_discard";
+            choice["potion"] = gamePotionSnapshot(gc, action.idx1);
+            choices.append(choice);
+        } else {
+            unsupportedReason = "MAP_SCREEN contains an unrecognized legal candidate kind";
+            break;
         }
-        route["destination"] = destination;
-        routes.append(route);
     }
-    return routes;
+    return choices;
 }
 
 pybind11::dict publicCardRewardSnapshot(const Card &card) {
@@ -1041,7 +1066,9 @@ pybind11::dict publicChoiceScreenPayload(
         const std::vector<LightSpeedAction> &actions,
         const pybind11::list &mapGraph,
         const pybind11::dict &currentMapNode,
-        const pybind11::list &legalRoutes) {
+        const pybind11::list &legalRoutes,
+        const pybind11::list &mapChoices,
+        const std::string &mapChoicesUnsupportedReason) {
     pybind11::dict payload;
     switch (gc.screenState) {
         case ScreenState::REWARDS:
@@ -1049,11 +1076,18 @@ pybind11::dict publicChoiceScreenPayload(
         case ScreenState::MAP_SCREEN: {
             const bool bossAvailable = visibleActBoss["availability"]
                     .cast<std::string>() == "available";
-            payload["coverage_status"] = bossAvailable ? "supported" : "partial";
-            payload["source"] = "GameContext::map and StepSimulator::legalActions";
+            payload["coverage_status"] = mapChoicesUnsupportedReason.empty()
+                    ? (bossAvailable ? "supported" : "partial") : "unsupported";
+            payload["source"] =
+                    "GameContext::map, GameContext::potions, and StepSimulator::legalActions";
             payload["map_graph"] = mapGraph;
             payload["current_map_node"] = currentMapNode;
             payload["legal_routes"] = legalRoutes;
+            if (!mapChoicesUnsupportedReason.empty()) {
+                payload["reason"] = mapChoicesUnsupportedReason;
+                return payload;
+            }
+            payload["choices"] = mapChoices;
             if (!bossAvailable) {
                 payload["missing_facts"] = pybind11::make_tuple(
                         "current_act_boss_identity_not_validated_for_the_public_map");
@@ -3819,6 +3853,8 @@ struct StepSimulator {
         pybind11::list mapGraph;
         pybind11::dict currentMapNode;
         pybind11::list legalRoutes;
+        pybind11::list mapChoices;
+        std::string mapChoicesUnsupportedReason;
         if (gc.map) {
             mapGraph = publicMapGraphSnapshot(*gc.map);
             currentMapNode = publicCurrentMapNode(gc);
@@ -3829,7 +3865,8 @@ struct StepSimulator {
                     currentMapNode,
                     "GameContext::curMapNodeX/curMapNodeY and current public room symbol");
             if (gc.screenState == ScreenState::MAP_SCREEN) {
-                legalRoutes = publicMapRouteChoices(gc, actions);
+                mapChoices = publicMapScreenChoices(
+                        gc, actions, legalRoutes, mapChoicesUnsupportedReason);
                 ret["immediately_legal_routes"] = publicProjectionAvailable(
                         legalRoutes,
                         "GameContext::map and ordered StepSimulator::legalActions");
@@ -3885,7 +3922,8 @@ struct StepSimulator {
         ret["screen_payload"] = publicProjectionAvailable(
                 publicChoiceScreenPayload(
                         gc, visibleActBoss, actions, mapGraph,
-                        currentMapNode, legalRoutes),
+                        currentMapNode, legalRoutes, mapChoices,
+                        mapChoicesUnsupportedReason),
                 "StepSimulator::publicProjection screen coverage and choices");
 
         pybind11::list candidates;

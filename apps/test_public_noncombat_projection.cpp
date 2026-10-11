@@ -167,6 +167,128 @@ void checkControlledVisibleAlias(nlohmann::json &evidence) {
     };
 }
 
+void checkControlledVisibleRouteAlias(nlohmann::json &evidence) {
+    StepSimulator first(CharacterClass::IRONCLAD, 49, 20);
+    StepSimulator second(CharacterClass::IRONCLAD, 49, 20);
+    first.gc.screenState = ScreenState::MAP_SCREEN;
+    second.gc.screenState = ScreenState::MAP_SCREEN;
+    require(first.gc.map != nullptr && second.gc.map != nullptr,
+            "controlled route fixture has no initialized native map");
+    const auto firstNativeActions = first.legalActions();
+    const auto secondNativeActions = second.legalActions();
+    require(firstNativeActions.size() == secondNativeActions.size(),
+            "same-seed route fixtures produced different legal-action counts");
+    std::size_t selectedRouteIndex = firstNativeActions.size();
+    for (std::size_t index = 0; index < firstNativeActions.size(); ++index) {
+        if (firstNativeActions[index].kind == "map") {
+            selectedRouteIndex = index;
+            break;
+        }
+    }
+    require(selectedRouteIndex < firstNativeActions.size(),
+            "controlled route fixture has no legal map destination");
+    const auto &firstRoute = firstNativeActions[selectedRouteIndex];
+    const auto &secondRoute = secondNativeActions[selectedRouteIndex];
+    require(firstRoute.kind == "map" && secondRoute.kind == "map"
+                    && firstRoute.idx1 == secondRoute.idx1,
+            "same-seed route fixtures do not share the selected native route");
+    const int destinationY = first.gc.curMapNodeY + 1;
+    const int destinationX = firstRoute.idx1;
+    require(destinationY >= 0 && destinationY < 15,
+            "controlled route fixture selected an invalid destination row");
+    first.gc.map->getNode(destinationX, destinationY).room = Room::SHOP;
+    second.gc.map->getNode(destinationX, destinationY).room = Room::REST;
+    require(first.observation() == second.observation(),
+            "controlled map-room pair unexpectedly changed the legacy observation");
+
+    const auto firstProjection = projection(first);
+    const auto secondProjection = projection(second);
+    require(coverage(firstProjection) == "supported"
+                    && coverage(secondProjection) == "supported",
+            "controlled visible route fixture is not fully rendered");
+    require(!firstProjection.equal(secondProjection),
+            "visible route difference did not change the public projection");
+    const auto firstActions = checkCandidateParity(first, firstProjection);
+    const auto secondActions = checkCandidateParity(second, secondProjection);
+    const auto firstPath = checkStudyAdapterBoundary(
+            first, firstProjection, firstActions, selectedRouteIndex);
+    const auto secondPath = checkStudyAdapterBoundary(
+            second, secondProjection, secondActions, selectedRouteIndex);
+    const auto firstInput = firstPath.at("serialized_policy_input");
+    const auto secondInput = secondPath.at("serialized_policy_input");
+    require(firstInput != secondInput,
+            "adapter policy inputs did not distinguish visible route rooms");
+    const auto firstSymbol = firstInput.at("legal_options").at(selectedRouteIndex)
+            .at("semantics").at("destination").at("room_symbol").get<std::string>();
+    const auto secondSymbol = secondInput.at("legal_options").at(selectedRouteIndex)
+            .at("semantics").at("destination").at("room_symbol").get<std::string>();
+    require(firstSymbol == "$" && secondSymbol == "R",
+            "adapter route options do not preserve their visible room symbols");
+    evidence["visible_route_alias_witness"] = {
+        {"legacy_observation", "native-412-feature-NNInterface::getObservation"},
+        {"legacy_observations_equal", true},
+        {"visible_route_symbols", {firstSymbol, secondSymbol}},
+        {"new_policy_inputs_differ", true},
+        {"selected_native_actions_executed", true},
+        {"scope", "controlled native map fixture; no full frozen T089 vector equality claim"}
+    };
+}
+
+void checkMapHeldPotionActions(nlohmann::json &evidence) {
+    const auto verifyPotionAction = [&](const Potion potion, const std::string &choiceType) {
+        StepSimulator simulator(CharacterClass::IRONCLAD, 49, 20);
+        advanceTo(simulator, ScreenState::MAP_SCREEN, 16);
+        require(simulator.gc.map != nullptr,
+                "held-potion MAP fixture has no initialized native map");
+        if (potion == Potion::BLOOD_POTION) {
+            simulator.gc.curHp = simulator.gc.curHp > 10
+                    ? simulator.gc.curHp - 10 : 1;
+        }
+        simulator.gc.obtainPotion(potion);
+        const auto nativeProjection = projection(simulator);
+        require(coverage(nativeProjection) == "supported",
+                "held-potion MAP screen was not marked supported");
+        const auto actions = checkCandidateParity(simulator, nativeProjection);
+        const auto payload = screenPayload(nativeProjection);
+        const auto choices = payload["choices"].cast<list>();
+        const auto routeField = nativeProjection["immediately_legal_routes"].cast<dict>();
+        const auto routes = routeField["value"].cast<list>();
+        const auto candidates = nativeProjection["candidate_actions"].cast<dict>()
+                ["value"].cast<list>();
+        checkChoiceAssociations(choices, candidates);
+        require(choices.size() == static_cast<ssize_t>(actions.size())
+                        && routes.size() < choices.size(),
+                "held-potion MAP choices are not complete or route-specific");
+
+        std::size_t selectedCandidate = actions.size();
+        int matchingChoiceCount = 0;
+        for (const auto &choiceHandle : choices) {
+            const auto choice = choiceHandle.cast<dict>();
+            if (choice["choice_type"].cast<std::string>() != choiceType) {
+                continue;
+            }
+            const auto visiblePotion = choice["potion"].cast<dict>();
+            if (visiblePotion["id"].cast<int>() != static_cast<int>(potion)) {
+                continue;
+            }
+            selectedCandidate = choice["candidate_index"].cast<std::size_t>();
+            ++matchingChoiceCount;
+        }
+        require(matchingChoiceCount == 1 && selectedCandidate < actions.size(),
+                "held-potion MAP action has no unique visible choice association");
+        const auto execution = checkStudyAdapterBoundary(
+                simulator, nativeProjection, actions, selectedCandidate);
+        evidence[potion == Potion::FIRE_POTION ? "fire_potion_discard" : "blood_potion_use"] = {
+            {"candidate_count", actions.size()}, {"route_count", routes.size()},
+            {"choice_count", choices.size()}, {"selected_candidate_index", selectedCandidate},
+            {"adapter_execution", execution}
+        };
+    };
+
+    verifyPotionAction(Potion::FIRE_POTION, "potion_discard");
+    verifyPotionAction(Potion::BLOOD_POTION, "potion_use");
+}
+
 void checkHiddenFutureInvariant(StepSimulator &simulator, const dict &baseline) {
     auto changedFuture = simulator;
     changedFuture.gc.seed ^= 0x22002026ULL;
@@ -262,19 +384,48 @@ nlohmann::json checkStudyAdapterBoundary(
             throw std::logic_error("adapter reward integration selected an untested subtype");
         }
     } else if (simulator.gc.screenState == ScreenState::MAP_SCREEN) {
-        const auto &destination = option.at("semantics").at("destination");
-        if (destination.at("location") == "map_node") {
-            require(execution.gc.curMapNodeX == destination.at("x").get<int>()
-                            && execution.gc.curMapNodeY == destination.at("y").get<int>(),
-                    "resolved map option did not enter its exact visible destination");
+        const auto &semantics = option.at("semantics");
+        const auto choiceType = semantics.at("choice_type").get<std::string>();
+        if (choiceType == "map_route") {
+            const auto &destination = semantics.at("destination");
+            if (destination.at("location") == "map_node") {
+                require(execution.gc.curMapNodeX == destination.at("x").get<int>()
+                                && execution.gc.curMapNodeY == destination.at("y").get<int>(),
+                        "resolved map option did not enter its exact visible destination");
+            } else {
+                require(destination.at("location") == "boss_entry"
+                                && execution.gc.curMapNodeY == 15,
+                        "resolved final route did not enter the visible Act boss node");
+            }
             evidence["selected_destination"] = destination;
+            evidence["selected_route_entered"] = true;
+        } else if (choiceType == "potion_use" || choiceType == "potion_discard") {
+            const auto &candidate = option.at("action");
+            const auto &potion = semantics.at("potion");
+            const int potionIndex = candidate.at("idx1").get<int>();
+            const auto expectedKind = choiceType == "potion_use"
+                    ? "game_potion_use" : "game_potion_discard";
+            require(candidate.at("kind") == expectedKind
+                            && potion.at("potion_index").get<int>() == potionIndex
+                            && potion.at("id").get<int>()
+                                    == static_cast<int>(simulator.gc.potions[potionIndex]),
+                    "map potion option differs from its exact native action or visible slot");
+            require(execution.gc.potionCount < simulator.gc.potionCount,
+                    "selected map potion action did not consume its potion");
+            if (choiceType == "potion_discard") {
+                require(execution.gc.potions[potionIndex] == Potion::EMPTY_POTION_SLOT,
+                        "selected map potion discard did not empty its associated slot");
+            } else if (simulator.gc.potions[potionIndex] == Potion::BLOOD_POTION) {
+                require(execution.gc.curHp > simulator.gc.curHp,
+                        "selected Blood Potion did not apply its visible healing action");
+            }
+            evidence["selected_potion_action"] = {
+                {"choice_type", choiceType}, {"potion", potion},
+                {"potion_consumed", true}
+            };
         } else {
-            require(destination.at("location") == "boss_entry"
-                            && execution.gc.curMapNodeY == 15,
-                    "resolved final route did not enter the visible Act boss node");
-            evidence["selected_destination"] = destination;
+            throw std::logic_error("adapter returned an unsupported MAP choice type");
         }
-        evidence["selected_route_entered"] = true;
     }
     evidence["serialized_policy_input"] = policyInput;
     return evidence;
@@ -297,6 +448,7 @@ int main() {
         };
 
         checkControlledVisibleAlias(evidence);
+        checkControlledVisibleRouteAlias(evidence);
 
         StepSimulator run(CharacterClass::IRONCLAD, seed, ascension);
         advanceTo(run, ScreenState::REWARDS, 8);
@@ -356,9 +508,10 @@ int main() {
                         && routeField["availability"].cast<std::string>() == "available",
                 "public map or legal routes are unavailable");
         const auto routes = routeField["value"].cast<list>();
+        const auto choices = mapPayload["choices"].cast<list>();
         const auto mapCandidates = mapProjection["candidate_actions"].cast<dict>()
                 ["value"].cast<list>();
-        checkChoiceAssociations(routes, mapCandidates);
+        checkChoiceAssociations(choices, mapCandidates);
         require(routes.size() > 0, "natural A20 map has no route choices");
         bool sawUnknownRoom = false;
         for (const auto &nodeHandle : mapField["value"].cast<list>()) {
@@ -373,6 +526,7 @@ int main() {
             {"screen", "MAP_SCREEN"}, {"coverage_status", "supported"},
             {"visible_node_count", mapField["value"].cast<list>().size()},
             {"legal_route_count", routes.size()},
+            {"ordered_choice_count", choices.size()},
             {"candidate_count", mapActions.size()},
             {"candidate_order_matches_native_actions", true},
             {"unknown_event_room_uses_public_symbol", sawUnknownRoom}
@@ -384,6 +538,8 @@ int main() {
         evidence["examples"]["policy_input_map"] =
                 mapAdapterExecution.at("serialized_policy_input");
         evidence["adapter_online_execution"]["natural_map"] = mapAdapterExecution;
+        evidence["held_potion_map_regression"] = nlohmann::json::object();
+        checkMapHeldPotionActions(evidence["held_potion_map_regression"]);
 
         StepSimulator indexedGold(CharacterClass::IRONCLAD, seed, ascension);
         indexedGold.gc.screenState = ScreenState::REWARDS;
