@@ -317,6 +317,123 @@ list nativeActionMappings(const std::vector<LightSpeedAction> &actions) {
     return result;
 }
 
+void checkSapphireRewardCoupling(nlohmann::json &evidence) {
+    auto adapter = module_::import("adapter");
+    const auto executePublicChoice = [&](StepSimulator &simulator, std::size_t ordinal) {
+        const auto publicValue = projection(simulator);
+        const auto actions = checkCandidateParity(simulator, publicValue);
+        const auto prepared = adapter.attr("prepare_policy_input")(
+                publicValue, nativeActionMappings(actions));
+        const auto serialized = prepared.attr("serialized_input").cast<std::string>();
+        const auto callback = cpp_function([ordinal, serialized](const std::string &input) {
+            require(input == serialized, "Sapphire callback input changed during selection");
+            return int_(ordinal);
+        });
+        const auto selected = adapter.attr("call_policy")(prepared, callback).cast<std::size_t>();
+        const auto resolved = adapter.attr("resolve_native_action")(
+                prepared, selected, publicValue, nativeActionMappings(actions)).cast<dict>();
+        require(selected == ordinal && resolved["bits"].cast<std::uint32_t>() == actions.at(ordinal).bits,
+                "Sapphire option did not resolve to its exact native action");
+        const auto semantics = nlohmann::json::parse(serialized)
+                .at("legal_options").at(ordinal).at("semantics");
+        simulator.step(actions[ordinal]);
+        return semantics;
+    };
+    const auto findKey = [](StepSimulator &simulator) {
+        const auto actions = simulator.legalActions();
+        for (std::size_t i = 0; i < actions.size(); ++i) {
+            if (actions[i].kind == "reward_key") return i;
+        }
+        return actions.size();
+    };
+    const std::array<RelicId, 3> relics = {
+        RelicId::ANCHOR, RelicId::VAJRA, RelicId::BAG_OF_MARBLES
+    };
+    evidence = nlohmann::json::array();
+    for (int count = 1; count <= static_cast<int>(relics.size()); ++count) {
+        StepSimulator fixture(CharacterClass::IRONCLAD, 49, 20);
+        advanceTo(fixture, ScreenState::REWARDS, 8);
+        auto &rewards = fixture.gc.info.rewardsContainer;
+        rewards.clear();
+        // Retain a gold option so each coupled choice has a remaining reward screen.
+        rewards.addGold(1);
+        for (int i = 0; i < count; ++i) rewards.addRelic(relics[i]);
+        rewards.sapphireKey = true;
+        const auto actions = fixture.legalActions();
+        int checked = 0;
+        for (std::size_t ordinal = 0; ordinal < actions.size(); ++ordinal) {
+            const auto &action = actions[ordinal];
+            if (action.kind != "reward_relic" && action.kind != "reward_key") continue;
+            auto execution = fixture;
+            const auto semantics = executePublicChoice(execution, ordinal);
+            auto &remaining = execution.gc.info.rewardsContainer;
+            require(remaining.relicCount == count - 1,
+                    "coupled choice did not remove exactly one offered relic");
+            if (action.kind == "reward_relic") {
+                const bool associated = action.idx1 == count - 1;
+                require(semantics.at("relic").at("id") == static_cast<int>(relics[action.idx1])
+                                && execution.gc.relics.has(relics[action.idx1]),
+                        "selected Sapphire fixture relic was not awarded");
+                require(semantics.value("sapphire_key_is_lost", false) == associated
+                                && remaining.sapphireKey == !associated && !execution.gc.blueKey,
+                        "relic execution disagrees with projected Sapphire coupling");
+                const auto keyOrdinal = findKey(execution);
+                if (associated) {
+                    require(keyOrdinal == execution.legalActions().size(),
+                            "Sapphire Key remained collectible after taking its relic");
+                } else {
+                    require(keyOrdinal < execution.legalActions().size(),
+                            "unassociated relic incorrectly removed the Sapphire Key option");
+                    const auto keySemantics = executePublicChoice(execution, keyOrdinal);
+                    require(keySemantics.at("relic_removed_with_key").at("id")
+                                    == static_cast<int>(relics[count - 1])
+                                    && execution.gc.blueKey && !remaining.sapphireKey
+                                    && remaining.relicCount == count - 2
+                                    && !execution.gc.relics.has(relics[count - 1]),
+                            "Sapphire selection after compaction did not remove its associated relic");
+                }
+                evidence.push_back({{"initial_relic_count", count},
+                    {"selected_relic_index", action.idx1},
+                    {"projected_sapphire_key_is_lost", associated},
+                    {"native_coupling_matches_projection", true}});
+            } else {
+                require(semantics.at("key") == "SAPPHIRE_KEY"
+                                && semantics.at("relic_removed_with_key").at("id")
+                                        == static_cast<int>(relics[count - 1])
+                                && execution.gc.blueKey && !remaining.sapphireKey,
+                        "key-first selection did not remove the associated last relic");
+                evidence.push_back({{"initial_relic_count", count},
+                    {"selected_key_first", true}, {"native_coupling_matches_projection", true}});
+            }
+            // Collect all surviving relic options; the unselected coupled relic must stay unavailable.
+            const bool choseAssociatedRelic = action.kind == "reward_relic" && action.idx1 == count - 1;
+            for (int i = 0; i < count; ++i) {
+                const bool shouldRemain = i != count - 1
+                        && !(action.kind == "reward_relic" && i == action.idx1);
+                bool offered = false;
+                for (int slot = 0; slot < remaining.relicCount; ++slot) {
+                    offered |= remaining.relics[slot] == relics[i];
+                }
+                require(offered == shouldRemain, "coupled choice removed the wrong surviving relic");
+            }
+            while (remaining.relicCount > 0) {
+                const auto next = execution.legalActions();
+                std::size_t relicOrdinal = next.size();
+                for (std::size_t i = 0; i < next.size(); ++i) {
+                    if (next[i].kind == "reward_relic") { relicOrdinal = i; break; }
+                }
+                require(relicOrdinal < next.size(), "surviving relic has no legal action");
+                executePublicChoice(execution, relicOrdinal);
+            }
+            require(execution.gc.relics.has(relics[count - 1]) == choseAssociatedRelic
+                            && execution.gc.blueKey == !choseAssociatedRelic,
+                    "both the associated relic and Sapphire Key could be collected");
+            ++checked;
+        }
+        require(checked == count + 1, "Sapphire regression omitted a relic or key choice");
+    }
+}
+
 nlohmann::json checkStudyAdapterBoundary(
         StepSimulator &simulator,
         const dict &nativeProjection,
@@ -449,6 +566,7 @@ int main() {
 
         checkControlledVisibleAlias(evidence);
         checkControlledVisibleRouteAlias(evidence);
+        checkSapphireRewardCoupling(evidence["sapphire_reward_coupling"]);
 
         StepSimulator run(CharacterClass::IRONCLAD, seed, ascension);
         advanceTo(run, ScreenState::REWARDS, 8);
