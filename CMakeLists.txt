@@ -45,3 +45,28 @@ add_executable(
         apps/test-gold-reward-actions.cpp
         ${sts_lightspeed_SOURCES})
 target_include_directories(test-gold-reward-actions PRIVATE include json/include)
+add_executable(test-public-noncombat-projection EXCLUDE_FROM_ALL
+        apps/test_public_noncombat_projection.cpp
+        bindings/bindings-util.cpp
+        ${sts_lightspeed_SOURCES})
+target_include_directories(test-public-noncombat-projection PRIVATE
+        include json/single_include bindings)
+target_link_libraries(test-public-noncombat-projection PRIVATE pybind11::embed)
+set(STS_LIGHTSPEED_TESTED_SOURCE_COMMIT_OVERRIDE "" CACHE STRING
+        "Exact native source commit for public-choice test evidence; normally read from Git HEAD")
+if(STS_LIGHTSPEED_TESTED_SOURCE_COMMIT_OVERRIDE)
+    set(STS_LIGHTSPEED_TESTED_SOURCE_COMMIT "${STS_LIGHTSPEED_TESTED_SOURCE_COMMIT_OVERRIDE}")
+else()
+    execute_process(
+            COMMAND git rev-parse --verify HEAD
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE STS_LIGHTSPEED_GIT_RESULT
+            ERROR_QUIET)
+    if(NOT STS_LIGHTSPEED_GIT_RESULT EQUAL 0 OR NOT STS_LIGHTSPEED_TESTED_SOURCE_COMMIT)
+        set(STS_LIGHTSPEED_TESTED_SOURCE_COMMIT "unknown")
+    endif()
+endif()
+target_compile_definitions(test-public-noncombat-projection PRIVATE
+        STS_LIGHTSPEED_TESTED_SOURCE_COMMIT="${STS_LIGHTSPEED_TESTED_SOURCE_COMMIT}")

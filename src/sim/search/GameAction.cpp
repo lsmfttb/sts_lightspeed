@@ -364,13 +364,16 @@ void executeRewardsAction(GameContext &gc, const search::GameAction a) {
             r.removePotionReward(a.getIdx1());
             break;
 
-        case search::GameAction::RewardsActionType::RELIC:
+        case search::GameAction::RewardsActionType::RELIC: {
+            // The Sapphire Key is coupled to the last offered relic before removal.
+            const bool losesSapphireKey = r.sapphireKey && a.getIdx1() == r.relicCount-1;
             gc.obtainRelic(r.relics[a.getIdx1()]);
             r.removeRelicReward(a.getIdx1());
-            if (a.getIdx1() == r.relicCount-1) {
+            if (losesSapphireKey) {
                 r.sapphireKey = false;
             }
             break;
+        }
 
         case search::GameAction::RewardsActionType::SKIP:
             gc.regainControl();
