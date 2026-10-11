@@ -769,6 +769,333 @@ pybind11::dict publicInformationActionIdentity(const LightSpeedAction &action) {
     return ret;
 }
 
+pybind11::dict publicChoiceActionSnapshot(const LightSpeedAction &action) {
+    pybind11::dict ret;
+    ret["scope"] = action.scope;
+    ret["kind"] = action.kind;
+    ret["idx1"] = action.idx1;
+    ret["idx2"] = action.idx2;
+    ret["idx3"] = action.idx3;
+    const auto bitsMarker = action.label.find("bits=");
+    if (bitsMarker == std::string::npos) {
+        ret["label"] = action.label;
+    } else {
+        std::ostringstream publicLabel;
+        publicLabel << action.scope << "." << action.kind
+                    << " idx1=" << action.idx1
+                    << " idx2=" << action.idx2
+                    << " idx3=" << action.idx3;
+        ret["label"] = publicLabel.str();
+    }
+    return ret;
+}
+
+pybind11::dict publicChoiceAssociation(
+        const std::size_t candidateIndex,
+        const LightSpeedAction &action) {
+    pybind11::dict ret;
+    ret["candidate_index"] = candidateIndex;
+    ret["candidate_action"] = publicChoiceActionSnapshot(action);
+    return ret;
+}
+
+bool isCurrentActBossSelection(const GameContext &gc) {
+    switch (gc.act) {
+        case 1:
+            return gc.boss == MonsterEncounter::THE_GUARDIAN
+                    || gc.boss == MonsterEncounter::HEXAGHOST
+                    || gc.boss == MonsterEncounter::SLIME_BOSS;
+        case 2:
+            return gc.boss == MonsterEncounter::AUTOMATON
+                    || gc.boss == MonsterEncounter::COLLECTOR
+                    || gc.boss == MonsterEncounter::CHAMP;
+        case 3:
+            return gc.boss == MonsterEncounter::AWAKENED_ONE
+                    || gc.boss == MonsterEncounter::TIME_EATER
+                    || gc.boss == MonsterEncounter::DONU_AND_DECA;
+        case 4:
+            return gc.boss == MonsterEncounter::THE_HEART;
+        default:
+            return false;
+    }
+}
+
+pybind11::dict publicVisibleActBoss(const GameContext &gc) {
+    if (!gc.map) {
+        return publicProjectionUnavailable(
+                "unavailable", "the current Act map is not initialized");
+    }
+    if (!isCurrentActBossSelection(gc)) {
+        return publicProjectionUnavailable(
+                "unavailable",
+                "the current Act has no validated public boss selection");
+    }
+    return publicProjectionAvailable(
+            pybind11::str(monsterEncounterStrings[static_cast<int>(gc.boss)]),
+            "the current Act boss icon on the public map; GameContext::secondBoss is excluded");
+}
+
+pybind11::list publicMapGraphSnapshot(const Map &map) {
+    pybind11::list nodes;
+    for (int y = 0; y < static_cast<int>(map.nodes.size()); ++y) {
+        for (int x = 0; x < static_cast<int>(map.nodes[y].size()); ++x) {
+            const auto &node = map.nodes[y][x];
+            if (node.parentCount == 0 && node.edgeCount == 0
+                    && node.room != Room::BOSS) {
+                continue;
+            }
+            pybind11::dict publicNode;
+            publicNode["x"] = node.x;
+            publicNode["y"] = node.y;
+            // getRoomSymbol is the source-owned public rendering; EVENT stays '?'.
+            publicNode["room_symbol"] = std::string(1, node.getRoomSymbol());
+            pybind11::list edges;
+            for (int edgeIndex = 0; edgeIndex < node.edgeCount; ++edgeIndex) {
+                pybind11::dict edge;
+                edge["x"] = node.edges[edgeIndex];
+                edge["y"] = y + 1;
+                edges.append(edge);
+            }
+            publicNode["outgoing_edges"] = edges;
+            nodes.append(publicNode);
+        }
+    }
+    return nodes;
+}
+
+pybind11::dict publicCurrentMapNode(const GameContext &gc) {
+    pybind11::dict node;
+    if (gc.curMapNodeY < 0) {
+        node["location"] = "before_first_route";
+        return node;
+    }
+    if (gc.curMapNodeY == 15) {
+        node["location"] = "act_boss_entry";
+        return node;
+    }
+    if (gc.curMapNodeY >= static_cast<int>(gc.map->nodes.size())
+            || gc.curMapNodeX < 0
+            || gc.curMapNodeX >= static_cast<int>(gc.map->nodes[0].size())) {
+        throw std::logic_error("current map location is outside the native map");
+    }
+    const auto &current = gc.map->getNode(gc.curMapNodeX, gc.curMapNodeY);
+    node["location"] = "map_node";
+    node["x"] = current.x;
+    node["y"] = current.y;
+    node["room_symbol"] = std::string(1, current.getRoomSymbol());
+    return node;
+}
+
+pybind11::list publicMapRouteChoices(
+        const GameContext &gc,
+        const std::vector<LightSpeedAction> &actions) {
+    pybind11::list routes;
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        const auto &action = actions[index];
+        if (action.kind != "map") {
+            continue;
+        }
+        pybind11::dict route = publicChoiceAssociation(index, action);
+        pybind11::dict destination;
+        if (gc.curMapNodeY == 14) {
+            destination["location"] = "boss_entry";
+        } else {
+            const int destinationY = gc.curMapNodeY + 1;
+            const int destinationX = action.idx1;
+            if (destinationY < 0
+                    || destinationY >= static_cast<int>(gc.map->nodes.size())
+                    || destinationX < 0
+                    || destinationX >= static_cast<int>(gc.map->nodes[0].size())) {
+                throw std::logic_error("native legal map action is outside the map graph");
+            }
+            const auto &node = gc.map->getNode(destinationX, destinationY);
+            destination["location"] = "map_node";
+            destination["x"] = node.x;
+            destination["y"] = node.y;
+            destination["room_symbol"] = std::string(1, node.getRoomSymbol());
+        }
+        route["destination"] = destination;
+        routes.append(route);
+    }
+    return routes;
+}
+
+pybind11::dict publicCardRewardSnapshot(const Card &card) {
+    pybind11::dict ret;
+    ret["id"] = static_cast<int>(card.getId());
+    ret["id_label"] = std::string(getCardEnumName(card.getId()));
+    ret["name"] = std::string(card.getName());
+    ret["type"] = cardTypeLabel(card.getType());
+    ret["rarity"] = cardRarityLabel(card.getRarity());
+    ret["upgraded"] = card.isUpgraded();
+    return ret;
+}
+
+pybind11::dict publicRelicRewardSnapshot(const RelicId relic) {
+    pybind11::dict ret;
+    ret["id"] = static_cast<int>(relic);
+    ret["id_label"] = std::string(relicIds[static_cast<int>(relic)]);
+    ret["name"] = std::string(getRelicName(relic));
+    return ret;
+}
+
+pybind11::dict publicRewardScreenPayload(
+        const GameContext &gc,
+        const std::vector<LightSpeedAction> &actions) {
+    const auto &rewards = gc.info.rewardsContainer;
+    pybind11::dict payload;
+    pybind11::list choices;
+    std::string unsupportedReason;
+    for (std::size_t candidateIndex = 0;
+            candidateIndex < actions.size(); ++candidateIndex) {
+        const auto &action = actions[candidateIndex];
+        pybind11::dict choice = publicChoiceAssociation(candidateIndex, action);
+        if (action.kind == "reward_card") {
+            if (action.idx1 < 0 || action.idx1 >= rewards.cardRewardCount) {
+                unsupportedReason = "card candidate index is outside the visible reward list";
+                break;
+            }
+            if (action.idx2 == 5 && gc.relics.has(RelicId::SINGING_BOWL)) {
+                choice["choice_type"] = "singing_bowl_max_hp";
+                choice["max_hp_gain"] = 2;
+                choice["description"] = "Gain 2 Max HP instead of choosing a card";
+            } else if (action.idx2 >= 0
+                    && action.idx2 < rewards.cardRewards[action.idx1].size()) {
+                choice["choice_type"] = "card";
+                choice["card"] = publicCardRewardSnapshot(
+                        rewards.cardRewards[action.idx1][action.idx2]);
+            } else {
+                unsupportedReason = "card candidate does not map to a visible card offer";
+                break;
+            }
+        } else if (action.kind == "reward_gold") {
+            if (action.idx1 < 0 || action.idx1 >= rewards.goldRewardCount) {
+                unsupportedReason = "gold candidate index is outside the visible reward list";
+                break;
+            }
+            choice["choice_type"] = "gold";
+            choice["gold"] = rewards.gold[action.idx1];
+        } else if (action.kind == "reward_relic") {
+            if (action.idx1 < 0 || action.idx1 >= rewards.relicCount) {
+                unsupportedReason = "relic candidate index is outside the visible reward list";
+                break;
+            }
+            choice["choice_type"] = "relic";
+            choice["relic"] = publicRelicRewardSnapshot(rewards.relics[action.idx1]);
+            if (rewards.sapphireKey && action.idx1 == rewards.relicCount - 1) {
+                choice["sapphire_key_is_lost"] = true;
+            }
+        } else if (action.kind == "reward_potion") {
+            if (action.idx1 < 0 || action.idx1 >= rewards.potionCount) {
+                unsupportedReason = "potion candidate index is outside the visible reward list";
+                break;
+            }
+            const auto potion = rewards.potions[action.idx1];
+            pybind11::dict publicPotion;
+            publicPotion["id"] = static_cast<int>(potion);
+            publicPotion["id_label"] = potionIdLabel(potion);
+            publicPotion["name"] = potionLabel(potion);
+            choice["choice_type"] = "potion";
+            choice["potion"] = publicPotion;
+        } else if (action.kind == "reward_key") {
+            if (!rewards.emeraldKey && !rewards.sapphireKey) {
+                unsupportedReason = "key candidate has no visible key reward";
+                break;
+            }
+            choice["choice_type"] = "key";
+            choice["key"] = rewards.sapphireKey ? "SAPPHIRE_KEY" : "EMERALD_KEY";
+            if (rewards.sapphireKey && rewards.relicCount > 0) {
+                choice["relic_removed_with_key"] = publicRelicRewardSnapshot(
+                        rewards.relics[rewards.relicCount - 1]);
+            }
+        } else if (action.kind == "skip") {
+            choice["choice_type"] = "skip";
+            choice["description"] = "Skip the remaining reward screen choices";
+        } else if (action.kind == "game_potion_use"
+                || action.kind == "game_potion_discard") {
+            if (action.idx1 < 0 || action.idx1 >= gc.potionCapacity) {
+                unsupportedReason = "potion action candidate has no visible potion slot";
+                break;
+            }
+            choice["choice_type"] = action.kind;
+            choice["potion"] = gamePotionSnapshot(gc, action.idx1);
+        } else {
+            unsupportedReason = "reward screen contains an unrecognized legal candidate kind";
+            break;
+        }
+        choices.append(choice);
+    }
+    payload["coverage_status"] = unsupportedReason.empty() ? "supported" : "unsupported";
+    if (!unsupportedReason.empty()) {
+        payload["reason"] = unsupportedReason;
+        return payload;
+    }
+    payload["source"] = "GameContext::info.rewardsContainer and StepSimulator::legalActions";
+    payload["choices"] = choices;
+    return payload;
+}
+
+pybind11::dict publicChoiceScreenPayload(
+        GameContext &gc,
+        const pybind11::dict &visibleActBoss,
+        const std::vector<LightSpeedAction> &actions,
+        const pybind11::list &mapGraph,
+        const pybind11::dict &currentMapNode,
+        const pybind11::list &legalRoutes) {
+    pybind11::dict payload;
+    switch (gc.screenState) {
+        case ScreenState::REWARDS:
+            return publicRewardScreenPayload(gc, actions);
+        case ScreenState::MAP_SCREEN: {
+            const bool bossAvailable = visibleActBoss["availability"]
+                    .cast<std::string>() == "available";
+            payload["coverage_status"] = bossAvailable ? "supported" : "partial";
+            payload["source"] = "GameContext::map and StepSimulator::legalActions";
+            payload["map_graph"] = mapGraph;
+            payload["current_map_node"] = currentMapNode;
+            payload["legal_routes"] = legalRoutes;
+            if (!bossAvailable) {
+                payload["missing_facts"] = pybind11::make_tuple(
+                        "current_act_boss_identity_not_validated_for_the_public_map");
+            }
+            return payload;
+        }
+        case ScreenState::BATTLE:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] =
+                    "battle choices remain on the separate T096 public-information API";
+            return payload;
+        case ScreenState::EVENT_SCREEN:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] = "event option text is not source-backed by this choice surface";
+            return payload;
+        case ScreenState::BOSS_RELIC_REWARDS:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] = "boss relic choice contents are not rendered by this capability";
+            return payload;
+        case ScreenState::CARD_SELECT:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] = "card-select choice contents are not rendered by this capability";
+            return payload;
+        case ScreenState::TREASURE_ROOM:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] = "treasure-room choice contents are not rendered by this capability";
+            return payload;
+        case ScreenState::REST_ROOM:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] = "rest-room choice contents are not rendered by this capability";
+            return payload;
+        case ScreenState::SHOP_ROOM:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] = "shop choice contents are not rendered by this capability";
+            return payload;
+        case ScreenState::INVALID:
+        default:
+            payload["coverage_status"] = "unsupported";
+            payload["reason"] = "current screen identity is not supported";
+            return payload;
+    }
+}
 std::size_t knownDrawTopCount(const BattleContext &bc);
 bool knownDrawStateConsistent(const BattleContext &bc);
 
@@ -3409,24 +3736,43 @@ struct StepSimulator {
     pybind11::dict publicProjection() {
         ensureBattleContext();
         pybind11::dict ret;
-        ret["schema_id"] = "native-public-projection-v1";
-        ret["external_base_commit"] = "7476a81";
-        ret["patch_identity"] = "sts_lightspeed_public_projection.patch";
+        ret["schema_id"] = "native-public-projection-v3";
         ret["screen_identity"] = publicProjectionAvailable(
                 pybind11::str(screenStateLabel(gc.screenState)),
                 "GameContext::screenState");
-        ret["visible_act_boss"] = publicProjectionUnavailable(
-                "unavailable",
-                "no audited native source is exposed by this patch");
-        ret["visible_map_graph"] = publicProjectionUnavailable(
-                "unavailable",
-                "no audited native source is exposed by this patch");
-        ret["current_map_node"] = publicProjectionUnavailable(
-                "unavailable",
-                "no audited native source is exposed by this patch");
-        ret["immediately_legal_routes"] = publicProjectionUnavailable(
-                "unavailable",
-                "no audited native source is exposed by this patch");
+        const auto visibleActBoss = publicVisibleActBoss(gc);
+        ret["visible_act_boss"] = visibleActBoss;
+
+        const auto actions = legalActions();
+        pybind11::list mapGraph;
+        pybind11::dict currentMapNode;
+        pybind11::list legalRoutes;
+        if (gc.map) {
+            mapGraph = publicMapGraphSnapshot(*gc.map);
+            currentMapNode = publicCurrentMapNode(gc);
+            ret["visible_map_graph"] = publicProjectionAvailable(
+                    mapGraph,
+                    "GameContext::map via MapNode::getRoomSymbol, coordinates, and edges");
+            ret["current_map_node"] = publicProjectionAvailable(
+                    currentMapNode,
+                    "GameContext::curMapNodeX/curMapNodeY and current public room symbol");
+            if (gc.screenState == ScreenState::MAP_SCREEN) {
+                legalRoutes = publicMapRouteChoices(gc, actions);
+                ret["immediately_legal_routes"] = publicProjectionAvailable(
+                        legalRoutes,
+                        "GameContext::map and ordered StepSimulator::legalActions");
+            } else {
+                ret["immediately_legal_routes"] = publicProjectionUnavailable(
+                        "unavailable", "route candidates are only defined at MAP_SCREEN");
+            }
+        } else {
+            ret["visible_map_graph"] = publicProjectionUnavailable(
+                    "unavailable", "GameContext::map is not initialized");
+            ret["current_map_node"] = publicProjectionUnavailable(
+                    "unavailable", "GameContext::map is not initialized");
+            ret["immediately_legal_routes"] = publicProjectionUnavailable(
+                    "unavailable", "GameContext::map is not initialized");
+        }
 
         pybind11::dict resourceFields;
         if (battleActive) {
@@ -3463,18 +3809,21 @@ struct StepSimulator {
                 keyFlagsSnapshot(gc), "GameContext::keyFlags");
         ret["persistent_resources"] = publicProjectionAvailable(
                 resourceFields, "StepSimulator::publicProjection");
-        ret["screen_payload"] = publicProjectionUnavailable(
-                "unsupported", "screen-specific payloads are not exposed by this patch");
+
+        ret["screen_payload"] = publicProjectionAvailable(
+                publicChoiceScreenPayload(
+                        gc, visibleActBoss, actions, mapGraph,
+                        currentMapNode, legalRoutes),
+                "StepSimulator::publicProjection screen coverage and choices");
 
         pybind11::list candidates;
-        for (const auto &action : legalActions()) {
-            candidates.append(publicProjectionActionSnapshot(action));
+        for (const auto &action : actions) {
+            candidates.append(publicChoiceActionSnapshot(action));
         }
         ret["candidate_actions"] = publicProjectionAvailable(
-                candidates, "StepSimulator::legalActions");
+                candidates, "ordered StepSimulator::legalActions; action bits are withheld");
         return ret;
     }
-
     pybind11::dict t096PublicInformationProjection() {
         ensureBattleContext();
         if (!battleActive) {
