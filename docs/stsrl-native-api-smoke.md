@@ -48,6 +48,7 @@ The smoke check asserts these `StepSimulator` methods are callable:
 - `capture_checkpoint`
 - `restore_checkpoint`
 - `public_projection`
+- `public_projection_v3`
 - `battle_search`
 - `legal_battle_start_encounters`
 - `rebuild_battle_start`
@@ -64,6 +65,15 @@ It also checks these snapshot fields:
 `battle_search`, `legal_battle_start_encounters`, and `rebuild_battle_start`
 require an active battle context, so this smoke check verifies that the methods
 exist without running battle-specific oracle behavior.
+
+The smoke check also preserves the established
+`public_projection()` / `native-public-projection-v1` response, including its
+legacy metadata and unsupported screen payload. New normal-public choice
+consumers use the separately versioned `public_projection_v3()` /
+`native-public-projection-v3` response, which exposes audited visible choices
+and omits native action bits from candidate identities and labels. The smoke
+check validates both schema IDs and confirms the v3 candidates do not expose
+action bits.
 
 ## Acceptance Boundary
 

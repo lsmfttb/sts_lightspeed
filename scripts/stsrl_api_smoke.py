@@ -22,6 +22,7 @@ REQUIRED_STEP_SIMULATOR_METHODS = (
     "capture_checkpoint",
     "restore_checkpoint",
     "public_projection",
+    "public_projection_v3",
     "battle_search",
     "battle_search_v2",
     "battle_search_v2_with_tree_geometry",
@@ -155,6 +156,47 @@ def main() -> int:
 
         projection = require_mapping(sim.public_projection(), "StepSimulator.public_projection()")
         require(projection.get("schema_id") == "native-public-projection-v1", "unexpected public_projection schema_id")
+        require(
+            projection.get("external_base_commit") == "7476a81",
+            "public_projection() changed its legacy external base marker",
+        )
+        require(
+            projection.get("patch_identity") == "sts_lightspeed_public_projection.patch",
+            "public_projection() changed its legacy patch marker",
+        )
+        legacy_payload = require_mapping(
+            projection.get("screen_payload"),
+            "StepSimulator.public_projection()['screen_payload']",
+        )
+        require(
+            legacy_payload.get("availability") == "unsupported",
+            "public_projection() changed its legacy screen-payload availability",
+        )
+        public_projection_v3 = require_mapping(
+            sim.public_projection_v3(),
+            "StepSimulator.public_projection_v3()",
+        )
+        require(
+            public_projection_v3.get("schema_id") == "native-public-projection-v3",
+            "unexpected public_projection_v3 schema_id",
+        )
+        v3_candidates = require_mapping(
+            public_projection_v3.get("candidate_actions"),
+            "StepSimulator.public_projection_v3()['candidate_actions']",
+        )
+        require(
+            v3_candidates.get("availability") == "available",
+            "public_projection_v3() omitted ordered legal candidates",
+        )
+        for index, candidate_value in enumerate(
+            require_sequence(v3_candidates.get("value"), "v3 candidate actions")
+        ):
+            candidate = require_mapping(candidate_value, f"v3 candidate actions[{index}]")
+            require("bits" not in candidate, f"v3 candidate actions[{index}] exposed native bits")
+            require(
+                "bits=" not in str(candidate.get("label", "")),
+                f"v3 candidate actions[{index}] exposed native bits in its label",
+            )
 
         checkpoint = sim.capture_checkpoint()
         restored_snapshot = require_mapping(

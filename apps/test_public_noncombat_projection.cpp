@@ -25,7 +25,7 @@ void require(bool condition, const std::string &message) {
 }
 
 dict projection(StepSimulator &simulator) {
-    return simulator.publicProjection();
+    return simulator.publicProjectionV3();
 }
 
 dict screenPayload(const dict &projectionValue) {

@@ -67,36 +67,52 @@ def main() -> int:
                     f"public idx1 disagrees with serialized action bits at step {step_index}: "
                     f"idx1={action.idx1} bits={action.bits}"
                 )
-            projection = sim.public_projection()
+            projection = sim.public_projection_v3()
+            if projection.get("schema_id") != "native-public-projection-v3":
+                raise AssertionError("gold action check received an unexpected public projection schema")
             screen_payload = projection["screen_payload"]
-            if screen_payload["availability"] != "unsupported":
+            if screen_payload["availability"] != "available":
                 raise AssertionError(
-                    "public projection unexpectedly exposed the private reward payload"
+                    "public projection omitted the currently visible reward choices"
                 )
-            projected_actions = projection["candidate_actions"]["value"]
+            payload = screen_payload["value"]
             projected_gold = [
-                candidate
-                for candidate in projected_actions
-                if candidate["kind"] == "reward_gold"
+                choice
+                for choice in payload["choices"]
+                if choice["choice_type"] == "gold"
+                and choice["candidate_action"]["idx1"] == action.idx1
             ]
-            if not any(candidate["idx1"] == action.idx1 for candidate in projected_gold):
-                raise AssertionError("public projection lost the gold action slot identity")
+            if len(projected_gold) != 1:
+                raise AssertionError("visible gold option is missing or ambiguously associated")
+            gold_choice = projected_gold[0]
+            candidate_index = gold_choice["candidate_index"]
+            if type(candidate_index) is not int:
+                raise AssertionError("visible gold option has a non-integer candidate index")
+            projected_actions = projection["candidate_actions"]["value"]
+            if not 0 <= candidate_index < len(projected_actions):
+                raise AssertionError("visible gold option has an invalid candidate index")
+            candidate = projected_actions[candidate_index]
+            if candidate != gold_choice["candidate_action"]:
+                raise AssertionError("visible gold option is associated with another legal action")
             if any(
-                "gold_reward" in candidate or "amount" in candidate
-                for candidate in projected_gold
+                candidate[field] != getattr(action, field)
+                for field in ("scope", "kind", "idx1", "idx2", "idx3")
             ):
-                raise AssertionError("public projection exposed a gold reward amount")
+                raise AssertionError("visible gold option does not identify the selected action")
+            gold_amount = gold_choice["gold"]
+            if type(gold_amount) is not int or gold_amount <= 0:
+                raise AssertionError("visible gold option has an invalid reward amount")
             before_gold = sim.snapshot()["gold"]
             after = sim.step(action)
-            if after["gold"] <= before_gold:
+            if after["gold"] - before_gold != gold_amount:
                 raise AssertionError(
-                    f"gold action did not collect its reward at step {step_index}: "
-                    f"before={before_gold} after={after['gold']}"
+                    f"gold action did not collect the projected reward at step {step_index}: "
+                    f"expected={gold_amount} before={before_gold} after={after['gold']}"
                 )
             print(
-                "public gold action round-trip passed: "
+                "public gold option identity and amount round-trip passed: "
                 f"seed={args.seed} step={step_index} idx1={action.idx1} "
-                f"bits={action.bits} gold={before_gold}->{after['gold']}"
+                f"amount={gold_amount} gold={before_gold}->{after['gold']}"
             )
             return 0
 

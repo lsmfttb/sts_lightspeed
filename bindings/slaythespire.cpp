@@ -3733,7 +3733,79 @@ struct StepSimulator {
         return result;
     }
 
+    // Preserve the original projection contract for frozen API consumers.
+    // New normal-public choice consumers should use publicProjectionV3(),
+    // which withholds native action bits and includes audited screen choices.
     pybind11::dict publicProjection() {
+        ensureBattleContext();
+        pybind11::dict ret;
+        ret["schema_id"] = "native-public-projection-v1";
+        ret["external_base_commit"] = "7476a81";
+        ret["patch_identity"] = "sts_lightspeed_public_projection.patch";
+        ret["screen_identity"] = publicProjectionAvailable(
+                pybind11::str(screenStateLabel(gc.screenState)),
+                "GameContext::screenState");
+        ret["visible_act_boss"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+        ret["visible_map_graph"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+        ret["current_map_node"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+        ret["immediately_legal_routes"] = publicProjectionUnavailable(
+                "unavailable",
+                "no audited native source is exposed by this patch");
+
+        pybind11::dict resourceFields;
+        if (battleActive) {
+            resourceFields["current_hp"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.curHp), "BattleContext::player.curHp");
+            resourceFields["max_hp"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.maxHp), "BattleContext::player.maxHp");
+            resourceFields["gold"] = publicProjectionAvailable(
+                    pybind11::int_(bc.player.gold), "BattleContext::player.gold");
+            resourceFields["potion_count"] = publicProjectionAvailable(
+                    pybind11::int_(bc.potionCount), "BattleContext::potionCount");
+            resourceFields["potion_capacity"] = publicProjectionAvailable(
+                    pybind11::int_(bc.potionCapacity), "BattleContext::potionCapacity");
+        } else {
+            resourceFields["current_hp"] = publicProjectionAvailable(
+                    pybind11::int_(gc.curHp), "GameContext::curHp");
+            resourceFields["max_hp"] = publicProjectionAvailable(
+                    pybind11::int_(gc.maxHp), "GameContext::maxHp");
+            resourceFields["gold"] = publicProjectionAvailable(
+                    pybind11::int_(gc.gold), "GameContext::gold");
+            resourceFields["potion_count"] = publicProjectionAvailable(
+                    pybind11::int_(gc.potionCount), "GameContext::potionCount");
+            resourceFields["potion_capacity"] = publicProjectionAvailable(
+                    pybind11::int_(gc.potionCapacity), "GameContext::potionCapacity");
+        }
+        resourceFields["deck"] = publicProjectionAvailable(
+                deckSnapshot(gc), "GameContext::deck");
+        resourceFields["relics"] = publicProjectionAvailable(
+                relicListSnapshot(gc), "GameContext::relics");
+        resourceFields["potion_identities"] = publicProjectionAvailable(
+                battleActive ? potionListSnapshot(bc) : gamePotionListSnapshot(gc),
+                battleActive ? "BattleContext::potions" : "GameContext::potions");
+        resourceFields["keys"] = publicProjectionAvailable(
+                keyFlagsSnapshot(gc), "GameContext::keyFlags");
+        ret["persistent_resources"] = publicProjectionAvailable(
+                resourceFields, "StepSimulator::publicProjection");
+        ret["screen_payload"] = publicProjectionUnavailable(
+                "unsupported", "screen-specific payloads are not exposed by this patch");
+
+        pybind11::list candidates;
+        for (const auto &action : legalActions()) {
+            candidates.append(publicProjectionActionSnapshot(action));
+        }
+        ret["candidate_actions"] = publicProjectionAvailable(
+                candidates, "StepSimulator::legalActions");
+        return ret;
+    }
+
+    pybind11::dict publicProjectionV3() {
         ensureBattleContext();
         pybind11::dict ret;
         ret["schema_id"] = "native-public-projection-v3";
@@ -7366,6 +7438,7 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("observation", &StepSimulator::observation)
         .def("legal_actions", &StepSimulator::legalActions)
         .def("public_projection", &StepSimulator::publicProjection)
+        .def("public_projection_v3", &StepSimulator::publicProjectionV3)
         .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
         .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
         .def("t096_visibility_audit", &StepSimulator::t096VisibilityAudit)
