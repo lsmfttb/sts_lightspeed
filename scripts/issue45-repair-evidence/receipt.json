@@ -1,0 +1,88 @@
+{
+  "issue": 45,
+  "original_store": "/home/lsmft/.cache/issue45-potion-paired",
+  "original_evidence": "a138371e7a249a27c9f99ba03b80ae4241db513b",
+  "tested_candidate": "3120fdb554b6e60d4d649f9244cff02ba2c693c6",
+  "native_base": "7fef4e19c7ee13f049ee0fb45c9967e7e349fcfb",
+  "costs": [
+    {
+      "file": "issue45-repair-build.cost",
+      "user_cpu": 75.95,
+      "system_cpu": 12.37,
+      "wall": 70.01,
+      "failed": true
+    },
+    {
+      "file": "issue45-repair-build2.cost",
+      "user_cpu": 39.84,
+      "system_cpu": 6.27,
+      "wall": 33.69,
+      "failed": false
+    },
+    {
+      "file": "issue45-repair-build3.cost",
+      "user_cpu": 86.67,
+      "system_cpu": 12.44,
+      "wall": 80.57,
+      "failed": false
+    },
+    {
+      "file": "issue45-repair-config.cost",
+      "user_cpu": 0.15,
+      "system_cpu": 0.22,
+      "wall": 1.5,
+      "failed": true
+    },
+    {
+      "file": "issue45-repair-config2.cost",
+      "user_cpu": 0.32,
+      "system_cpu": 0.22,
+      "wall": 1.0,
+      "failed": true
+    },
+    {
+      "file": "issue45-repair-config3.cost",
+      "user_cpu": 0.08,
+      "system_cpu": 0.05,
+      "wall": 0.47,
+      "failed": false
+    },
+    {
+      "file": "issue45-repair-root.cost",
+      "user_cpu": 0.07,
+      "system_cpu": 0.01,
+      "wall": 0.16,
+      "failed": false
+    },
+    {
+      "file": "issue45-repair-unit.cost",
+      "user_cpu": 0.0,
+      "system_cpu": 0.0,
+      "wall": 0.07,
+      "failed": false
+    }
+  ],
+  "measured_repair_cpu": 234.66,
+  "repair_admin_dependency_fixture_allowance": 300,
+  "previous_builder_reviewer_cpu_upper": 787.205714014,
+  "same_task_cpu_upper": 1321.8657140139999,
+  "cumulative_wall_at_receipt": 14740.601483345032,
+  "wall_cap_status": "BREACHED_BEFORE_REPAIR_NOT_RESET",
+  "whole_run_execution": "NONE",
+  "classification": "CANDIDATE_REPAIR_PASS; original study INCOMPLETE/POTION_ACTION_MAPPING_INVALID",
+  "extension_sha256": "0652b1ce6d757404278b840678b1f8548c81fb6b03cade598e7f3d82524b18d2",
+  "native_test_executable_sha256": "14093fbcd1293cacb0c2f74d5917da6f8f6170da9382f4c957c37b0b0c43f3d3",
+  "tests": [
+    "POTION_DISCARD_IDENTITY_PASS: real native enumeration/reporter with fixture per-edge counts, duplicates, targeting, no-target discard, non-target use, canonical/historical discard inventory parity",
+    "ISSUE45_CAPTURED_FAIRY_ROOT_PASS: exact27-action prefix, native400 on/off root searches, unchanged snapshots",
+    "baseline accepted extension fails the unmapped-edge assertion at the same root"
+  ],
+  "failed_checks": [
+    "initial legacy dependency CMake policy requirement",
+    "PowerShell split unquoted CMake version flag",
+    "initial C++ test ambiguous Action type; fixed alias"
+  ],
+  "purpose": "candidate review only, no merge/promotion",
+  "consumer": "Issue45 Builder/Reviewer/Planner; native PR36 reviewers",
+  "review_delete": "2026-11-09"
+}
