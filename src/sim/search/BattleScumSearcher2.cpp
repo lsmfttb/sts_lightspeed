@@ -826,7 +826,7 @@ void search::BattleScumSearcher2::enumeratePotionActions(search::BattleScumSearc
 
         // not enumerating the discard of a potion if it can be used
         if (p == Potion::FAIRY_POTION) {
-            node.edges.push_back({Action(ActionType::POTION, pIdx, -1)});
+            node.edges.push_back({Action(ActionType::POTION, pIdx, 6)});
             continue;
         }
 
@@ -837,7 +837,7 @@ void search::BattleScumSearcher2::enumeratePotionActions(search::BattleScumSearc
 
         // potion requires target
         if (!hasValidTarget) {
-            node.edges.push_back({Action(ActionType::POTION, pIdx, -1)});
+            node.edges.push_back({Action(ActionType::POTION, pIdx, 6)});
             continue;
         }
 
