@@ -363,6 +363,8 @@ void checkSmokeBombBattleProjection(nlohmann::json &evidence) {
             "Smoke Bomb escape produced an event or normal combat reward");
 
     evidence = {
+        {"tested_native_source_commit", STS_LIGHTSPEED_TESTED_SOURCE_COMMIT},
+        {"screen", "BATTLE"},
         {"candidate_count", actions.size()},
         {"duplicate_smoke_slots_remain_distinct", true},
         {"selected_potion_slot", selected.idx1},
