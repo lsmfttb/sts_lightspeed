@@ -822,6 +822,9 @@ void search::BattleScumSearcher2::enumeratePotionActions(search::BattleScumSearc
         if (p == Potion::EMPTY_POTION_SLOT) {
             continue;
         }
+        if (p == Potion::SMOKE_BOMB && !bc.canUseSmokeBomb()) {
+            continue;
+        }
         ++foundPotions;
 
         // not enumerating the discard of a potion if it can be used

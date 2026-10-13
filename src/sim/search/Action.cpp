@@ -76,12 +76,14 @@ bool isValidPotionAction(const BattleContext &bc, const search::Action &a) {
     if (p == Potion::INVALID || p == Potion::EMPTY_POTION_SLOT) {
         return false;
     }
-
     if (a.getTargetIdx() > 5) {
         // discard action
         return true;
 
     } else {
+        if (p == Potion::SMOKE_BOMB && !bc.canUseSmokeBomb()) {
+            return false;
+        }
 
         if (p == sts::Potion::FAIRY_POTION) {
             return false;

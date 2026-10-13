@@ -1116,15 +1116,18 @@ void GameContext::enterBattle(MonsterEncounter encounter) {
     screenState = ScreenState::BATTLE;
     info.encounter = encounter;
     if (skipBattles) {
+        applyFaceOfClericCombatEndEffect();
         afterBattle();
     }
 }
 
-void GameContext::afterBattle() {
+void GameContext::applyFaceOfClericCombatEndEffect() {
     if (hasRelic(RelicId::FACE_OF_CLERIC)) {
         playerIncreaseMaxHp(1);
     }
+}
 
+void GameContext::afterBattle() {
     switch (curRoom) {
         case Room::MONSTER: {
             regainControlAction = returnToMapAction;
@@ -2187,14 +2190,16 @@ void GameContext::drinkPotion(Potion p) {
             break;
 
         case Potion::ENTROPIC_BREW: {
-            Potion randPotions[5];
-            for (int i = 0 ; i < potionCapacity; ++i) {
-                randPotions[i] = returnRandomPotion(potionRng, cc);
-                if (potions[i] == Potion::EMPTY_POTION_SLOT) {
-                    potions[i] = randPotions[i];
+            const bool canObtainPotions = !relics.has(RelicId::SOZU);
+            for (int i = 0; i < potionCapacity; ++i) {
+                const Potion randomPotion = returnRandomPotion(potionRng, cc);
+                if (canObtainPotions && potions[i] == Potion::EMPTY_POTION_SLOT) {
+                    potions[i] = randomPotion;
                 }
             }
-            potionCount = potionCapacity;
+            if (canObtainPotions) {
+                potionCount = potionCapacity;
+            }
             break;
         }
 

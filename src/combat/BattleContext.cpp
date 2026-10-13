@@ -500,7 +500,7 @@ void BattleContext::exitBattle(GameContext &g) const {
     updateCardsOnExit(g.deck);
 
     g.info.stolenGold = 0;
-    if (requiresStolenGoldCheck()) {
+    if (outcome != Outcome::PLAYER_ESCAPE && requiresStolenGoldCheck()) {
         for (int i = 0; i < monsters.monsterCount; ++i) {
             const auto &m = monsters.arr[i];
 
@@ -514,7 +514,24 @@ void BattleContext::exitBattle(GameContext &g) const {
         }
     }
 
-    if (outcome == Outcome::PLAYER_LOSS) {
+    if (outcome == Outcome::PLAYER_VICTORY || outcome == Outcome::PLAYER_ESCAPE) {
+        // Face of Cleric is a combat-end hook, independent of which reward
+        // callback the room uses after the battle.
+        g.applyFaceOfClericCombatEndEffect();
+    }
+
+    if (outcome == Outcome::PLAYER_ESCAPE) {
+        // Escape ends the combat for relic hooks, but deliberately skips
+        // afterBattle() because that also creates normal/event rewards.
+        // Smoke Bomb abandons the encounter, including any event-specific
+        // post-battle reward callback. Return to the map without running
+        // afterBattle(), which would grant normal combat rewards.
+        g.regainControlAction = [](GameContext &gc) {
+            gc.screenState = ScreenState::MAP_SCREEN;
+            gc.regainControlAction = nullptr;
+        };
+        g.regainControl();
+    } else if (outcome == Outcome::PLAYER_LOSS) {
         g.outcome = GameOutcome::PLAYER_LOSS;
     } else {
         // player victory
@@ -526,6 +543,17 @@ void BattleContext::exitBattle(GameContext &g) const {
 }
 
 void BattleContext::updateRelicsOnExit(GameContext &g) const {
+    const bool combatEndRelicsTrigger = outcome == Outcome::PLAYER_VICTORY
+            || outcome == Outcome::PLAYER_ESCAPE;
+
+    // Meat on the Bone checks HP at the start of combat-end relic processing.
+    // Evaluate it before Burning Blood or Black Blood, regardless of relic
+    // storage order.
+    if (combatEndRelicsTrigger && g.relics.has(RelicId::MEAT_ON_THE_BONE)
+            && g.curHp <= g.maxHp / 2) {
+        g.playerHeal(12);
+    }
+
     for (auto &r : g.relics.relics) {
         switch (r.id) {
             case RelicId::HAPPY_FLOWER:
@@ -574,21 +602,18 @@ void BattleContext::updateRelicsOnExit(GameContext &g) const {
                 break;
 
             case RelicId::BURNING_BLOOD:
-                if (outcome == Outcome::PLAYER_VICTORY) {
+                if (combatEndRelicsTrigger) {
                     g.playerHeal(6);
                 }
                 break;
 
             case RelicId::BLACK_BLOOD:
-                if (outcome == Outcome::PLAYER_VICTORY) {
+                if (combatEndRelicsTrigger) {
                     g.playerHeal(12);
                 }
                 break;
 
             case RelicId::MEAT_ON_THE_BONE:
-                if (outcome == Outcome::PLAYER_VICTORY && g.curHp <= g.maxHp / 2) {
-                    g.playerHeal(12);
-                }
                 break;
 
             default:
@@ -2244,9 +2269,27 @@ void BattleContext::discardPotion(int idx) {
     --potionCount;
 }
 
+bool BattleContext::canUseSmokeBomb() const {
+    if (encounter == MonsterEncounter::INVALID || isBossEncounter(encounter)
+            || encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS
+            || encounter == MonsterEncounter::COLOSSEUM_EVENT_NOBS) {
+        return false;
+    }
+
+    // The Act 4 elite's Surrounded debuff prevents escape while both enemies
+    // remain. The current simulator does not clear the debuff on the first
+    // kill, so use the encounter's live count for this legality check.
+    // Colosseum's multi-fight continuation is not modeled, so fail closed
+    // instead of letting an escape incorrectly end the event.
+    return encounter != MonsterEncounter::SHIELD_AND_SPEAR || monsters.monstersAlive <= 1;
+}
+
 void BattleContext::drinkPotion(int idx, int target) {
     const bool hasBark = player.hasRelic<R::SACRED_BARK>();
     const Potion p = potions[idx];
+    if (p == Potion::SMOKE_BOMB && !canUseSmokeBomb()) {
+        return;
+    }
     discardPotion(idx);
 
     // todo - dont need to add to bot because always will have nothing in actionQueue?
@@ -2274,7 +2317,8 @@ void BattleContext::drinkPotion(int idx, int target) {
 
 
         case Potion::BLOOD_POTION: {
-            int healAmt = static_cast<int>((static_cast<float>(player.maxHp * (hasBark ? 20 : 40)) / 100.0f));
+            int healAmt = static_cast<int>(static_cast<float>(player.maxHp)
+                    * (hasBark ? 0.40f : 0.20f));
             addToBot(Actions::HealPlayer(healAmt));
             break;
         }
@@ -2404,7 +2448,7 @@ void BattleContext::drinkPotion(int idx, int target) {
             break;
 
         case Potion::SMOKE_BOMB:
-            // todo
+            outcome = Outcome::PLAYER_ESCAPE;
             break;
 
         case Potion::SNECKO_OIL:
