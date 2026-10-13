@@ -273,6 +273,7 @@ namespace sts {
         void enterBossTreasureRoom();
         void enterAct3VictoryRoom();
         void enterBattle(MonsterEncounter encounter);
+        void applyFaceOfClericCombatEndEffect();
         void afterBattle();
 
         // actions

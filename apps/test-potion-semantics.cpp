@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -294,8 +295,7 @@ void checkSmokeBombExitSkipsRewards() {
     gc.info.gold = 45;
     gc.info.bossRelics[0] = RelicId::ANCHOR;
     gc.info.stolenGold = 13;
-    gc.relics.add({RelicId::FACE_OF_CLERIC, 0});
-    gc.relics.add({RelicId::MEAT_ON_THE_BONE, 0});
+    gc.relics.remove(RelicId::BURNING_BLOOD);
     gc.potions[0] = Potion::SMOKE_BOMB;
     gc.potionCount = 1;
     gc.regainControlAction = [](GameContext &next) { next.afterBattle(); };
@@ -329,6 +329,89 @@ void checkSmokeBombExitSkipsRewards() {
             "event escape applied a victory reward, altered the run, or failed to consume potion");
 }
 
+void checkCombatEndRelic(
+        const RelicId relic,
+        const Outcome outcome,
+        const int startingHp,
+        const int startingMaxHp,
+        const int expectedHp,
+        const int expectedMaxHp,
+        const bool markOfTheBloom = false) {
+    auto gc = gameFixture();
+    gc.relics.remove(RelicId::BURNING_BLOOD);
+    gc.relics.add({relic, 0});
+    if (markOfTheBloom) {
+        gc.relics.add({RelicId::MARK_OF_THE_BLOOM, 0});
+    }
+    gc.curHp = startingHp;
+    gc.maxHp = startingMaxHp;
+    gc.gold = 99;
+    gc.info.stolenGold = 13;
+    if (outcome == Outcome::PLAYER_ESCAPE) {
+        gc.potions[0] = Potion::SMOKE_BOMB;
+        gc.potionCount = 1;
+    }
+    gc.regainControlAction = [](GameContext &next) { next.afterBattle(); };
+
+    auto bc = battleFixture(gc, MonsterEncounter::CULTIST);
+    bc.player.curHp = startingHp;
+    bc.player.maxHp = startingMaxHp;
+    if (outcome == Outcome::PLAYER_ESCAPE) {
+        bc.drinkPotion(0);
+        require(bc.outcome == Outcome::PLAYER_ESCAPE,
+                "Smoke Bomb did not set the escape result for combat-end relic test");
+    } else {
+        bc.outcome = outcome;
+    }
+    bc.exitBattle(gc);
+
+    require(gc.curHp == expectedHp && gc.maxHp == expectedMaxHp,
+            "combat-end relic health/max-HP hook was missing, doubled, or misapplied");
+    require(gc.outcome == GameOutcome::UNDECIDED,
+            "combat-end relic hook falsely completed or lost the run");
+    if (outcome == Outcome::PLAYER_ESCAPE) {
+        require(gc.screenState == ScreenState::MAP_SCREEN
+                        && gc.gold == 99 && gc.info.stolenGold == 0
+                        && gc.info.rewardsContainer.goldRewardCount == 0
+                        && gc.info.rewardsContainer.relicCount == 0
+                        && gc.info.rewardsContainer.potionCount == 0
+                        && gc.info.rewardsContainer.cardRewardCount == 0,
+                "escape relic hook granted rewards or did not continue at the map");
+    }
+}
+
+void checkSmokeBombCombatEndRelics() {
+    struct RelicExpectation {
+        RelicId relic;
+        int healedHp;
+        int healedMaxHp;
+        int markedMaxHp;
+    };
+    constexpr std::array<RelicExpectation, 4> expectations = {{
+            {RelicId::BURNING_BLOOD, 36, 60, 60},
+            {RelicId::BLACK_BLOOD, 42, 60, 60},
+            {RelicId::MEAT_ON_THE_BONE, 42, 60, 60},
+            {RelicId::FACE_OF_CLERIC, 31, 61, 61},
+    }};
+
+    for (const auto &expected : expectations) {
+        for (const auto outcome : {Outcome::PLAYER_ESCAPE, Outcome::PLAYER_VICTORY}) {
+            checkCombatEndRelic(expected.relic, outcome, 30, 60,
+                    expected.healedHp, expected.healedMaxHp);
+            checkCombatEndRelic(expected.relic, outcome,
+                    30, 60, 30, expected.markedMaxHp, true);
+            const int cappedHp = expected.relic == RelicId::FACE_OF_CLERIC ? 61 : 60;
+            const int cappedMaxHp = expected.relic == RelicId::FACE_OF_CLERIC ? 61 : 60;
+            checkCombatEndRelic(expected.relic, outcome,
+                    60, 60, cappedHp, cappedMaxHp);
+        }
+    }
+    for (const auto outcome : {Outcome::PLAYER_ESCAPE, Outcome::PLAYER_VICTORY}) {
+        checkCombatEndRelic(RelicId::MEAT_ON_THE_BONE, outcome,
+                31, 60, 31, 60);
+    }
+}
+
 void checkSozuPotionRefusal() {
     auto gc = gameFixture();
     gc.obtainRelic(RelicId::SOZU);
@@ -352,6 +435,7 @@ int main() {
         checkEntropicBrew(5, false);
         checkSmokeBombLegalityAndSearch();
         checkSmokeBombExitSkipsRewards();
+        checkSmokeBombCombatEndRelics();
         for (const int capacity : {3, 5}) {
             for (const bool sacredBark : {false, true}) {
                 checkSozuEntropicBrew(false, capacity, sacredBark);

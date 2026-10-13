@@ -3,6 +3,7 @@
 #include <pybind11/embed.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <set>
@@ -337,7 +338,11 @@ void checkSmokeBombBattleProjection(nlohmann::json &evidence) {
 
     const int initialGold = simulator.gc.gold;
     const int initialHp = simulator.gc.curHp;
+    const int initialMaxHp = simulator.gc.maxHp;
     const int initialRelics = simulator.gc.relics.relics.size();
+    require(simulator.gc.relics.has(RelicId::BURNING_BLOOD),
+            "public Smoke Bomb fixture is missing Ironclad's Burning Blood");
+    const int expectedHpAfterEscape = std::min(initialMaxHp, initialHp + 6);
     const auto selected = actions[smokeSlots[1]];
     require(selected.idx1 == 1,
             "public candidate selection did not retain the chosen potion slot");
@@ -352,10 +357,11 @@ void checkSmokeBombBattleProjection(nlohmann::json &evidence) {
                     && simulator.gc.potionCount == 1,
             "selected public Smoke Bomb action consumed the wrong potion slot");
     require(simulator.gc.gold == initialGold
-                    && simulator.gc.curHp == initialHp
+                    && simulator.gc.curHp == expectedHpAfterEscape
+                    && simulator.gc.maxHp == initialMaxHp
                     && simulator.gc.relics.relics.size() == initialRelics
                     && simulator.gc.info.stolenGold == 0,
-            "Smoke Bomb escape granted loot or retained encounter stolen gold");
+            "Smoke Bomb escape missed its capped combat-end heal or granted loot");
     require(simulator.gc.info.rewardsContainer.relicCount == 0
                     && simulator.gc.info.rewardsContainer.cardRewardCount == 0
                     && simulator.gc.info.rewardsContainer.potionCount == 0
@@ -371,7 +377,11 @@ void checkSmokeBombBattleProjection(nlohmann::json &evidence) {
         {"opaque_action_bits_withheld", true},
         {"hidden_future_projection_invariant", true},
         {"executed_outcome", "PLAYER_ESCAPE"},
-        {"victory_only_heal_not_applied", true},
+        {"burning_blood_escape_heal_applied", simulator.gc.curHp == expectedHpAfterEscape},
+        {"escape_heal_capped", expectedHpAfterEscape == initialMaxHp},
+        {"starting_hp", initialHp},
+        {"ending_hp", simulator.gc.curHp},
+        {"max_hp", simulator.gc.maxHp},
         {"returned_to_map_without_reward_or_victory", true}
     };
 }

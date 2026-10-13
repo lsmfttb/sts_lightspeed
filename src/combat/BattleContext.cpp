@@ -515,6 +515,9 @@ void BattleContext::exitBattle(GameContext &g) const {
     }
 
     if (outcome == Outcome::PLAYER_ESCAPE) {
+        // Escape ends the combat for relic hooks, but deliberately skips
+        // afterBattle() because that also creates normal/event rewards.
+        g.applyFaceOfClericCombatEndEffect();
         // Smoke Bomb abandons the encounter, including any event-specific
         // post-battle reward callback. Return to the map without running
         // afterBattle(), which would grant normal combat rewards.
@@ -535,6 +538,8 @@ void BattleContext::exitBattle(GameContext &g) const {
 }
 
 void BattleContext::updateRelicsOnExit(GameContext &g) const {
+    const bool combatEndRelicsTrigger = outcome == Outcome::PLAYER_VICTORY
+            || outcome == Outcome::PLAYER_ESCAPE;
     for (auto &r : g.relics.relics) {
         switch (r.id) {
             case RelicId::HAPPY_FLOWER:
@@ -583,19 +588,19 @@ void BattleContext::updateRelicsOnExit(GameContext &g) const {
                 break;
 
             case RelicId::BURNING_BLOOD:
-                if (outcome == Outcome::PLAYER_VICTORY) {
+                if (combatEndRelicsTrigger) {
                     g.playerHeal(6);
                 }
                 break;
 
             case RelicId::BLACK_BLOOD:
-                if (outcome == Outcome::PLAYER_VICTORY) {
+                if (combatEndRelicsTrigger) {
                     g.playerHeal(12);
                 }
                 break;
 
             case RelicId::MEAT_ON_THE_BONE:
-                if (outcome == Outcome::PLAYER_VICTORY && g.curHp <= g.maxHp / 2) {
+                if (combatEndRelicsTrigger && g.curHp <= g.maxHp / 2) {
                     g.playerHeal(12);
                 }
                 break;

@@ -1120,10 +1120,14 @@ void GameContext::enterBattle(MonsterEncounter encounter) {
     }
 }
 
-void GameContext::afterBattle() {
+void GameContext::applyFaceOfClericCombatEndEffect() {
     if (hasRelic(RelicId::FACE_OF_CLERIC)) {
         playerIncreaseMaxHp(1);
     }
+}
+
+void GameContext::afterBattle() {
+    applyFaceOfClericCombatEndEffect();
 
     switch (curRoom) {
         case Room::MONSTER: {
