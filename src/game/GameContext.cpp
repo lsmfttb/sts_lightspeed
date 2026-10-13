@@ -1116,6 +1116,7 @@ void GameContext::enterBattle(MonsterEncounter encounter) {
     screenState = ScreenState::BATTLE;
     info.encounter = encounter;
     if (skipBattles) {
+        applyFaceOfClericCombatEndEffect();
         afterBattle();
     }
 }
@@ -1127,8 +1128,6 @@ void GameContext::applyFaceOfClericCombatEndEffect() {
 }
 
 void GameContext::afterBattle() {
-    applyFaceOfClericCombatEndEffect();
-
     switch (curRoom) {
         case Room::MONSTER: {
             regainControlAction = returnToMapAction;

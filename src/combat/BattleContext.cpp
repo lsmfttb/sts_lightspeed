@@ -514,10 +514,15 @@ void BattleContext::exitBattle(GameContext &g) const {
         }
     }
 
+    if (outcome == Outcome::PLAYER_VICTORY || outcome == Outcome::PLAYER_ESCAPE) {
+        // Face of Cleric is a combat-end hook, independent of which reward
+        // callback the room uses after the battle.
+        g.applyFaceOfClericCombatEndEffect();
+    }
+
     if (outcome == Outcome::PLAYER_ESCAPE) {
         // Escape ends the combat for relic hooks, but deliberately skips
         // afterBattle() because that also creates normal/event rewards.
-        g.applyFaceOfClericCombatEndEffect();
         // Smoke Bomb abandons the encounter, including any event-specific
         // post-battle reward callback. Return to the map without running
         // afterBattle(), which would grant normal combat rewards.
@@ -540,6 +545,15 @@ void BattleContext::exitBattle(GameContext &g) const {
 void BattleContext::updateRelicsOnExit(GameContext &g) const {
     const bool combatEndRelicsTrigger = outcome == Outcome::PLAYER_VICTORY
             || outcome == Outcome::PLAYER_ESCAPE;
+
+    // Meat on the Bone checks HP at the start of combat-end relic processing.
+    // Evaluate it before Burning Blood or Black Blood, regardless of relic
+    // storage order.
+    if (combatEndRelicsTrigger && g.relics.has(RelicId::MEAT_ON_THE_BONE)
+            && g.curHp <= g.maxHp / 2) {
+        g.playerHeal(12);
+    }
+
     for (auto &r : g.relics.relics) {
         switch (r.id) {
             case RelicId::HAPPY_FLOWER:
@@ -600,9 +614,6 @@ void BattleContext::updateRelicsOnExit(GameContext &g) const {
                 break;
 
             case RelicId::MEAT_ON_THE_BONE:
-                if (combatEndRelicsTrigger && g.curHp <= g.maxHp / 2) {
-                    g.playerHeal(12);
-                }
                 break;
 
             default:

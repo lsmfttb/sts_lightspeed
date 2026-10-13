@@ -412,6 +412,94 @@ void checkSmokeBombCombatEndRelics() {
     }
 }
 
+void checkMeatOnTheBoneOrdering(
+        const RelicId bloodRelic,
+        const bool meatFirst,
+        const Outcome outcome,
+        const int startingHp,
+        const int maxHp,
+        const bool markOfTheBloom = false) {
+    auto gc = gameFixture();
+    gc.relics.remove(RelicId::BURNING_BLOOD);
+    if (meatFirst) {
+        gc.relics.add({RelicId::MEAT_ON_THE_BONE, 0});
+        gc.relics.add({bloodRelic, 0});
+    } else {
+        gc.relics.add({bloodRelic, 0});
+        gc.relics.add({RelicId::MEAT_ON_THE_BONE, 0});
+    }
+    if (markOfTheBloom) {
+        gc.relics.add({RelicId::MARK_OF_THE_BLOOM, 0});
+    }
+    gc.curHp = startingHp;
+    gc.maxHp = maxHp;
+    gc.regainControlAction = [](GameContext &next) { next.afterBattle(); };
+    if (outcome == Outcome::PLAYER_ESCAPE) {
+        gc.potions[0] = Potion::SMOKE_BOMB;
+        gc.potionCount = 1;
+    }
+
+    auto bc = battleFixture(gc, MonsterEncounter::CULTIST);
+    bc.player.curHp = startingHp;
+    bc.player.maxHp = maxHp;
+    if (outcome == Outcome::PLAYER_ESCAPE) {
+        bc.drinkPotion(0);
+        require(bc.outcome == Outcome::PLAYER_ESCAPE,
+                "Smoke Bomb did not set escape for combined relic-order test");
+    } else {
+        bc.outcome = outcome;
+    }
+    bc.exitBattle(gc);
+
+    const int bloodHeal = bloodRelic == RelicId::BLACK_BLOOD ? 12 : 6;
+    const int meatHeal = startingHp <= maxHp / 2 ? 12 : 0;
+    const int expectedHp = markOfTheBloom
+            ? startingHp
+            : std::min(maxHp, startingHp + meatHeal + bloodHeal);
+    require(gc.curHp == expectedHp,
+            "Meat on the Bone eligibility depended on blood relic order or healed more than once");
+}
+
+void checkFaceOfClericEventVictory(const Event event, const int eventOption,
+        const MonsterEncounter encounter) {
+    auto gc = gameFixture();
+    gc.curHp = 30;
+    gc.maxHp = 60;
+    gc.curRoom = Room::EVENT;
+    gc.curEvent = event;
+    gc.relics.remove(RelicId::BURNING_BLOOD);
+    gc.relics.add({RelicId::FACE_OF_CLERIC, 0});
+    gc.setupEvent();
+    gc.chooseEventOption(eventOption);
+    require(gc.screenState == ScreenState::BATTLE
+                    && gc.info.encounter == encounter,
+            "event option did not enter its expected native encounter");
+
+    auto bc = battleFixture(gc, encounter, Room::EVENT);
+    bc.player.curHp = gc.curHp;
+    bc.player.maxHp = gc.maxHp;
+    bc.outcome = Outcome::PLAYER_VICTORY;
+    bc.exitBattle(gc);
+
+    require(gc.curHp == 31 && gc.maxHp == 61,
+            "Face of Cleric was missed or applied more than once on an event victory");
+    require(gc.screenState == ScreenState::REWARDS,
+            "event victory no longer reached its event-specific reward callback");
+}
+
+void checkCombinedCombatEndRelicOrdering() {
+    for (const auto bloodRelic : {RelicId::BURNING_BLOOD, RelicId::BLACK_BLOOD}) {
+        for (const auto outcome : {Outcome::PLAYER_ESCAPE, Outcome::PLAYER_VICTORY}) {
+            for (const bool meatFirst : {false, true}) {
+                checkMeatOnTheBoneOrdering(bloodRelic, meatFirst, outcome, 30, 60);
+                checkMeatOnTheBoneOrdering(bloodRelic, meatFirst, outcome, 31, 60);
+                checkMeatOnTheBoneOrdering(bloodRelic, meatFirst, outcome, 15, 30);
+                checkMeatOnTheBoneOrdering(bloodRelic, meatFirst, outcome, 30, 60, true);
+            }
+        }
+    }
+}
+
 void checkSozuPotionRefusal() {
     auto gc = gameFixture();
     gc.obtainRelic(RelicId::SOZU);
@@ -436,6 +524,11 @@ int main() {
         checkSmokeBombLegalityAndSearch();
         checkSmokeBombExitSkipsRewards();
         checkSmokeBombCombatEndRelics();
+        checkCombinedCombatEndRelicOrdering();
+        checkFaceOfClericEventVictory(Event::MASKED_BANDITS, 1,
+                MonsterEncounter::MASKED_BANDITS_EVENT);
+        checkFaceOfClericEventVictory(Event::HYPNOTIZING_COLORED_MUSHROOMS, 0,
+                MonsterEncounter::MUSHROOMS_EVENT);
         for (const int capacity : {3, 5}) {
             for (const bool sacredBark : {false, true}) {
                 checkSozuEntropicBrew(false, capacity, sacredBark);
