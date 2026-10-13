@@ -45,6 +45,14 @@ add_executable(
         apps/test-gold-reward-actions.cpp
         ${sts_lightspeed_SOURCES})
 target_include_directories(test-gold-reward-actions PRIVATE include json/include)
+
+# Focused native regression for in-battle and noncombat potion semantics.
+add_executable(
+        test-potion-semantics
+        apps/test-potion-semantics.cpp
+        ${sts_lightspeed_SOURCES})
+target_include_directories(test-potion-semantics PRIVATE include json/include)
+
 add_executable(test-public-noncombat-projection EXCLUDE_FROM_ALL
         apps/test_public_noncombat_projection.cpp
         bindings/bindings-util.cpp

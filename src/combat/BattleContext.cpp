@@ -500,7 +500,7 @@ void BattleContext::exitBattle(GameContext &g) const {
     updateCardsOnExit(g.deck);
 
     g.info.stolenGold = 0;
-    if (requiresStolenGoldCheck()) {
+    if (outcome != Outcome::PLAYER_ESCAPE && requiresStolenGoldCheck()) {
         for (int i = 0; i < monsters.monsterCount; ++i) {
             const auto &m = monsters.arr[i];
 
@@ -514,7 +514,16 @@ void BattleContext::exitBattle(GameContext &g) const {
         }
     }
 
-    if (outcome == Outcome::PLAYER_LOSS) {
+    if (outcome == Outcome::PLAYER_ESCAPE) {
+        // Smoke Bomb abandons the encounter, including any event-specific
+        // post-battle reward callback. Return to the map without running
+        // afterBattle(), which would grant normal combat rewards.
+        g.regainControlAction = [](GameContext &gc) {
+            gc.screenState = ScreenState::MAP_SCREEN;
+            gc.regainControlAction = nullptr;
+        };
+        g.regainControl();
+    } else if (outcome == Outcome::PLAYER_LOSS) {
         g.outcome = GameOutcome::PLAYER_LOSS;
     } else {
         // player victory
@@ -2244,9 +2253,23 @@ void BattleContext::discardPotion(int idx) {
     --potionCount;
 }
 
+bool BattleContext::canUseSmokeBomb() const {
+    if (encounter == MonsterEncounter::INVALID || isBossEncounter(encounter)) {
+        return false;
+    }
+
+    // The Act 4 elite's Surrounded debuff prevents escape while both enemies
+    // remain. The current simulator does not clear the debuff on the first
+    // kill, so use the encounter's live count for this legality check.
+    return encounter != MonsterEncounter::SHIELD_AND_SPEAR || monsters.monstersAlive <= 1;
+}
+
 void BattleContext::drinkPotion(int idx, int target) {
     const bool hasBark = player.hasRelic<R::SACRED_BARK>();
     const Potion p = potions[idx];
+    if (p == Potion::SMOKE_BOMB && !canUseSmokeBomb()) {
+        return;
+    }
     discardPotion(idx);
 
     // todo - dont need to add to bot because always will have nothing in actionQueue?
@@ -2274,7 +2297,8 @@ void BattleContext::drinkPotion(int idx, int target) {
 
 
         case Potion::BLOOD_POTION: {
-            int healAmt = static_cast<int>((static_cast<float>(player.maxHp * (hasBark ? 20 : 40)) / 100.0f));
+            int healAmt = static_cast<int>(static_cast<float>(player.maxHp)
+                    * (hasBark ? 0.40f : 0.20f));
             addToBot(Actions::HealPlayer(healAmt));
             break;
         }
@@ -2404,7 +2428,7 @@ void BattleContext::drinkPotion(int idx, int target) {
             break;
 
         case Potion::SMOKE_BOMB:
-            // todo
+            outcome = Outcome::PLAYER_ESCAPE;
             break;
 
         case Potion::SNECKO_OIL:

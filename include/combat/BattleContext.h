@@ -33,6 +33,7 @@ namespace sts {
         UNDECIDED=0,
         PLAYER_VICTORY,
         PLAYER_LOSS,
+        PLAYER_ESCAPE,
     };
 
     // Exact draw facts and unrepresented player knowledge have different
@@ -65,6 +66,7 @@ namespace sts {
             "UNDECIDED",
             "PLAYER_VICTORY",
             "PLAYER_LOSS",
+            "PLAYER_ESCAPE",
     };
 
     class GameContext;
@@ -211,6 +213,7 @@ namespace sts {
         void obtainPotion(Potion p);
         void discardPotion(int idx);
         void drinkPotion(int idx, int target=0);
+        [[nodiscard]] bool canUseSmokeBomb() const;
 
         void drawCards(int count);
         void discardAtEndOfTurn();

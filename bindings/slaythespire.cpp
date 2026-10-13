@@ -71,6 +71,8 @@ std::string battleOutcomeLabel(const Outcome outcome) {
             return "PLAYER_VICTORY";
         case Outcome::PLAYER_LOSS:
             return "PLAYER_LOSS";
+        case Outcome::PLAYER_ESCAPE:
+            return "PLAYER_ESCAPE";
         default:
             return "UNKNOWN";
     }

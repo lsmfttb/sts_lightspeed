@@ -289,6 +289,91 @@ void checkMapHeldPotionActions(nlohmann::json &evidence) {
     verifyPotionAction(Potion::BLOOD_POTION, "potion_use");
 }
 
+void checkHiddenFutureInvariant(StepSimulator &simulator, const dict &baseline);
+
+void checkSmokeBombBattleProjection(nlohmann::json &evidence) {
+    StepSimulator simulator(CharacterClass::IRONCLAD, 52, 0);
+    const auto configure = [](StepSimulator &fixture) {
+        fixture.gc.screenState = ScreenState::BATTLE;
+        fixture.gc.curRoom = Room::EVENT;
+        fixture.gc.info.encounter = MonsterEncounter::MYSTERIOUS_SPHERE_EVENT;
+        fixture.gc.potions.fill(Potion::EMPTY_POTION_SLOT);
+        fixture.gc.potions[0] = Potion::SMOKE_BOMB;
+        fixture.gc.potions[1] = Potion::SMOKE_BOMB;
+        fixture.gc.potionCount = 2;
+        fixture.gc.curHp = fixture.gc.maxHp - 1;
+        fixture.gc.gold = 73;
+        fixture.gc.info.stolenGold = 19;
+        fixture.gc.info.rewardsContainer.clear();
+        fixture.battleActive = false;
+    };
+    configure(simulator);
+
+    const auto nativeProjection = projection(simulator);
+    const auto actions = checkCandidateParity(simulator, nativeProjection);
+    auto changedFuture = StepSimulator(CharacterClass::IRONCLAD, 52, 0);
+    configure(changedFuture);
+    (void) projection(changedFuture);
+    changedFuture.gc.seed ^= 0x22002026ULL;
+    changedFuture.gc.eventRng = Random(0x22012026ULL);
+    changedFuture.gc.monsterRng = Random(0x22022026ULL);
+    changedFuture.gc.cardRng = Random(0x22032026ULL);
+    changedFuture.gc.relicRng = Random(0x22042026ULL);
+    changedFuture.gc.secondBoss = MonsterEncounter::AWAKENED_ONE;
+    require(nativeProjection.equal(projection(changedFuture)),
+            "public battle projection changed with hidden future fields");
+
+    std::array<std::size_t, 2> smokeSlots = {actions.size(), actions.size()};
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        const auto &action = actions[index];
+        if (action.scope != "battle" || action.kind != "potion") continue;
+        if (action.idx1 >= 0 && action.idx1 < static_cast<int>(smokeSlots.size())) {
+            smokeSlots[action.idx1] = index;
+        }
+    }
+    require(smokeSlots[0] < actions.size() && smokeSlots[1] < actions.size()
+                    && smokeSlots[0] != smokeSlots[1],
+            "public battle candidates collapsed duplicate Smoke Bomb slots");
+
+    const int initialGold = simulator.gc.gold;
+    const int initialHp = simulator.gc.curHp;
+    const int initialRelics = simulator.gc.relics.relics.size();
+    const auto selected = actions[smokeSlots[1]];
+    require(selected.idx1 == 1,
+            "public candidate selection did not retain the chosen potion slot");
+    const auto transition = simulator.step(selected);
+    require(transition["completed_battle_outcome"].cast<std::string>() == "PLAYER_ESCAPE",
+            "selected public Smoke Bomb action did not report escape");
+    require(simulator.gc.screenState == ScreenState::MAP_SCREEN
+                    && simulator.gc.outcome == GameOutcome::UNDECIDED,
+            "Smoke Bomb escape did not continue the run at the map");
+    require(simulator.gc.potions[0] == Potion::SMOKE_BOMB
+                    && simulator.gc.potions[1] == Potion::EMPTY_POTION_SLOT
+                    && simulator.gc.potionCount == 1,
+            "selected public Smoke Bomb action consumed the wrong potion slot");
+    require(simulator.gc.gold == initialGold
+                    && simulator.gc.curHp == initialHp
+                    && simulator.gc.relics.relics.size() == initialRelics
+                    && simulator.gc.info.stolenGold == 0,
+            "Smoke Bomb escape granted loot or retained encounter stolen gold");
+    require(simulator.gc.info.rewardsContainer.relicCount == 0
+                    && simulator.gc.info.rewardsContainer.cardRewardCount == 0
+                    && simulator.gc.info.rewardsContainer.potionCount == 0
+                    && simulator.gc.info.rewardsContainer.goldRewardCount == 0,
+            "Smoke Bomb escape produced an event or normal combat reward");
+
+    evidence = {
+        {"candidate_count", actions.size()},
+        {"duplicate_smoke_slots_remain_distinct", true},
+        {"selected_potion_slot", selected.idx1},
+        {"opaque_action_bits_withheld", true},
+        {"hidden_future_projection_invariant", true},
+        {"executed_outcome", "PLAYER_ESCAPE"},
+        {"victory_only_heal_not_applied", true},
+        {"returned_to_map_without_reward_or_victory", true}
+    };
+}
+
 void checkHiddenFutureInvariant(StepSimulator &simulator, const dict &baseline) {
     auto changedFuture = simulator;
     changedFuture.gc.seed ^= 0x22002026ULL;
@@ -550,9 +635,15 @@ nlohmann::json checkStudyAdapterBoundary(
 
 }  // namespace
 
-int main() {
+int main(const int argc, char **argv) {
     try {
         scoped_interpreter interpreter{};
+        if (argc == 2 && std::string(argv[1]) == "--smoke-bomb-only") {
+            nlohmann::json smokeEvidence;
+            checkSmokeBombBattleProjection(smokeEvidence);
+            std::cout << smokeEvidence.dump() << std::endl;
+            return 0;
+        }
         constexpr std::uint64_t seed = 49;
         constexpr int ascension = 20;
         nlohmann::json evidence = {
@@ -658,6 +749,8 @@ int main() {
         evidence["adapter_online_execution"]["natural_map"] = mapAdapterExecution;
         evidence["held_potion_map_regression"] = nlohmann::json::object();
         checkMapHeldPotionActions(evidence["held_potion_map_regression"]);
+        evidence["smoke_bomb_battle_projection"] = nlohmann::json::object();
+        checkSmokeBombBattleProjection(evidence["smoke_bomb_battle_projection"]);
 
         StepSimulator indexedGold(CharacterClass::IRONCLAD, seed, ascension);
         indexedGold.gc.screenState = ScreenState::REWARDS;
