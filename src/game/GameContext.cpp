@@ -2187,14 +2187,16 @@ void GameContext::drinkPotion(Potion p) {
             break;
 
         case Potion::ENTROPIC_BREW: {
-            Potion randPotions[5];
-            for (int i = 0 ; i < potionCapacity; ++i) {
-                randPotions[i] = returnRandomPotion(potionRng, cc);
-                if (potions[i] == Potion::EMPTY_POTION_SLOT) {
-                    potions[i] = randPotions[i];
+            const bool canObtainPotions = !relics.has(RelicId::SOZU);
+            for (int i = 0; i < potionCapacity; ++i) {
+                const Potion randomPotion = returnRandomPotion(potionRng, cc);
+                if (canObtainPotions && potions[i] == Potion::EMPTY_POTION_SLOT) {
+                    potions[i] = randomPotion;
                 }
             }
-            potionCount = potionCapacity;
+            if (canObtainPotions) {
+                potionCount = potionCapacity;
+            }
             break;
         }
 

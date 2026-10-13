@@ -2254,13 +2254,17 @@ void BattleContext::discardPotion(int idx) {
 }
 
 bool BattleContext::canUseSmokeBomb() const {
-    if (encounter == MonsterEncounter::INVALID || isBossEncounter(encounter)) {
+    if (encounter == MonsterEncounter::INVALID || isBossEncounter(encounter)
+            || encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS
+            || encounter == MonsterEncounter::COLOSSEUM_EVENT_NOBS) {
         return false;
     }
 
     // The Act 4 elite's Surrounded debuff prevents escape while both enemies
     // remain. The current simulator does not clear the debuff on the first
     // kill, so use the encounter's live count for this legality check.
+    // Colosseum's multi-fight continuation is not modeled, so fail closed
+    // instead of letting an escape incorrectly end the event.
     return encounter != MonsterEncounter::SHIELD_AND_SPEAR || monsters.monstersAlive <= 1;
 }
 

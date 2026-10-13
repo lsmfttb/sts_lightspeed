@@ -134,6 +134,46 @@ void checkEntropicBrew(const int initialCapacity, const bool sacredBark) {
             "Sacred Bark unexpectedly changed Entropic Brew's random potion result");
 }
 
+void checkSozuEntropicBrew(
+        const bool inBattle,
+        const int initialCapacity,
+        const bool sacredBark) {
+    auto gc = gameFixture();
+    if (initialCapacity == 5) {
+        gc.obtainRelic(RelicId::POTION_BELT);
+        require(gc.potionCapacity == 5, "Potion Belt did not add its two slots");
+    }
+    gc.obtainRelic(RelicId::SOZU);
+    if (sacredBark) {
+        gc.relics.add({RelicId::SACRED_BARK, 0});
+    }
+
+    gc.potions[0] = Potion::ENTROPIC_BREW;
+    gc.potions[1] = Potion::FIRE_POTION;
+    gc.potions[2] = Potion::BLOCK_POTION;
+    if (initialCapacity == 5) {
+        gc.potions[4] = Potion::SPEED_POTION;
+    }
+    gc.potionCount = initialCapacity == 5 ? 4 : 3;
+
+    auto expectedPotions = gc.potions;
+    expectedPotions[0] = Potion::EMPTY_POTION_SLOT;
+    const int expectedPotionCount = gc.potionCount - 1;
+
+    if (inBattle) {
+        auto bc = battleFixture(gc, MonsterEncounter::CULTIST);
+        const search::Action useBrew(search::ActionType::POTION, 0);
+        require(useBrew.isValidAction(bc), "Sozu Entropic Brew was not legal");
+        useBrew.execute(bc);
+        require(bc.potionCount == expectedPotionCount && bc.potions == expectedPotions,
+                "battle Sozu Entropic Brew did not consume only itself and preserve held slots");
+    } else {
+        gc.drinkPotionAtIdx(0);
+        require(gc.potionCount == expectedPotionCount && gc.potions == expectedPotions,
+                "noncombat Sozu Entropic Brew gained potions or changed held slots");
+    }
+}
+
 int countPotionActions(const search::BattleScumSearcher2::Node &node) {
     int count = 0;
     for (const auto &edge : node.edges) {
@@ -223,6 +263,24 @@ void checkSmokeBombLegalityAndSearch() {
     require(shield.canUseSmokeBomb()
                     && search::Action(search::ActionType::POTION, 0).isValidAction(shield),
             "Smoke Bomb remained blocked after one Shield/Spear enemy was defeated");
+
+    for (const auto encounter : {
+            MonsterEncounter::COLOSSEUM_EVENT_SLAVERS,
+            MonsterEncounter::COLOSSEUM_EVENT_NOBS}) {
+        auto colosseumGame = gameFixture();
+        colosseumGame.potions[0] = Potion::SMOKE_BOMB;
+        colosseumGame.potionCount = 1;
+        auto colosseum = battleFixture(colosseumGame, encounter, Room::EVENT);
+        require(!colosseum.canUseSmokeBomb()
+                        && !search::Action(search::ActionType::POTION, 0).isValidAction(colosseum),
+                "unsupported Colosseum encounter allowed Smoke Bomb");
+        require(search::Action(search::ActionType::POTION, 0, 6).isValidAction(colosseum),
+                "unsupported Colosseum encounter incorrectly prevented potion discard");
+        colosseum.drinkPotion(0);
+        require(colosseum.potionCount == 1
+                        && colosseum.potions[0] == Potion::SMOKE_BOMB,
+                "direct invalid Colosseum Smoke Bomb use consumed the potion");
+    }
 }
 
 void checkSmokeBombExitSkipsRewards() {
@@ -294,6 +352,12 @@ int main() {
         checkEntropicBrew(5, false);
         checkSmokeBombLegalityAndSearch();
         checkSmokeBombExitSkipsRewards();
+        for (const int capacity : {3, 5}) {
+            for (const bool sacredBark : {false, true}) {
+                checkSozuEntropicBrew(false, capacity, sacredBark);
+                checkSozuEntropicBrew(true, capacity, sacredBark);
+            }
+        }
         checkSozuPotionRefusal();
         std::cout << "native potion semantics regression passed\n";
         return 0;
