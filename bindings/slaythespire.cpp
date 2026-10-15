@@ -6616,7 +6616,8 @@ struct StepSimulator {
                 }
             } else {
                 for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size()); ++edgeIdx) {
-                    if (searcher.root.edges[edgeIdx].action.bits == legalAction.bits) {
+                    if (search::sameBattleRootActionIdentity(
+                            searcher.root.edges[edgeIdx].action.bits, legalAction.bits)) {
                         matchedEdge = &searcher.root.edges[edgeIdx];
                         matchedEdgeIndex = edgeIdx;
                         matchedEdges[edgeIdx] = true;
@@ -7250,7 +7251,8 @@ struct StepSimulator {
                 if (matchedLegalActions[legalIdx]) {
                     continue;
                 }
-                if (searcher.root.edges[edgeIdx].action.bits == legalActions[legalIdx].bits) {
+                if (search::sameBattleRootActionIdentity(
+                        searcher.root.edges[edgeIdx].action.bits, legalActions[legalIdx].bits)) {
                     edgePriors[edgeIdx] = rootActionPriors[legalIdx];
                     matchedLegalActions[legalIdx] = true;
                     matchedPriorMass += rootActionPriors[legalIdx];

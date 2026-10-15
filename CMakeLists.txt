@@ -46,6 +46,10 @@ add_executable(
         ${sts_lightspeed_SOURCES})
 target_include_directories(test-gold-reward-actions PRIVATE include json/include)
 
+# Focused native regression for battle-search root action identity aliases.
+add_executable(test-battle-root-action-identity apps/test-battle-root-action-identity.cpp)
+target_include_directories(test-battle-root-action-identity PRIVATE include)
+
 # Focused native regression for in-battle and noncombat potion semantics.
 add_executable(
         test-potion-semantics
