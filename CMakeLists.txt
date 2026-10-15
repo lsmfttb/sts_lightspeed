@@ -82,3 +82,9 @@ else()
 endif()
 target_compile_definitions(test-public-noncombat-projection PRIVATE
         STS_LIGHTSPEED_TESTED_SOURCE_COMMIT="${STS_LIGHTSPEED_TESTED_SOURCE_COMMIT}")
+
+# Canonical potion occurrence identity, independent of whole-run evaluation.
+add_executable(test-potion-discard-identity EXCLUDE_FROM_ALL
+        apps/test-potion-discard-identity.cpp bindings/bindings-util.cpp ${sts_lightspeed_SOURCES})
+target_include_directories(test-potion-discard-identity PRIVATE include json/single_include bindings)
+target_link_libraries(test-potion-discard-identity PRIVATE pybind11::embed)

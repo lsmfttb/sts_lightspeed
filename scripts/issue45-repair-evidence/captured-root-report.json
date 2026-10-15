@@ -1,0 +1,113 @@
+{
+  "on": {
+    "schema_id": "native-battle-search-root-v1",
+    "native_api": "StepSimulator.battle_search_v2.v1",
+    "patch_identity": "sts_lightspeed_battle_search_v2_tree_internal_v1",
+    "information_regime": "full_simulator_state_oracle_like",
+    "simulations_requested": 400,
+    "root_visits": 400,
+    "include_potions": true,
+    "native_simulator_steps": 1607,
+    "model_calls": 0,
+    "best_action_value": 7698.0,
+    "min_action_value": 7697.0,
+    "outcome_player_hp": 42,
+    "root_row_count": 2,
+    "search_edge_count": 2,
+    "unsearched_legal_action_count": 0,
+    "unmapped_search_edge_count": 0,
+    "root_rows": [
+      {
+        "scope": "battle",
+        "bits": 2147483648,
+        "kind": "end_turn",
+        "idx1": 0,
+        "idx2": 0,
+        "idx3": 0,
+        "label": "{ end turn }",
+        "search_tree_present": true,
+        "search_edge_index": 1,
+        "visits": 0,
+        "evaluation_sum": 0.0,
+        "mean_value": null
+      },
+      {
+        "scope": "battle",
+        "bits": 537264128,
+        "kind": "potion_discard",
+        "idx1": 0,
+        "idx2": 6,
+        "idx3": 0,
+        "label": "{ discard potion (0) Fairy Potion }",
+        "search_tree_present": true,
+        "search_edge_index": 0,
+        "visits": 400,
+        "evaluation_sum": 3079198.0,
+        "mean_value": 7697.995
+      }
+    ],
+    "tree_internal_telemetry": {
+      "expanded_nodes": 4,
+      "policy_prior_calls": 0,
+      "leaf_value_calls": 0,
+      "policy_prior_scope": "disabled",
+      "leaf_value_boundary": "disabled"
+    }
+  },
+  "off": {
+    "schema_id": "native-battle-search-root-v1",
+    "native_api": "StepSimulator.battle_search_v2.v1",
+    "patch_identity": "sts_lightspeed_battle_search_v2_tree_internal_v1",
+    "information_regime": "full_simulator_state_oracle_like",
+    "simulations_requested": 400,
+    "root_visits": 400,
+    "include_potions": false,
+    "native_simulator_steps": 1205,
+    "model_calls": 0,
+    "best_action_value": 8098.0,
+    "min_action_value": 7895.999999999999,
+    "outcome_player_hp": 42,
+    "root_row_count": 2,
+    "search_edge_count": 1,
+    "unsearched_legal_action_count": 1,
+    "unmapped_search_edge_count": 0,
+    "root_rows": [
+      {
+        "scope": "battle",
+        "bits": 2147483648,
+        "kind": "end_turn",
+        "idx1": 0,
+        "idx2": 0,
+        "idx3": 0,
+        "label": "{ end turn }",
+        "search_tree_present": true,
+        "search_edge_index": 0,
+        "visits": 400,
+        "evaluation_sum": 3238998.0,
+        "mean_value": 8097.495
+      },
+      {
+        "scope": "battle",
+        "bits": 537264128,
+        "kind": "potion_discard",
+        "idx1": 0,
+        "idx2": 6,
+        "idx3": 0,
+        "label": "{ discard potion (0) Fairy Potion }",
+        "search_tree_present": false,
+        "search_edge_index": null,
+        "visits": 0,
+        "evaluation_sum": null,
+        "mean_value": null
+      }
+    ],
+    "tree_internal_telemetry": {
+      "expanded_nodes": 3,
+      "policy_prior_calls": 0,
+      "leaf_value_calls": 0,
+      "policy_prior_scope": "disabled",
+      "leaf_value_boundary": "disabled"
+    }
+  },
+  "prefix_actions": 27
+}
