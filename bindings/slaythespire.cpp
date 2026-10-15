@@ -4997,6 +4997,12 @@ struct StepSimulator {
             reason = "include_potions_false";
             return true;
         }
+        if (searchState.inputState == InputState::PLAYER_NORMAL
+                && action.getActionType() == search::ActionType::POTION
+                && action.getSourceIdx() == searcher.getForbiddenPotionSlot()) {
+            reason = "forbidden_potion_slot";
+            return true;
+        }
         return false;
     }
 
@@ -6587,7 +6593,8 @@ struct StepSimulator {
             const std::vector<double> *legalActionPriors,
             const std::vector<int> *edgeAllocations,
             const pybind11::object &allocationMetadata,
-            const std::vector<int> *publicToEdgeMapping = nullptr) {
+            const std::vector<int> *publicToEdgeMapping = nullptr,
+            const int forbiddenPotionSlot = -1) {
         const auto legalActions = enumerateBattleActions(searchState);
         std::vector<bool> matchedEdges(searcher.root.edges.size(), false);
         pybind11::list rootRows;
@@ -6620,6 +6627,19 @@ struct StepSimulator {
 
             pybind11::dict row = publicProjectionActionSnapshot(
                     makeBattleAction(searchState, legalAction));
+            const bool isForbiddenPotionOccurrence = forbiddenPotionSlot >= 0
+                    && legalAction.getActionType() == search::ActionType::POTION
+                    && legalAction.getSourceIdx() == forbiddenPotionSlot;
+            if (isForbiddenPotionOccurrence && matchedEdge != nullptr) {
+                throw std::runtime_error(
+                        "NATIVE_SLOT_CONSTRAINT_BLOCKED: forbidden root potion action was searched"
+                        " seed=" + std::to_string(searchState.seed)
+                        + " protected_slot=" + std::to_string(forbiddenPotionSlot)
+                        + " action_bits=" + std::to_string(legalAction.bits));
+            }
+            if (isForbiddenPotionOccurrence) {
+                row["search_exclusion_reason"] = "forbidden_potion_slot";
+            }
             row["search_tree_present"] = matchedEdge != nullptr;
             row["search_edge_index"] = matchedEdgeIndex >= 0
                     ? pybind11::object(pybind11::int_(matchedEdgeIndex))
@@ -6674,6 +6694,15 @@ struct StepSimulator {
         ret["search_edge_count"] = static_cast<int>(searcher.root.edges.size());
         ret["unsearched_legal_action_count"] = unsearchedLegalActionCount;
         ret["unmapped_search_edge_count"] = unmappedSearchEdgeCount;
+        if (forbiddenPotionSlot >= 0) {
+            ret["forbidden_potion_slot"] = forbiddenPotionSlot;
+            ret["tree_forbidden_potion_slot_exclusion_count"] =
+                    searcher.treeForbiddenPotionSlotExclusionCount;
+            ret["rollout_forbidden_potion_slot_exclusion_count"] =
+                    searcher.rolloutForbiddenPotionSlotExclusionCount;
+            ret["search_constraint"] =
+                    "potion_source_slot_omitted_from_tree_and_random_rollouts";
+        }
         ret["root_rows"] = rootRows;
         if (!allocationMetadata.is_none()) {
             ret["allocation_metadata"] = allocationMetadata;
@@ -6871,7 +6900,8 @@ struct StepSimulator {
             bool includeTreeGeometry,
             bool includeClassicalTelemetry=false,
             bool progressiveBiasEnabled=false,
-            std::size_t progressiveBiasAuditLimit=0) {
+            std::size_t progressiveBiasAuditLimit=0,
+            int forbiddenPotionSlot=-1) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error("battle search v2 requested outside battle");
@@ -6890,6 +6920,7 @@ struct StepSimulator {
 
         search::BattleScumSearcher2 searcher(bc);
         searcher.includePotions = includePotions;
+        searcher.setForbiddenPotionSlot(forbiddenPotionSlot);
         searcher.progressiveBiasEnabled = progressiveBiasEnabled;
         searcher.progressiveBiasAuditLimit = progressiveBiasAuditLimit;
         if (usePolicyPriors) {
@@ -6931,7 +6962,15 @@ struct StepSimulator {
                 "sts_lightspeed_battle_search_v2_tree_internal_v1",
                 nullptr,
                 nullptr,
-                pybind11::none());
+                pybind11::none(),
+                nullptr,
+                forbiddenPotionSlot);
+        if (forbiddenPotionSlot >= 0) {
+            report["native_api"] =
+                    "StepSimulator.battle_search_v2_forbidden_potion_slot.v1";
+            report["patch_identity"] =
+                    "sts_lightspeed_battle_search_v2_forbidden_potion_slot_v1";
+        }
         report["model_calls"] = searcher.policyPriorCallCount + searcher.leafValueCallCount;
         pybind11::dict telemetry;
         telemetry["expanded_nodes"] = searcher.expandedNodeCount;
@@ -6976,13 +7015,18 @@ struct StepSimulator {
             std::int64_t simulations,
             bool includePotions,
             const pybind11::object &policyPriorCallback,
-            const pybind11::object &leafValueCallback) {
+            const pybind11::object &leafValueCallback,
+            const int forbiddenPotionSlot=-1) {
         return battleSearchV2Impl(
                 simulations,
                 includePotions,
                 policyPriorCallback,
                 leafValueCallback,
-                false);
+                false,
+                false,
+                false,
+                0,
+                forbiddenPotionSlot);
     }
 
     pybind11::dict battleSearchV2WithTreeGeometry(
@@ -7529,7 +7573,8 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("simulations"),
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),
-            pybind11::arg("leaf_value_callback") = pybind11::none())
+            pybind11::arg("leaf_value_callback") = pybind11::none(),
+            pybind11::arg("forbidden_potion_slot") = -1)
         .def(
             "battle_search_v2_with_tree_geometry",
             &StepSimulator::battleSearchV2WithTreeGeometry,

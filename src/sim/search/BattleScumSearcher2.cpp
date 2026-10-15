@@ -243,6 +243,85 @@ search::BattleScumSearcher2::BattleScumSearcher2(const BattleContext &bc, search
     : rootState(new BattleContext(bc)), evalFnc(std::move(_evalFnc)), randGen(bc.seed+bc.floorNum) {
 }
 
+void search::BattleScumSearcher2::setForbiddenPotionSlot(const int slot) {
+    if (!root.edges.empty() || root.simulationCount != 0 || actionExecutionCount != 0) {
+        throw std::logic_error(
+                "forbidden potion slot must be configured before Search-v2 starts");
+    }
+    if (slot == -1) {
+        forbiddenPotionSlot = -1;
+        forbiddenPotion = Potion::EMPTY_POTION_SLOT;
+        return;
+    }
+    if (slot < 0 || slot >= rootState->potionCapacity) {
+        throw std::invalid_argument(
+                "forbidden_potion_slot must be -1 or a valid zero-based potion slot");
+    }
+    if (!includePotions) {
+        throw std::invalid_argument(
+                "forbidden_potion_slot requires include_potions=true");
+    }
+    const auto potion = rootState->potions[slot];
+    if (potion == Potion::EMPTY_POTION_SLOT) {
+        throw std::invalid_argument(
+                "forbidden_potion_slot must identify an occupied potion slot");
+    }
+    forbiddenPotionSlot = slot;
+    forbiddenPotion = potion;
+    validateForbiddenPotionSlot(*rootState);
+}
+
+void search::BattleScumSearcher2::validateForbiddenPotionSlot(
+        const BattleContext &state, const Action *action) const {
+    if (forbiddenPotionSlot < 0) {
+        return;
+    }
+    if (!includePotions) {
+        throw std::logic_error(
+                "forbidden_potion_slot requires include_potions=true");
+    }
+    const auto actual = forbiddenPotionSlot < state.potionCapacity
+            ? state.potions[forbiddenPotionSlot]
+            : Potion::EMPTY_POTION_SLOT;
+    if (actual == forbiddenPotion) {
+        return;
+    }
+
+    const auto potionName = [](const Potion potion) {
+        const auto value = static_cast<int>(potion);
+        if (value >= 0 && value <= static_cast<int>(Potion::WEAK_POTION)) {
+            return std::string(potionEnumNames[value]);
+        }
+        return std::string("unknown(") + std::to_string(value) + ")";
+    };
+    std::ostringstream message;
+    message << "NATIVE_SLOT_CONSTRAINT_BLOCKED: protected potion slot changed"
+            << " seed=" << state.seed
+            << " floor=" << state.floorNum
+            << " protected_slot=" << forbiddenPotionSlot
+            << " expected=" << potionName(forbiddenPotion)
+            << " actual=" << potionName(actual)
+            << " input_state=" << static_cast<int>(state.inputState)
+            << " outcome=" << static_cast<int>(state.outcome)
+            << " potion_count=" << state.potionCount
+            << " potion_capacity=" << state.potionCapacity
+            << " inventory=[";
+    for (int slot = 0; slot < state.potionCapacity; ++slot) {
+        if (slot > 0) {
+            message << ',';
+        }
+        message << slot << ':' << potionName(state.potions[slot]);
+    }
+    message << ']';
+    if (action != nullptr) {
+        message << " action_bits=" << action->bits
+                << " action_type=" << static_cast<int>(action->getActionType())
+                << " action_source=" << action->getSourceIdx()
+                << " action_target=" << action->getTargetIdx();
+    }
+    throw std::runtime_error(message.str());
+}
+
 void search::BattleScumSearcher2::enableStateUtilizationTelemetry() {
     stateUtilizationEnabled = true;
     stateUtilizationTelemetry = {};
@@ -292,6 +371,7 @@ void search::BattleScumSearcher2::recordExpandedState(
 
 void search::BattleScumSearcher2::search(int64_t simulations) {
     g_debug_scum_search = this;
+    validateForbiddenPotionSlot(*rootState);
     // A search() invocation reports only its own work.  The tree may be
     // deliberately retained between invocations, but its accumulated
     // statistics are not confused with this call's audit/work telemetry.
@@ -301,6 +381,8 @@ void search::BattleScumSearcher2::search(int64_t simulations) {
     leafValueCallCount = 0;
     rolloutCount = 0;
     terminalUtilityEvaluationCount = 0;
+    treeForbiddenPotionSlotExclusionCount = 0;
+    rolloutForbiddenPotionSlotExclusionCount = 0;
     heuristicSuccessorTransitionCount = 0;
     heuristicAvailableCount = 0;
     heuristicTerminalUnavailableCount = 0;
@@ -349,6 +431,7 @@ void search::BattleScumSearcher2::step() {
 //            edgeTaken.action.printDesc(std::cout, curState) << std::endl;
             ++actionExecutionCount;
             edgeTaken.action.execute(curState);
+            validateForbiddenPotionSlot(curState, &edgeTaken.action);
 
             actionStack.push_back(edgeTaken.action);
             searchStack.push_back(&edgeTaken.node);
@@ -387,6 +470,7 @@ void search::BattleScumSearcher2::step() {
 //            edgeTaken.action.printDesc(std::cout, curState) << std::endl;
             ++actionExecutionCount;
             edgeTaken.action.execute(curState);
+            validateForbiddenPotionSlot(curState, &edgeTaken.action);
 
             actionStack.push_back(edgeTaken.action);
             searchStack.push_back(&edgeTaken.node);
@@ -416,6 +500,7 @@ void search::BattleScumSearcher2::stepFromRootEdge(int rootEdgeIdx) {
     auto &rootEdgeTaken = root.edges[rootEdgeIdx];
     ++actionExecutionCount;
     rootEdgeTaken.action.execute(curState);
+    validateForbiddenPotionSlot(curState, &rootEdgeTaken.action);
     actionStack.push_back(rootEdgeTaken.action);
     searchStack.push_back(&rootEdgeTaken.node);
 
@@ -436,6 +521,7 @@ void search::BattleScumSearcher2::stepFromRootEdge(int rootEdgeIdx) {
 
             ++actionExecutionCount;
             edgeTaken.action.execute(curState);
+            validateForbiddenPotionSlot(curState, &edgeTaken.action);
 
             actionStack.push_back(edgeTaken.action);
             searchStack.push_back(&edgeTaken.node);
@@ -449,6 +535,7 @@ void search::BattleScumSearcher2::stepFromRootEdge(int rootEdgeIdx) {
 
             ++actionExecutionCount;
             edgeTaken.action.execute(curState);
+            validateForbiddenPotionSlot(curState, &edgeTaken.action);
 
             actionStack.push_back(edgeTaken.action);
             searchStack.push_back(&edgeTaken.node);
@@ -596,6 +683,7 @@ void search::BattleScumSearcher2::prepareChildHeuristics(Node &node, const Battl
         ++actionExecutionCount;
         ++heuristicSuccessorTransitionCount;
         edge.action.execute(child);
+        validateForbiddenPotionSlot(child, &edge.action);
         auto heuristic = combatHandcraftedH1(child);
         if (heuristic.available) {
             ++heuristicAvailableCount;
@@ -663,7 +751,7 @@ void search::BattleScumSearcher2::playoutRandom(BattleContext &state, std::vecto
     Node tempNode; // temp
     while (!isTerminalState(state)) {
         ++simulationIdx;
-        enumerateActionsForNode(tempNode, state, false);
+        enumerateActionsForNode(tempNode, state, false, true);
         if (tempNode.edges.empty()) {
             std::cerr << state.seed << " " << simulationIdx << std::endl;
             std::cerr << state.monsters.arr[0].getName() << " " << state.floorNum << " " << monsterEncounterStrings[static_cast<int>(state.encounter)] << std::endl;
@@ -678,6 +766,7 @@ void search::BattleScumSearcher2::playoutRandom(BattleContext &state, std::vecto
         actionStack.push_back(action);
         ++actionExecutionCount;
         action.execute(state);
+        validateForbiddenPotionSlot(state, &action);
 
         tempNode.edges.clear();
     }
@@ -685,12 +774,14 @@ void search::BattleScumSearcher2::playoutRandom(BattleContext &state, std::vecto
 
 void search::BattleScumSearcher2::enumerateActionsForNode(search::BattleScumSearcher2::Node &node,
                                                                const BattleContext &bc,
-                                                               bool applyPriors) {
+                                                               bool applyPriors,
+                                                               bool randomPlayout) {
+    validateForbiddenPotionSlot(bc);
     switch (bc.inputState) {
         case InputState::PLAYER_NORMAL:
             enumerateCardActions(node, bc);
             if (includePotions) {
-                enumeratePotionActions(node, bc);
+                enumeratePotionActions(node, bc, applyPriors, randomPlayout);
             }
             node.edges.push_back({Action(ActionType::END_TURN)});
             break;
@@ -811,7 +902,9 @@ void search::BattleScumSearcher2::enumerateCardActions(search::BattleScumSearche
 }
 
 void search::BattleScumSearcher2::enumeratePotionActions(search::BattleScumSearcher2::Node &node,
-                                                              const BattleContext &bc) {
+                                                              const BattleContext &bc,
+                                                              const bool treeExpansion,
+                                                              const bool randomPlayout) {
 
     const auto hasValidTarget = bc.monsters.getTargetableCount() > 0;
 
@@ -820,6 +913,15 @@ void search::BattleScumSearcher2::enumeratePotionActions(search::BattleScumSearc
 
         const auto p = bc.potions[pIdx];
         if (p == Potion::EMPTY_POTION_SLOT) {
+            continue;
+        }
+        if (pIdx == forbiddenPotionSlot) {
+            if (treeExpansion) {
+                ++treeForbiddenPotionSlotExclusionCount;
+            }
+            if (randomPlayout) {
+                ++rolloutForbiddenPotionSlotExclusionCount;
+            }
             continue;
         }
         if (p == Potion::SMOKE_BOMB && !bc.canUseSmokeBomb()) {
