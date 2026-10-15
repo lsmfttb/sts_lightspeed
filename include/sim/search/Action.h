@@ -60,6 +60,30 @@ namespace sts::search {
         static std::vector<Action> enumerateCardSelectActions(const BattleContext &bc);
     };
 
+    // Root mapping treats the internal -1 and public target-6 encodings as one
+    // potion discard only when they identify the same source slot.
+    inline bool sameBattleRootActionIdentity(
+            const std::uint32_t searchActionBits,
+            const std::uint32_t publicActionBits) {
+        if (searchActionBits == publicActionBits) {
+            return true;
+        }
+        const auto actionType = [](const std::uint32_t bits) {
+            return static_cast<ActionType>((bits >> 29) & 0xF);
+        };
+        const auto sourceIdx = [](const std::uint32_t bits) {
+            return bits & 0xFFFF;
+        };
+        const auto targetIdx = [](const std::uint32_t bits) {
+            return (bits >> 16) & 0x1FFF;
+        };
+        return actionType(searchActionBits) == ActionType::POTION
+                && actionType(publicActionBits) == ActionType::POTION
+                && sourceIdx(searchActionBits) == sourceIdx(publicActionBits)
+                && targetIdx(searchActionBits) > 5
+                && targetIdx(publicActionBits) > 5;
+    }
+
 }
 
 
