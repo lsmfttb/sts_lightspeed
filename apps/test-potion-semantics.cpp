@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -195,6 +196,201 @@ search::Action potionActionForSlot(
         }
     }
     throw std::logic_error("search action list omitted the requested potion slot");
+}
+
+bool sameSearchTree(
+        const search::BattleScumSearcher2::Node &left,
+        const search::BattleScumSearcher2::Node &right) {
+    if (left.simulationCount != right.simulationCount
+            || left.evaluationSum != right.evaluationSum
+            || left.edges.size() != right.edges.size()
+            || left.policyPriors != right.policyPriors) {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.edges.size(); ++index) {
+        if (left.edges[index].action.bits != right.edges[index].action.bits
+                || !sameSearchTree(left.edges[index].node, right.edges[index].node)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void requireNoPotionActionFromSlot(
+        const search::BattleScumSearcher2::Node &node,
+        const int slot) {
+    for (const auto &edge : node.edges) {
+        require(edge.action.getActionType() != search::ActionType::POTION
+                        || edge.action.getSourceIdx() != slot,
+                "protected potion slot was enumerated in a tree node");
+        requireNoPotionActionFromSlot(edge.node, slot);
+    }
+}
+
+int countNewEntropicPotions(
+        const BattleContext &beforeBrew,
+        const BattleContext &afterBrew) {
+    const int afterConsumingBrew = beforeBrew.potionCount - 1;
+    return afterBrew.potionCount - afterConsumingBrew;
+}
+
+void checkForbiddenPotionSlotSearch() {
+    auto gc = gameFixture();
+    gc.potions[0] = Potion::FIRE_POTION;
+    gc.potions[1] = Potion::BLOCK_POTION;
+    gc.potionCount = 2;
+    const auto bc = battleFixture(gc, MonsterEncounter::CULTIST);
+
+    search::BattleScumSearcher2 baseline(bc);
+    baseline.includePotions = true;
+    baseline.search(400);
+
+    search::BattleScumSearcher2 explicitDefault(bc);
+    explicitDefault.includePotions = true;
+    explicitDefault.setForbiddenPotionSlot(-1);
+    explicitDefault.search(400);
+    require(sameSearchTree(baseline.root, explicitDefault.root)
+                    && baseline.bestActionValue == explicitDefault.bestActionValue
+                    && baseline.minActionValue == explicitDefault.minActionValue
+                    && baseline.actionExecutionCount == explicitDefault.actionExecutionCount
+                    && baseline.expandedNodeCount == explicitDefault.expandedNodeCount,
+            "disabled forbidden-slot configuration changed exact Search-v2 results");
+
+    search::BattleScumSearcher2 constrained(bc);
+    constrained.includePotions = true;
+    constrained.setForbiddenPotionSlot(0);
+    constrained.search(400);
+    require(constrained.getForbiddenPotionSlot() == 0,
+            "Search-v2 lost the requested protected potion slot");
+    require(constrained.expandedNodeCount > 1 && constrained.rolloutCount > 0,
+            "protected-slot witness did not reach deeper tree nodes and rollouts");
+    require(constrained.treeForbiddenPotionSlotExclusionCount > 0
+                    && constrained.rolloutForbiddenPotionSlotExclusionCount > 0,
+            "protected slot was not excluded in both tree expansion and random rollout");
+    requireNoPotionActionFromSlot(constrained.root, 0);
+
+    bool foundOtherPotion = false;
+    bool foundOtherPotionVisited = false;
+    for (const auto &edge : constrained.root.edges) {
+        if (edge.action.getActionType() != search::ActionType::POTION) {
+            continue;
+        }
+        require(edge.action.getSourceIdx() != 0,
+                "protected potion action appeared at the Search-v2 root");
+        if (edge.action.getSourceIdx() == 1) {
+            foundOtherPotion = true;
+            foundOtherPotionVisited = edge.node.simulationCount > 0;
+        }
+    }
+    require(foundOtherPotion && foundOtherPotionVisited,
+            "an unprotected potion action was absent or unvisited at the root");
+
+    const search::Action protectedAction(search::ActionType::POTION, 0);
+    const search::Action otherAction(search::ActionType::POTION, 1);
+    require(protectedAction.isValidAction(bc) && otherAction.isValidAction(bc),
+            "Search-only restriction changed normal simulator action legality");
+
+    auto changedSlot = bc;
+    changedSlot.potions[0] = Potion::BOTTLED_MIRACLE;
+    search::BattleScumSearcher2::Node staleStateActions;
+    bool failedClosedWithRepro = false;
+    try {
+        constrained.enumerateActionsForNode(staleStateActions, changedSlot, false);
+    } catch (const std::runtime_error &error) {
+        const std::string message = error.what();
+        failedClosedWithRepro = message.find("NATIVE_SLOT_CONSTRAINT_BLOCKED") != std::string::npos
+                && message.find("seed=52026") != std::string::npos
+                && message.find("protected_slot=0") != std::string::npos
+                && message.find("inventory=[") != std::string::npos;
+    }
+    require(failedClosedWithRepro,
+            "a changed protected slot did not fail closed with its concrete state");
+}
+
+void checkProtectedEntropicBrewOccupancy() {
+    // Full inventory with duplicate potion types: the same slot occurrence
+    // identity must remain distinguishable even though slots 0 and 1 match.
+    auto fullGame = gameFixture();
+    fullGame.potions[0] = Potion::FIRE_POTION;
+    fullGame.potions[1] = Potion::FIRE_POTION;
+    fullGame.potions[2] = Potion::ENTROPIC_BREW;
+    fullGame.potionCount = 3;
+    const auto fullRoot = battleFixture(fullGame, MonsterEncounter::CULTIST);
+
+    search::BattleScumSearcher2 fullSearch(fullRoot);
+    fullSearch.includePotions = true;
+    fullSearch.setForbiddenPotionSlot(0);
+    fullSearch.enumerateActionsForNode(fullSearch.root, fullRoot, false);
+    require(fullRoot.potions[0] == fullRoot.potions[1],
+            "duplicate-potion fixture did not contain identical types in separate slots");
+    require(countPotionActions(fullSearch.root) == 2
+                    && !std::any_of(fullSearch.root.edges.begin(), fullSearch.root.edges.end(),
+                            [](const auto &edge) {
+                                return edge.action.getActionType() == search::ActionType::POTION
+                                        && edge.action.getSourceIdx() == 0;
+                            }),
+            "protected duplicate slot was not distinguished from the usable duplicate");
+    const auto unprotectedDuplicate = potionActionForSlot(fullSearch.root, 1);
+    const auto protectedEntropic = potionActionForSlot(fullSearch.root, 2);
+    require(unprotectedDuplicate.isValidAction(fullRoot)
+                    && protectedEntropic.isValidAction(fullRoot),
+            "an allowed duplicate or Entropic Brew action lost normal legality");
+
+    auto scenarioA = fullRoot;
+    const search::Action consumeProtected(search::ActionType::POTION, 0);
+    consumeProtected.execute(scenarioA);
+    require(scenarioA.potions[0] == Potion::EMPTY_POTION_SLOT,
+            "A-side setup did not naturally empty the protected slot");
+    const auto scenarioABeforeBrew = scenarioA;
+    const search::Action scenarioABrew(search::ActionType::POTION, 2);
+    scenarioABrew.execute(scenarioA);
+
+    auto scenarioB = fullRoot;
+    protectedEntropic.execute(scenarioB);
+    require(scenarioB.potions[0] == Potion::FIRE_POTION
+                    && scenarioB.potions[1] == Potion::FIRE_POTION,
+            "B-side Entropic Brew changed either occupied protected/duplicate slot");
+    require(scenarioB.potions[2] != Potion::ENTROPIC_BREW,
+            "B-side Entropic Brew did not replace its own naturally empty slot");
+    const int generatedA = countNewEntropicPotions(scenarioABeforeBrew, scenarioA);
+    const int generatedB = countNewEntropicPotions(fullRoot, scenarioB);
+    require(generatedA == 2 && generatedB == 1,
+            "full-inventory A/B Entropic Brew did not preserve occupancy-dependent generation");
+    require(scenarioA.potions[0] != Potion::EMPTY_POTION_SLOT
+                    && scenarioA.potions[1] == Potion::FIRE_POTION
+                    && scenarioA.potions[2] != Potion::ENTROPIC_BREW,
+            "A-side Entropic Brew did not fill the newly empty protected-slot index naturally");
+
+    // The partially empty case verifies that the protected potion stays put
+    // while Entropic Brew fills only the other naturally empty slots.
+    auto partialGame = gameFixture();
+    partialGame.potions[0] = Potion::BLOCK_POTION;
+    partialGame.potions[1] = Potion::ENTROPIC_BREW;
+    partialGame.potionCount = 2;
+    const auto partialRoot = battleFixture(partialGame, MonsterEncounter::CULTIST);
+    search::BattleScumSearcher2 partialSearch(partialRoot);
+    partialSearch.includePotions = true;
+    partialSearch.setForbiddenPotionSlot(0);
+    partialSearch.enumerateActionsForNode(partialSearch.root, partialRoot, false);
+    const auto partialAllowedBrew = potionActionForSlot(partialSearch.root, 1);
+    auto partialB = partialRoot;
+    partialAllowedBrew.execute(partialB);
+    require(partialB.potions[0] == Potion::BLOCK_POTION
+                    && partialB.potions[1] != Potion::ENTROPIC_BREW
+                    && partialB.potions[2] != Potion::EMPTY_POTION_SLOT
+                    && partialB.potionCount == partialB.potionCapacity,
+            "partial-inventory Entropic Brew failed to preserve slot 0 and fill other empty slots");
+
+    auto partialA = partialRoot;
+    const search::Action consumeProtectedBlock(search::ActionType::POTION, 0);
+    consumeProtectedBlock.execute(partialA);
+    const search::Action partialABrew(search::ActionType::POTION, 1);
+    partialABrew.execute(partialA);
+    require(partialA.potions[0] != Potion::EMPTY_POTION_SLOT
+                    && partialA.potions[1] != Potion::ENTROPIC_BREW
+                    && partialA.potions[2] != Potion::EMPTY_POTION_SLOT
+                    && partialA.potionCount == partialA.potionCapacity,
+            "partial-inventory A-side Entropic Brew did not fill the newly empty slot naturally");
 }
 
 void checkSmokeBombLegalityAndSearch() {
@@ -522,6 +718,8 @@ int main() {
         }
         checkEntropicBrew(5, false);
         checkSmokeBombLegalityAndSearch();
+        checkForbiddenPotionSlotSearch();
+        checkProtectedEntropicBrewOccupancy();
         checkSmokeBombExitSkipsRewards();
         checkSmokeBombCombatEndRelics();
         checkCombinedCombatEndRelicOrdering();

@@ -121,6 +121,10 @@ namespace sts::search {
         std::int64_t leafValueCallCount = 0;
         std::int64_t rolloutCount = 0;
         std::int64_t terminalUtilityEvaluationCount = 0;
+        // Counts player-normal action-list enumerations where the protected
+        // occupied slot was omitted, split by tree expansion and rollout.
+        std::int64_t treeForbiddenPotionSlotExclusionCount = 0;
+        std::int64_t rolloutForbiddenPotionSlotExclusionCount = 0;
 
         // Fixed T088 heuristic/weight; no learned callback or parameter tuning.
         bool progressiveBiasEnabled = false;
@@ -143,7 +147,21 @@ namespace sts::search {
         StateUtilizationTelemetry stateUtilizationTelemetry;
         std::vector<std::string> stateUtilizationPayloads;
 
+    private:
+        int forbiddenPotionSlot = -1;
+        Potion forbiddenPotion = Potion::EMPTY_POTION_SLOT;
+
+        void validateForbiddenPotionSlot(
+                const BattleContext &state, const Action *action = nullptr) const;
+
+    public:
+
         explicit BattleScumSearcher2(const BattleContext &bc, EvalFnc evalFnc=&evaluateEndState);
+
+        // Search-only intervention. Game legality and Action execution remain
+        // unchanged; -1 disables the constraint.
+        void setForbiddenPotionSlot(int slot);
+        [[nodiscard]] int getForbiddenPotionSlot() const { return forbiddenPotionSlot; }
 
         // public methods
         void search(int64_t simulations);
@@ -166,10 +184,12 @@ namespace sts::search {
         void playoutRandom(BattleContext &state, std::vector<Action> &actionStack);
 
         void enumerateActionsForNode(
-                Node &node, const BattleContext &bc, bool applyPolicyPriors=true);
+                Node &node, const BattleContext &bc, bool applyPolicyPriors=true,
+                bool randomPlayout=false);
         void applyPolicyPriors(Node &node, const BattleContext &bc);
         void enumerateCardActions(Node &node, const BattleContext &bc);
-        void enumeratePotionActions(Node &node, const BattleContext &bc);
+        void enumeratePotionActions(Node &node, const BattleContext &bc,
+                                    bool treeExpansion=false, bool randomPlayout=false);
         void enumerateCardSelectActions(Node &node, const BattleContext &bc);
         static double evaluateEndState(const BattleContext &bc);
 
