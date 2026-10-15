@@ -5057,8 +5057,7 @@ struct StepSimulator {
             std::vector<int> directMatches;
             for (int edgeIdx = 0; edgeIdx < static_cast<int>(searcher.root.edges.size());
                     ++edgeIdx) {
-                if (search::sameBattleRootActionIdentity(
-                            searcher.root.edges[edgeIdx].action.bits, legalAction.bits)) {
+                if (searcher.root.edges[edgeIdx].action.bits == legalAction.bits) {
                     directMatches.push_back(edgeIdx);
                 }
             }
