@@ -652,7 +652,8 @@ nlohmann::json checkStudyAdapterBoundary(
 }
 
 pybind11::dict privilegedProjection(StepSimulator &simulator) {
-    return simulator.privilegedNoncombatChoiceProjectionV1();
+    return PrivilegedNoncombatProjectionAccess(
+            simulator, "training_oracle_only").projectV1();
 }
 
 std::vector<LightSpeedAction> verifyPrivilegedCandidateParity(
@@ -697,6 +698,10 @@ std::vector<LightSpeedAction> verifyPrivilegedCandidateParity(
         const auto candidateStatus = candidate["coverage_status"].cast<std::string>();
         require(candidateStatus == "supported" || candidateStatus == "unsupported",
                 "candidate omitted an explicit support status");
+        if (expectedStatus == "supported") {
+            require(candidateStatus == "supported",
+                    "supported fixture contains an unsupported legal candidate");
+        }
         if (candidateStatus == "unsupported") {
             require(candidate.contains("reason"),
                     "unsupported native candidate omitted its blocker");
@@ -788,6 +793,8 @@ nlohmann::json checkPrivilegedProjectionPerformance() {
     require(nativeActions.size() > 1, "benchmark shop fixture has too few legal candidates");
     constexpr int iterations = 10000;
     std::size_t sink = 0;
+    const PrivilegedNoncombatProjectionAccess projectionAccess(
+            simulator, "training_oracle_only");
     const auto legalWallStart = std::chrono::steady_clock::now();
     const auto legalCpuStart = std::clock();
     for (int i = 0; i < iterations; ++i) {
@@ -799,7 +806,7 @@ nlohmann::json checkPrivilegedProjectionPerformance() {
     const auto projectionWallStart = std::chrono::steady_clock::now();
     const auto projectionCpuStart = std::clock();
     for (int i = 0; i < iterations; ++i) {
-        const auto value = simulator.privilegedNoncombatChoiceProjectionV1();
+        const auto value = projectionAccess.projectV1();
         sink += value["candidate_count"].cast<std::size_t>();
     }
     const auto projectionCpuEnd = std::clock();
@@ -829,6 +836,16 @@ nlohmann::json checkPrivilegedProjectionPerformance() {
 }
 
 nlohmann::json checkPrivilegedNoncombatProjection() {
+    StepSimulator boundarySimulator(CharacterClass::IRONCLAD, 49, 20);
+    bool rejectedPublicAudience = false;
+    try {
+        (void) PrivilegedNoncombatProjectionAccess(boundarySimulator, "public_now");
+    } catch (const std::invalid_argument &) {
+        rejectedPublicAudience = true;
+    }
+    require(rejectedPublicAudience,
+            "privileged projection access accepted a public audience tag");
+
     nlohmann::json result = {
         {"schema_id", "native-privileged-noncombat-semantic-capability-evidence-v1"},
         {"tested_native_source_commit", STS_LIGHTSPEED_TESTED_SOURCE_COMMIT},
@@ -919,6 +936,98 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
         ++eventFamilyCount;
         eventCandidateCount += actions.size();
     }
+    require(eventFamilyCount == eventFamilies.size(),
+            "source-enabled event fixture skipped a multi-choice family");
+
+    // The native chooser treats 0 as gold, 2 as a relic, and leaves 1 with
+    // neither immediate reward.  Force a no-encounter draw so each labeled
+    // phase value can be checked against that native branch's actual effect.
+    std::uint64_t noEncounterSeed = 0;
+    for (; noEncounterSeed < 128; ++noEncounterSeed) {
+        sts::Random rng(noEncounterSeed);
+        if (rng.random(99) >= 25) break;
+    }
+    require(noEncounterSeed < 128,
+            "could not find a deterministic Dead Adventurer no-encounter fixture seed");
+    const std::array<std::pair<int, const char *>, 3> deadAdventurerRewards = {{
+        {0, "gold"}, {1, "no_reward"}, {2, "relic"}
+    }};
+    for (const auto &[nativeCode, expectedKind] : deadAdventurerRewards) {
+        StepSimulator deadAdventurer(CharacterClass::IRONCLAD, noEncounterSeed, 0);
+        deadAdventurer.gc.screenState = ScreenState::EVENT_SCREEN;
+        deadAdventurer.gc.curEvent = Event::DEAD_ADVENTURER;
+        deadAdventurer.gc.info.phase = 0;
+        deadAdventurer.gc.info.rewards = {nativeCode, 1, 2};
+        deadAdventurer.gc.miscRng = sts::Random(noEncounterSeed);
+        const auto projectionValue = privilegedProjection(deadAdventurer);
+        const auto actions = verifyPrivilegedCandidateParity(deadAdventurer, projectionValue);
+        const auto searchIndex = findGameCandidate(actions, "event", 0);
+        const auto candidates = projectionValue["candidates"].cast<pybind11::list>();
+        const auto row = candidates[searchIndex].cast<pybind11::dict>();
+        const auto features = row["features"].cast<pybind11::dict>();
+        const auto choiceFeature = features["choice"].cast<pybind11::dict>();
+        require(choiceFeature["availability"].cast<std::string>() == "available"
+                        && choiceFeature["visibility"].cast<std::string>() == "oracle_only"
+                        && choiceFeature["source"].cast<std::string>()
+                                == "GameContext::chooseEventOption DEAD_ADVENTURER reward codes",
+                "Dead Adventurer reward label omitted its native source branch");
+        const auto choice = choiceFeature["value"].cast<pybind11::dict>();
+        require(choice["phase_reward_kind"].cast<std::string>() == expectedKind,
+                "Dead Adventurer native reward code has the wrong semantic label");
+
+        const int goldBefore = deadAdventurer.gc.gold;
+        const int relicCountBefore = deadAdventurer.gc.relics.size();
+        auto execute = deadAdventurer;
+        (void) execute.step(actions[searchIndex]);
+        require(execute.gc.screenState == ScreenState::EVENT_SCREEN
+                        && execute.gc.info.phase == 1,
+                "Dead Adventurer no-encounter branch did not advance its native phase");
+        if (nativeCode == 0) {
+            require(execute.gc.gold == goldBefore + 30
+                            && execute.gc.relics.size() == relicCountBefore,
+                    "native Dead Adventurer code 0 did not grant its 30 gold reward");
+        } else if (nativeCode == 1) {
+            require(execute.gc.gold == goldBefore
+                            && execute.gc.relics.size() == relicCountBefore,
+                    "native Dead Adventurer code 1 unexpectedly granted gold or a relic");
+        } else {
+            require(execute.gc.gold == goldBefore
+                            && execute.gc.relics.size() == relicCountBefore + 1,
+                    "native Dead Adventurer code 2 did not grant its relic reward");
+        }
+    }
+
+    StepSimulator unknownDeadAdventurerReward(CharacterClass::IRONCLAD, 49, 0);
+    unknownDeadAdventurerReward.gc.screenState = ScreenState::EVENT_SCREEN;
+    unknownDeadAdventurerReward.gc.curEvent = Event::DEAD_ADVENTURER;
+    unknownDeadAdventurerReward.gc.info.phase = 0;
+    unknownDeadAdventurerReward.gc.info.rewards = {99, 1, 2};
+    const auto unknownRewardProjection = privilegedProjection(unknownDeadAdventurerReward);
+    const auto unknownRewardActions = verifyPrivilegedCandidateParity(
+            unknownDeadAdventurerReward, unknownRewardProjection,
+            "NATIVE_CHOICE_SEMANTIC_NOT_READY");
+    const auto unknownSearchIndex = findGameCandidate(unknownRewardActions, "event", 0);
+    const auto unknownRewardRow = unknownRewardProjection["candidates"]
+            .cast<pybind11::list>()[unknownSearchIndex].cast<pybind11::dict>();
+    require(unknownRewardRow["coverage_status"].cast<std::string>() == "unsupported"
+                    && unknownRewardRow.contains("reason"),
+            "unknown Dead Adventurer reward code did not fail closed per candidate");
+
+    StepSimulator invalidDeadAdventurerPhase(CharacterClass::IRONCLAD, 49, 0);
+    invalidDeadAdventurerPhase.gc.screenState = ScreenState::EVENT_SCREEN;
+    invalidDeadAdventurerPhase.gc.curEvent = Event::DEAD_ADVENTURER;
+    invalidDeadAdventurerPhase.gc.info.phase = 3;
+    invalidDeadAdventurerPhase.gc.info.rewards = {0, 1, 2};
+    const auto invalidPhaseProjection = privilegedProjection(invalidDeadAdventurerPhase);
+    const auto invalidPhaseActions = verifyPrivilegedCandidateParity(
+            invalidDeadAdventurerPhase, invalidPhaseProjection,
+            "NATIVE_CHOICE_SEMANTIC_NOT_READY");
+    const auto invalidPhaseSearchIndex = findGameCandidate(invalidPhaseActions, "event", 0);
+    const auto invalidPhaseRow = invalidPhaseProjection["candidates"]
+            .cast<pybind11::list>()[invalidPhaseSearchIndex].cast<pybind11::dict>();
+    require(invalidPhaseRow["coverage_status"].cast<std::string>() == "unsupported"
+                    && invalidPhaseRow.contains("reason"),
+            "out-of-range Dead Adventurer phase did not fail closed per candidate");
     StepSimulator unsupportedColosseum(CharacterClass::IRONCLAD, 49, 20);
     unsupportedColosseum.gc.screenState = ScreenState::EVENT_SCREEN;
     unsupportedColosseum.gc.curEvent = Event::COLOSSEUM;
@@ -1019,7 +1128,7 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     result["coverage_matrix"]["EVENT_SCREEN:SOURCE_ENABLED_MULTI_CHOICE"] = {
         {"status", "supported"}, {"multi_choice_event_families_checked", eventFamilyCount},
         {"native_candidate_occurrences_checked", eventCandidateCount},
-        {"all_candidate_semantics_available", true},
+        {"all_candidate_semantics_available", eventFamilyCount == eventFamilies.size()},
         {"transition_witness_scope", "representative native execution witnesses include Neow, Designer In-Spire, Old Beggar, Knowing Skull, and Wheel of Change"}
     };
 

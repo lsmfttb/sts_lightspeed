@@ -1487,8 +1487,27 @@ pybind11::dict privilegedEventChoice(
                 case Event::DEAD_ADVENTURER:
                     if (idx == 0) {
                         choice["current_phase"] = gc.info.phase;
-                        if (gc.info.phase >= 0 && gc.info.phase < 3)
-                            choice["phase_reward_kind"] = gc.info.rewards[gc.info.phase];
+                        if (gc.info.phase < 0
+                                || gc.info.phase >= static_cast<int>(gc.info.rewards.size())) {
+                            setUnavailable(
+                                    "Dead Adventurer phase has no native reward entry");
+                            return features;
+                        }
+                        switch (gc.info.rewards[gc.info.phase]) {
+                            case 0:
+                                choice["phase_reward_kind"] = "gold";
+                                break;
+                            case 1:
+                                choice["phase_reward_kind"] = "no_reward";
+                                break;
+                            case 2:
+                                choice["phase_reward_kind"] = "relic";
+                                break;
+                            default:
+                                setUnavailable(
+                                        "Dead Adventurer phase reward code has no source-backed mapping");
+                                return features;
+                        }
                         setFutureUnavailable("search_result", "encounter and reward depend on future MiscRng and RelicRng state");
                     }
                     break;
@@ -1675,8 +1694,11 @@ pybind11::dict privilegedEventChoice(
                     break;
             }
             if (!features.contains("choice")) {
+                const char *choiceSource = gc.curEvent == Event::DEAD_ADVENTURER
+                        ? "GameContext::chooseEventOption DEAD_ADVENTURER reward codes"
+                        : "GameContext::chooseEventOption and source-backed native event branch";
                 features["choice"] = privilegedChoiceFeature(
-                        choice, "oracle_only", "GameContext::chooseEventOption and source-backed native event branch");
+                        choice, "oracle_only", choiceSource);
             }
             return features;
         }
@@ -8458,6 +8480,24 @@ struct StepSimulator {
     }
 };
 
+struct PrivilegedNoncombatProjectionAccess {
+    StepSimulator &simulator;
+
+    PrivilegedNoncombatProjectionAccess(
+            StepSimulator &simulator,
+            const std::string &audience)
+        : simulator(simulator) {
+        if (audience != "training_oracle_only") {
+            throw std::invalid_argument(
+                    "privileged noncombat projection requires audience=training_oracle_only");
+        }
+    }
+
+    pybind11::dict projectV1() const {
+        return simulator.privilegedNoncombatChoiceProjectionV1();
+    }
+};
+
 }
 
 
@@ -8504,8 +8544,6 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("legal_actions", &StepSimulator::legalActions)
         .def("public_projection", &StepSimulator::publicProjection)
         .def("public_projection_v3", &StepSimulator::publicProjectionV3)
-        .def("privileged_noncombat_choice_projection_v1",
-                &StepSimulator::privilegedNoncombatChoiceProjectionV1)
         .def("t096_public_information_projection", &StepSimulator::t096PublicInformationProjection)
         .def("t096_anchor_distribution_metadata", &StepSimulator::t096AnchorDistributionMetadata)
         .def("t096_visibility_audit", &StepSimulator::t096VisibilityAudit)
@@ -8598,6 +8636,16 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
         .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
         .def("step", &StepSimulator::step);
+
+    pybind11::class_<PrivilegedNoncombatProjectionAccess>(
+            m, "PrivilegedNoncombatProjectionAccess",
+            "Explicit opt-in handle for training-oracle-only noncombat features.")
+        .def(pybind11::init<StepSimulator &, const std::string &>(),
+                pybind11::arg("simulator"),
+                pybind11::arg("audience"),
+                pybind11::keep_alive<1, 2>())
+        .def("project_v1", &PrivilegedNoncombatProjectionAccess::projectV1,
+                "Return noncombat features tagged public_now or oracle_only.");
 
     pybind11::class_<GameContext> gameContext(m, "GameContext");
     gameContext.def(pybind11::init<CharacterClass, std::uint64_t, int>())
