@@ -4,12 +4,18 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <ctime>
 #include <iostream>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/resource.h>
+#endif
 
 #ifndef STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
 #define STS_LIGHTSPEED_TESTED_SOURCE_COMMIT "unknown"
@@ -645,11 +651,801 @@ nlohmann::json checkStudyAdapterBoundary(
     return evidence;
 }
 
+pybind11::dict privilegedProjection(StepSimulator &simulator) {
+    return simulator.privilegedNoncombatChoiceProjectionV1();
+}
+
+std::vector<LightSpeedAction> verifyPrivilegedCandidateParity(
+        StepSimulator &simulator,
+        const pybind11::dict &projectionValue,
+        const std::string &expectedStatus = "supported") {
+    require(projectionValue["schema_id"].cast<std::string>()
+                    == "native-privileged-noncombat-choice-projection-v1",
+            "privileged projection schema id is incorrect");
+    require(projectionValue["audience"].cast<std::string>() == "training_oracle_only"
+                    && !projectionValue["public_api_safe"].cast<bool>()
+                    && !projectionValue["policy_training_authorized"].cast<bool>(),
+            "privileged projection lacks its restrictive audience boundary");
+    require(projectionValue["native_source_commit"].cast<std::string>()
+                    == STS_LIGHTSPEED_TESTED_SOURCE_COMMIT,
+            "privileged projection omitted the tested native source identity");
+    require(projectionValue["coverage_status"].cast<std::string>() == expectedStatus,
+            "privileged projection returned an unexpected fail-closed status");
+
+    const auto actions = simulator.legalActions();
+    const auto candidates = projectionValue["candidates"].cast<pybind11::list>();
+    require(candidates.size() == static_cast<ssize_t>(actions.size())
+                    && projectionValue["candidate_count"].cast<std::size_t>()
+                            == actions.size(),
+            "privileged candidate count differs from the native legal enumerator");
+    std::set<std::size_t> occurrences;
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        const auto candidate = candidates[static_cast<ssize_t>(index)].cast<pybind11::dict>();
+        const auto bindingField = candidate["candidate_binding"].cast<pybind11::dict>();
+        require(bindingField["availability"].cast<std::string>() == "available"
+                        && bindingField["visibility"].cast<std::string>() == "oracle_only",
+                "candidate occurrence binding is not explicitly oracle-only");
+        const auto binding = bindingField["value"].cast<pybind11::dict>();
+        const auto occurrence = binding["candidate_index"].cast<std::size_t>();
+        require(occurrence == index && occurrences.insert(occurrence).second,
+                "ordered native candidate occurrence was lost or deduplicated");
+        const auto boundAction = binding["candidate_action"].cast<pybind11::dict>();
+        require(!boundAction.contains("bits")
+                        && boundAction.equal(publicChoiceActionSnapshot(actions[index])),
+                "privileged candidate does not bind to its exact sanitized native action");
+
+        const auto candidateStatus = candidate["coverage_status"].cast<std::string>();
+        require(candidateStatus == "supported" || candidateStatus == "unsupported",
+                "candidate omitted an explicit support status");
+        if (candidateStatus == "unsupported") {
+            require(candidate.contains("reason"),
+                    "unsupported native candidate omitted its blocker");
+        }
+        const auto features = candidate["features"].cast<pybind11::dict>();
+        require(!features.empty(), "candidate has no source-backed semantic features");
+        for (const auto &featureHandle : features) {
+            const auto feature = featureHandle.second.cast<pybind11::dict>();
+            require(feature.contains("availability"),
+                    "candidate feature omitted explicit availability");
+            if (feature["availability"].cast<std::string>() == "available") {
+                const auto visibility = feature["visibility"].cast<std::string>();
+                require(visibility == "public_now" || visibility == "oracle_only",
+                        "available feature omitted the public/oracle visibility boundary");
+                require(feature.contains("source"),
+                        "available feature omitted native provenance");
+            }
+        }
+    }
+    require(occurrences.size() == actions.size(),
+            "privileged projection dropped or merged an ordered action occurrence");
+    const auto serialized = encodePython(projectionValue);
+    require(serialized.find("\"bits\"") == std::string::npos
+                    && serialized.find("bits=") == std::string::npos,
+            "native simulator-private action bits entered the privileged policy feature");
+    return actions;
+}
+
+std::size_t findGameCandidate(
+        const std::vector<LightSpeedAction> &actions,
+        const std::string &kind,
+        const int idx1 = -1) {
+    for (std::size_t index = 0; index < actions.size(); ++index) {
+        if (actions[index].kind == kind && (idx1 < 0 || actions[index].idx1 == idx1)) {
+            return index;
+        }
+    }
+    throw std::logic_error("native legal-action fixture omitted candidate " + kind);
+}
+
+void installTestMapContinuation(GameContext &gc) {
+    gc.regainControlAction = [](GameContext &state) {
+        state.screenState = ScreenState::MAP_SCREEN;
+        state.regainControlAction = nullptr;
+    };
+}
+
+void enterNativeMapThroughNeow(StepSimulator &simulator) {
+    require(simulator.gc.screenState == ScreenState::EVENT_SCREEN
+                    && simulator.gc.curEvent == Event::NEOW,
+            "fixture did not begin in the native Neow EVENT_SCREEN representation");
+    // Hand-built test fixtures need the ordinary native continuation that the
+    // game installs around start-of-run choices. Keep this setup in tests; the
+    // semantic capability does not alter StepSimulator transition behavior.
+    installTestMapContinuation(simulator.gc);
+    simulator.gc.info.neowRewards[0] = {
+            Neow::Bonus::HUNDRED_GOLD, Neow::Drawback::NONE};
+    const auto actions = simulator.legalActions();
+    const auto index = findGameCandidate(actions, "event", 0);
+    (void) simulator.step(actions[index]);
+    require(simulator.gc.screenState == ScreenState::MAP_SCREEN,
+            "native Neow option did not enter MAP_SCREEN through its real executor");
+    simulator.gc.regainControlAction = [](GameContext &state) {
+        state.screenState = ScreenState::MAP_SCREEN;
+        state.regainControlAction = nullptr;
+    };
+}
+
+long peakResidentSetKilobytes() {
+#if defined(__unix__) || defined(__APPLE__)
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+#if defined(__APPLE__)
+        return static_cast<long>(usage.ru_maxrss / 1024);
+#else
+        return static_cast<long>(usage.ru_maxrss);
+#endif
+    }
+#endif
+    return -1;
+}
+
+nlohmann::json checkPrivilegedProjectionPerformance() {
+    StepSimulator simulator(CharacterClass::IRONCLAD, 49, 20);
+    simulator.gc.screenState = ScreenState::SHOP_ROOM;
+    simulator.gc.gold = 1000;
+    simulator.gc.info.shop.setup(simulator.gc);
+    const auto nativeActions = simulator.legalActions();
+    require(nativeActions.size() > 1, "benchmark shop fixture has too few legal candidates");
+    constexpr int iterations = 10000;
+    std::size_t sink = 0;
+    const auto legalWallStart = std::chrono::steady_clock::now();
+    const auto legalCpuStart = std::clock();
+    for (int i = 0; i < iterations; ++i) {
+        sink += simulator.legalActions().size();
+    }
+    const auto legalCpuEnd = std::clock();
+    const auto legalWallEnd = std::chrono::steady_clock::now();
+    const long rssAfterLegal = peakResidentSetKilobytes();
+    const auto projectionWallStart = std::chrono::steady_clock::now();
+    const auto projectionCpuStart = std::clock();
+    for (int i = 0; i < iterations; ++i) {
+        const auto value = simulator.privilegedNoncombatChoiceProjectionV1();
+        sink += value["candidate_count"].cast<std::size_t>();
+    }
+    const auto projectionCpuEnd = std::clock();
+    const auto projectionWallEnd = std::chrono::steady_clock::now();
+    const long rssAfterProjection = peakResidentSetKilobytes();
+    const double legalCpuSeconds = static_cast<double>(legalCpuEnd - legalCpuStart) / CLOCKS_PER_SEC;
+    const double projectionCpuSeconds = static_cast<double>(projectionCpuEnd - projectionCpuStart) / CLOCKS_PER_SEC;
+    const double legalWallSeconds = std::chrono::duration<double>(legalWallEnd - legalWallStart).count();
+    const double projectionWallSeconds = std::chrono::duration<double>(projectionWallEnd - projectionWallStart).count();
+    return {
+        {"schema_id", "native-privileged-noncombat-projection-performance-v1"},
+        {"native_source_commit", STS_LIGHTSPEED_TESTED_SOURCE_COMMIT},
+        {"screen", "SHOP_ROOM"}, {"native_candidate_count", nativeActions.size()},
+        {"iterations_per_path", iterations}, {"candidate_sink", sink},
+        {"legal_actions_wall_seconds", legalWallSeconds},
+        {"privileged_projection_wall_seconds", projectionWallSeconds},
+        {"wall_overhead_ratio", projectionWallSeconds / legalWallSeconds},
+        {"legal_actions_cpu_seconds", legalCpuSeconds},
+        {"privileged_projection_cpu_seconds", projectionCpuSeconds},
+        {"cpu_overhead_ratio", projectionCpuSeconds / legalCpuSeconds},
+        {"peak_rss_after_legal_actions_kb", rssAfterLegal},
+        {"peak_rss_after_privileged_projection_kb", rssAfterProjection},
+        {"peak_rss_delta_kb", rssAfterProjection < 0 || rssAfterLegal < 0
+                ? -1 : rssAfterProjection - rssAfterLegal},
+        {"rss_measurement", "getrusage(RUSAGE_SELF).ru_maxrss process high-water mark; not isolated per-allocation accounting"}
+    };
+}
+
+nlohmann::json checkPrivilegedNoncombatProjection() {
+    nlohmann::json result = {
+        {"schema_id", "native-privileged-noncombat-semantic-capability-evidence-v1"},
+        {"tested_native_source_commit", STS_LIGHTSPEED_TESTED_SOURCE_COMMIT},
+        {"scope", "source-backed native projection and selected candidate execution; no policy training"},
+        {"coverage_matrix", nlohmann::json::object()},
+        {"execution_witnesses", nlohmann::json::array()}
+    };
+
+    // Audit every source-enabled multi-choice event family against the exact
+    // native enumerator.  Event state fields are initialized to valid native
+    // fixture values; we do not run a second event implementation here.
+    const std::vector<Event> eventFamilies = {
+        Event::OMINOUS_FORGE, Event::PLEADING_VAGRANT, Event::ANCIENT_WRITING,
+        Event::OLD_BEGGAR, Event::BIG_FISH, Event::CURSED_TOME, Event::DEAD_ADVENTURER,
+        Event::DESIGNER_IN_SPIRE, Event::AUGMENTER, Event::DUPLICATOR, Event::FACE_TRADER,
+        Event::FALLING, Event::FORGOTTEN_ALTAR, Event::THE_DIVINE_FOUNTAIN, Event::GHOSTS,
+        Event::GOLDEN_IDOL, Event::GOLDEN_SHRINE, Event::WING_STATUE, Event::KNOWING_SKULL,
+        Event::THE_SSSSSERPENT, Event::LIVING_WALL, Event::MASKED_BANDITS, Event::MINDBLOOM,
+        Event::HYPNOTIZING_COLORED_MUSHROOMS, Event::MYSTERIOUS_SPHERE, Event::THE_NEST,
+        Event::NLOTH, Event::NOTE_FOR_YOURSELF, Event::PURIFIER, Event::SCRAP_OOZE,
+        Event::SECRET_PORTAL, Event::SENSORY_STONE, Event::SHINING_LIGHT, Event::THE_CLERIC,
+        Event::THE_JOUST, Event::THE_LIBRARY, Event::THE_MAUSOLEUM, Event::THE_MOAI_HEAD,
+        Event::THE_WOMAN_IN_BLUE, Event::TOMB_OF_LORD_RED_MASK, Event::TRANSMORGRIFIER,
+        Event::UPGRADE_SHRINE, Event::VAMPIRES, Event::WE_MEET_AGAIN, Event::WINDING_HALLS,
+        Event::WORLD_OF_GOOP
+    };
+    std::size_t eventFamilyCount = 0;
+    std::size_t eventCandidateCount = 0;
+    for (const auto event : eventFamilies) {
+        StepSimulator fixture(CharacterClass::IRONCLAD, 49, 20);
+        auto &gc = fixture.gc;
+        gc.screenState = ScreenState::EVENT_SCREEN;
+        gc.curEvent = event;
+        gc.gold = 1000;
+        gc.curHp = 60;
+        gc.maxHp = 80;
+        gc.floorNum = 20;
+        gc.info.eventData = 0;
+        gc.info.hpAmount0 = 4;
+        gc.info.hpAmount1 = 5;
+        gc.info.hpAmount2 = 6;
+        gc.info.phase = 0;
+        gc.info.rewards = {0, 1, 2};
+        gc.info.upgradeOne = true;
+        gc.info.cleanUpIsRemoveCard = true;
+        gc.info.goldLoss = 10;
+        gc.info.potionIdx = -1;
+        gc.info.gold = 50;
+        gc.info.cardIdx = 0;
+        gc.info.relicIdx0 = 0;
+        gc.info.relicIdx1 = 0;
+        gc.info.skillCardDeckIdx = -1;
+        gc.info.powerCardDeckIdx = -1;
+        gc.info.attackCardDeckIdx = -1;
+        for (int card = 0; card < gc.deck.size(); ++card) {
+            const auto type = gc.deck.cards[card].getType();
+            if (type == CardType::SKILL && gc.info.skillCardDeckIdx == -1)
+                gc.info.skillCardDeckIdx = card;
+            if (type == CardType::POWER && gc.info.powerCardDeckIdx == -1)
+                gc.info.powerCardDeckIdx = card;
+            if (type == CardType::ATTACK && gc.info.attackCardDeckIdx == -1)
+                gc.info.attackCardDeckIdx = card;
+        }
+        if (event == Event::WE_MEET_AGAIN) {
+            gc.obtainPotion(Potion::FRUIT_JUICE);
+            gc.info.potionIdx = 0;
+        }
+        const auto projectionValue = privilegedProjection(fixture);
+        const auto actions = fixture.legalActions();
+        if (actions.size() < 2) continue;
+        const auto checkedActions = verifyPrivilegedCandidateParity(fixture, projectionValue);
+        require(checkedActions.size() == actions.size(),
+                "event family candidate parity changed during semantic projection");
+        const auto eventRows = projectionValue["candidates"].cast<pybind11::list>();
+        for (const auto &rowHandle : eventRows) {
+            const auto row = rowHandle.cast<pybind11::dict>();
+            const auto candidateBinding = row["candidate_binding"].cast<pybind11::dict>()
+                    ["value"].cast<pybind11::dict>();
+            const auto candidateKind = candidateBinding["candidate_action"]
+                    .cast<pybind11::dict>()["kind"].cast<std::string>();
+            if (candidateKind == "event") {
+                const auto features = row["features"].cast<pybind11::dict>();
+                const auto choice = features["choice"].cast<pybind11::dict>();
+                require(choice["visibility"].cast<std::string>() == "oracle_only",
+                        "source-reconstructed event meaning was not tagged as training-oracle-only");
+            }
+        }
+        ++eventFamilyCount;
+        eventCandidateCount += actions.size();
+    }
+    StepSimulator unsupportedColosseum(CharacterClass::IRONCLAD, 49, 20);
+    unsupportedColosseum.gc.screenState = ScreenState::EVENT_SCREEN;
+    unsupportedColosseum.gc.curEvent = Event::COLOSSEUM;
+    unsupportedColosseum.gc.info.eventData = 1;
+    const auto colosseumProjection = privilegedProjection(unsupportedColosseum);
+    const auto colosseumActions = verifyPrivilegedCandidateParity(
+            unsupportedColosseum, colosseumProjection, "NATIVE_CHOICE_SEMANTIC_NOT_READY");
+    require(colosseumActions.size() == 2
+                    && colosseumProjection["unsupported_candidates"].cast<pybind11::list>().size() == 2,
+            "disabled/TODO Colosseum alternatives did not fail closed individually");
+    result["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"] = {
+        {"status", "unsupported"}, {"native_candidate_count", colosseumActions.size()},
+        {"blocker", "native event generation disables Colosseum; chooseEventOption is TODO and both alternatives currently return to map"}
+    };
+
+    StepSimulator unsupportedLab(CharacterClass::IRONCLAD, 49, 20);
+    unsupportedLab.gc.screenState = ScreenState::EVENT_SCREEN;
+    unsupportedLab.gc.curEvent = Event::LAB;
+    const auto labProjection = privilegedProjection(unsupportedLab);
+    const auto labActions = verifyPrivilegedCandidateParity(
+            unsupportedLab, labProjection, "NATIVE_CHOICE_SEMANTIC_NOT_READY");
+    require(labActions.size() == 1
+                    && labProjection["unsupported_candidates"].cast<pybind11::list>().size() == 1,
+            "LAB action bit did not fail closed against its asserting native chooser");
+    result["coverage_matrix"]["EVENT_SCREEN:LAB"] = {
+        {"status", "unsupported"}, {"native_candidate_count", labActions.size()},
+        {"blocker", "native action enumeration has one bit but chooseEventOption asserts no action is valid"}
+    };
+
+    StepSimulator designer(CharacterClass::IRONCLAD, 49, 20);
+    designer.gc.screenState = ScreenState::EVENT_SCREEN;
+    designer.gc.curEvent = Event::DESIGNER_IN_SPIRE;
+    designer.gc.gold = 500;
+    designer.gc.info.cleanUpIsRemoveCard = false;
+    installTestMapContinuation(designer.gc);
+    const auto designerProjection = privilegedProjection(designer);
+    const auto designerActions = verifyPrivilegedCandidateParity(designer, designerProjection);
+    const auto transformCleanupIndex = findGameCandidate(designerActions, "event", 3);
+    const auto designerRows = designerProjection["candidates"].cast<pybind11::list>();
+    const auto designerFeatures = designerRows[transformCleanupIndex].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    const auto designerChoice = designerFeatures["choice"].cast<pybind11::dict>()
+            ["value"].cast<pybind11::dict>();
+    require(designerChoice["gold_cost"].cast<int>() == 185
+                    && designerChoice["hp_cost"].cast<int>() == 5
+                    && designerChoice["source_fallthrough_to_option_4"].cast<bool>()
+                    && designerChoice["source_fallthrough_to_option_5"].cast<bool>(),
+            "Designer In-Spire fall-through candidate omitted cumulative source costs/effects");
+    const int designerGoldBefore = designer.gc.gold;
+    const int designerHpBefore = designer.gc.curHp;
+    auto executeDesigner = designer;
+    (void) executeDesigner.step(designerActions[transformCleanupIndex]);
+    require(executeDesigner.gc.gold == designerGoldBefore - 185
+                    && executeDesigner.gc.curHp == designerHpBefore - 5
+                    && executeDesigner.gc.screenState == ScreenState::MAP_SCREEN,
+            "identified Designer In-Spire candidate did not run its native fall-through path");
+    result["coverage_matrix"]["EVENT_SCREEN:DESIGNER_IN_SPIRE_FALLTHROUGH"] = {
+        {"status", "supported"}, {"candidate_index", 3}, {"gold_cost", 185},
+        {"hp_cost", 5}, {"source_fallthrough_options", {4, 5}},
+        {"execution_witness", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "EVENT_SCREEN:DESIGNER_IN_SPIRE"},
+        {"candidate_index", transformCleanupIndex},
+        {"effect", "native option 3 fall-through spent cumulative gold, applied option 5 HP loss, and returned to map"}
+    });
+
+    StepSimulator wheel(CharacterClass::IRONCLAD, 49, 20);
+    wheel.gc.screenState = ScreenState::EVENT_SCREEN;
+    wheel.gc.curEvent = Event::WHEEL_OF_CHANGE;
+    installTestMapContinuation(wheel.gc);
+    const auto wheelProjection = privilegedProjection(wheel);
+    const auto wheelActions = verifyPrivilegedCandidateParity(wheel, wheelProjection);
+    require(wheelActions.size() == 1,
+            "Wheel of Change did not expose its single native legal candidate");
+    const auto wheelRows = wheelProjection["candidates"].cast<pybind11::list>();
+    const auto wheelFeatures = wheelRows[0].cast<pybind11::dict>()["features"]
+            .cast<pybind11::dict>();
+    const auto wheelChoice = wheelFeatures["choice"].cast<pybind11::dict>();
+    const auto wheelChoiceValue = wheelChoice["value"].cast<pybind11::dict>();
+    require(wheelChoiceValue["choice_type"].cast<std::string>() == "spin_wheel"
+                    && wheelChoiceValue["effect_type"].cast<std::string>()
+                            == "resolve_random_wheel_outcome",
+            "single legal Wheel of Change candidate omitted its source-backed meaning");
+    const auto wheelResult = wheelFeatures["wheel_result"].cast<pybind11::dict>();
+    require(wheelResult["availability"].cast<std::string>() == "unavailable"
+                    && !wheelResult["required_for_choice_semantics"].cast<bool>(),
+            "Wheel of Change exposed or required an unrevealed RNG outcome");
+    auto executeWheel = wheel;
+    (void) executeWheel.step(wheelActions[0]);
+    require(executeWheel.gc.screenState != ScreenState::EVENT_SCREEN,
+            "identified single Wheel of Change candidate did not execute its native chooser");
+    result["coverage_matrix"]["EVENT_SCREEN:WHEEL_OF_CHANGE"] = {
+        {"status", "supported"}, {"native_candidate_count", wheelActions.size()},
+        {"single_candidate_execution", true}, {"rng_result", "unavailable"}
+    };
+
+    result["coverage_matrix"]["EVENT_SCREEN:SOURCE_ENABLED_MULTI_CHOICE"] = {
+        {"status", "supported"}, {"multi_choice_event_families_checked", eventFamilyCount},
+        {"native_candidate_occurrences_checked", eventCandidateCount},
+        {"all_candidate_semantics_available", true},
+        {"transition_witness_scope", "representative native execution witnesses include Neow, Designer In-Spire, Old Beggar, Knowing Skull, and Wheel of Change"}
+    };
+
+    // Neow is represented by the real native EVENT_SCREEN and Event::NEOW,
+    // never by a fabricated ScreenState value.
+    StepSimulator neow(CharacterClass::IRONCLAD, 49, 20);
+    require(neow.gc.screenState == ScreenState::EVENT_SCREEN
+                    && neow.gc.curEvent == Event::NEOW,
+            "native start-of-run Neow state is not the expected EVENT_SCREEN");
+    installTestMapContinuation(neow.gc);
+    neow.gc.info.neowRewards[0] = {
+            Neow::Bonus::HUNDRED_GOLD, Neow::Drawback::NONE};
+    neow.gc.info.neowRewards[1] = {
+            Neow::Bonus::TEN_PERCENT_HP_BONUS, Neow::Drawback::NO_GOLD};
+    neow.gc.info.neowRewards[2] = {
+            Neow::Bonus::REMOVE_CARD, Neow::Drawback::TEN_PERCENT_HP_LOSS};
+    neow.gc.info.neowRewards[3] = {
+            Neow::Bonus::THREE_ENEMY_KILL, Neow::Drawback::CURSE};
+    const auto neowPublicBefore = neow.publicProjectionV3();
+    const auto neowCheckpoint = neow.captureCheckpoint();
+    const auto neowProjection = privilegedProjection(neow);
+    const auto neowActions = verifyPrivilegedCandidateParity(neow, neowProjection);
+    require(neow.publicProjectionV3().equal(neowPublicBefore),
+            "separate privileged Neow projection mutated or replaced public projection");
+    const auto neowEncodedBeforeReplay = encodePython(neowProjection);
+    (void) neow.restoreCheckpoint(neowCheckpoint);
+    require(encodePython(privilegedProjection(neow)) == neowEncodedBeforeReplay,
+            "native checkpoint replay changed the deterministic Neow semantic projection");
+    const auto neowChoices = neowProjection["candidates"].cast<pybind11::list>();
+    const auto firstNeowFeatures = neowChoices[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    const auto firstNeowChoice = firstNeowFeatures["choice"].cast<pybind11::dict>()
+            ["value"].cast<pybind11::dict>();
+    require(firstNeowChoice["bonus_effect_type"].cast<std::string>() == "obtain_100_gold"
+                    && firstNeowChoice["drawback_effect_type"].cast<std::string>() == "no_drawback",
+            "Neow option semantics do not match the native Bonus/Drawback enums");
+    const int goldBeforeNeow = neow.gc.gold;
+    auto executeNeow = neow;
+    (void) executeNeow.step(neowActions[0]);
+    require(executeNeow.gc.gold == goldBeforeNeow + 100,
+            "identified Neow candidate did not execute the associated +100 gold option");
+    result["coverage_matrix"]["EVENT_SCREEN:NEOW"] = {
+        {"status", "supported"}, {"native_candidate_count", neowActions.size()},
+        {"selection_meaning", "Bonus/Drawback enums and native source descriptions"},
+        {"candidate_order_and_checkpoint_replay", true}, {"public_api_unchanged", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "EVENT_SCREEN:NEOW"}, {"candidate_index", 0},
+        {"effect", "GameContext::chooseNeowOption obtained 100 gold"}
+    });
+
+    // Cost-bearing event options prove both the event identity and the native
+    // action's gold cost/next card-selection purpose.
+    StepSimulator beggar(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(beggar);
+    beggar.gc.screenState = ScreenState::EVENT_SCREEN;
+    beggar.gc.curEvent = Event::OLD_BEGGAR;
+    beggar.gc.gold = 200;
+    const auto beggarProjection = privilegedProjection(beggar);
+    const auto beggarActions = verifyPrivilegedCandidateParity(beggar, beggarProjection);
+    const auto payBeggarIndex = findGameCandidate(beggarActions, "event", 0);
+    const auto beggarCandidates = beggarProjection["candidates"].cast<pybind11::list>();
+    const auto beggarFeatures = beggarCandidates[payBeggarIndex].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    const auto beggarChoice = beggarFeatures["choice"].cast<pybind11::dict>()
+            ["value"].cast<pybind11::dict>();
+    require(beggarChoice["gold_cost"].cast<int>() == 75
+                    && beggarChoice["effect_type"].cast<std::string>() == "open_card_removal",
+            "Old Beggar candidate omitted native cost or selection effect semantics");
+    auto executeBeggar = beggar;
+    (void) executeBeggar.step(beggarActions[payBeggarIndex]);
+    require(executeBeggar.gc.gold == 125
+                    && executeBeggar.gc.screenState == ScreenState::CARD_SELECT
+                    && executeBeggar.gc.info.selectScreenType == CardSelectScreenType::REMOVE,
+            "identified Old Beggar candidate did not pay 75 gold and open card removal");
+    result["coverage_matrix"]["EVENT_SCREEN:OLD_BEGGAR"] = {
+        {"status", "supported"}, {"native_candidate_count", beggarActions.size()},
+        {"cost_and_next_screen", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "EVENT_SCREEN:OLD_BEGGAR"}, {"candidate_index", payBeggarIndex},
+        {"effect", "paid 75 gold and opened native CARD_SELECT:REMOVE"}
+    });
+
+    // Knowing Skull exposes native escalating HP costs and three distinct
+    // reward effects, including two future-RNG outcomes tagged unavailable.
+    StepSimulator knowingSkull(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(knowingSkull);
+    knowingSkull.gc.screenState = ScreenState::EVENT_SCREEN;
+    knowingSkull.gc.curEvent = Event::KNOWING_SKULL;
+    knowingSkull.gc.info.hpAmount0 = 2;
+    knowingSkull.gc.info.hpAmount1 = 3;
+    knowingSkull.gc.info.hpAmount2 = 4;
+    const auto skullProjection = privilegedProjection(knowingSkull);
+    const auto skullActions = verifyPrivilegedCandidateParity(knowingSkull, skullProjection);
+    require(skullActions.size() == 4,
+            "Knowing Skull fixture omitted a native option");
+    const auto skullCandidates = skullProjection["candidates"].cast<pybind11::list>();
+    const auto skullGoldChoice = skullCandidates[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>()["choice"].cast<pybind11::dict>()
+            ["value"].cast<pybind11::dict>();
+    require(skullGoldChoice["hp_cost"].cast<int>() == 2
+                    && skullGoldChoice["gold_amount"].cast<int>() == 90,
+            "Knowing Skull gold candidate omitted its native current cost or reward");
+    auto executeSkullGold = knowingSkull;
+    (void) executeSkullGold.step(skullActions[0]);
+    require(executeSkullGold.gc.curHp == knowingSkull.gc.curHp - 2
+                    && executeSkullGold.gc.gold == knowingSkull.gc.gold + 90,
+            "identified Knowing Skull gold candidate did not execute its exact native cost and reward");
+    auto executeSkullLeave = knowingSkull;
+    (void) executeSkullLeave.step(skullActions[3]);
+    require(executeSkullLeave.gc.curHp == knowingSkull.gc.curHp - 6
+                    && executeSkullLeave.gc.screenState == ScreenState::MAP_SCREEN,
+            "identified Knowing Skull leave candidate did not execute its native 6 HP cost");
+    result["coverage_matrix"]["EVENT_SCREEN:KNOWING_SKULL"] = {
+        {"status", "supported"}, {"native_candidate_count", skullActions.size()},
+        {"escalating_hp_costs_and_reward_kinds", true}, {"native_execution_witnesses", 2}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "EVENT_SCREEN:KNOWING_SKULL"}, {"candidate_index", 0},
+        {"effect", "lost the configured 2 HP and obtained the native 90 gold"}
+    });
+
+    StepSimulator reward(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(reward);
+    reward.gc.screenState = ScreenState::REWARDS;
+    reward.gc.info.rewardsContainer.clear();
+    reward.gc.info.rewardsContainer.addGold(17);
+    const auto rewardProjection = privilegedProjection(reward);
+    const auto rewardActions = verifyPrivilegedCandidateParity(reward, rewardProjection);
+    const auto goldRewardIndex = findGameCandidate(rewardActions, "reward_gold");
+    auto executeGoldReward = reward;
+    (void) executeGoldReward.step(rewardActions[goldRewardIndex]);
+    require(executeGoldReward.gc.gold == reward.gc.gold + 17,
+            "identified reward candidate did not grant its associated gold offer");
+    result["coverage_matrix"]["REWARDS"] = {
+        {"status", "supported"}, {"native_candidate_count", rewardActions.size()},
+        {"candidate_to_visible_offer", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "REWARDS"}, {"candidate_index", goldRewardIndex},
+        {"effect", "native reward action granted the associated 17 gold"}
+    });
+
+    StepSimulator map(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(map);
+    const auto mapProjection = privilegedProjection(map);
+    const auto mapActions = verifyPrivilegedCandidateParity(map, mapProjection);
+    const auto mapIndex = findGameCandidate(mapActions, "map");
+    const int expectedMapX = mapActions[mapIndex].idx1;
+    const auto mapCandidates = mapProjection["candidates"].cast<pybind11::list>();
+    const auto mapCandidate = mapCandidates[static_cast<ssize_t>(mapIndex)].cast<pybind11::dict>();
+    const auto mapFeatures = mapCandidate["features"].cast<pybind11::dict>();
+    const auto publicDestination = mapFeatures["public_destination"].cast<pybind11::dict>();
+    require(publicDestination["visibility"].cast<std::string>() == "public_now",
+            "map route omitted public destination visibility");
+    const auto publicDestinationValue = publicDestination["value"].cast<pybind11::dict>();
+    require(!publicDestinationValue.contains("underlying_room"),
+            "map oracle room leaked inside its public destination feature");
+    require(mapFeatures.contains("oracle_destination_room")
+                    && mapFeatures["oracle_destination_room"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "oracle_only",
+            "map route omitted its separately tagged oracle room fact");
+    auto executeMap = map;
+    (void) executeMap.step(mapActions[mapIndex]);
+    require(executeMap.gc.curMapNodeX == expectedMapX && executeMap.gc.curMapNodeY == 0,
+            "identified map route did not enter its associated native destination");
+    result["coverage_matrix"]["MAP_SCREEN"] = {
+        {"status", "supported"}, {"native_candidate_count", mapActions.size()},
+        {"public_and_oracle_destination_facts", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "MAP_SCREEN"}, {"candidate_index", mapIndex},
+        {"effect", "native transition entered the associated map node"}
+    });
+
+    StepSimulator boss(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(boss);
+    boss.gc.screenState = ScreenState::BOSS_RELIC_REWARDS;
+    for (int index = 0; index < 3; ++index) {
+        boss.gc.info.bossRelics[index] = boss.gc.returnRandomRelic(RelicTier::BOSS);
+    }
+    const auto bossProjection = privilegedProjection(boss);
+    const auto bossActions = verifyPrivilegedCandidateParity(boss, bossProjection);
+    const auto relicIndex = findGameCandidate(bossActions, "boss_relic", 0);
+    const auto offeredRelic = boss.gc.info.bossRelics[0];
+    auto executeBossRelic = boss;
+    (void) executeBossRelic.step(bossActions[relicIndex]);
+    require(executeBossRelic.gc.relics.has(offeredRelic),
+            "identified boss-relic candidate did not award its associated offer");
+    const auto bossSkipIndex = findGameCandidate(bossActions, "boss_relic", 3);
+    auto executeBossSkip = boss;
+    (void) executeBossSkip.step(bossActions[bossSkipIndex]);
+    require(executeBossSkip.gc.screenState == ScreenState::MAP_SCREEN,
+            "native boss-relic skip occurrence did not execute as skip");
+    result["coverage_matrix"]["BOSS_RELIC_REWARDS"] = {
+        {"status", "supported"}, {"native_candidate_count", bossActions.size()},
+        {"offered_relic_and_skip_semantics", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "BOSS_RELIC_REWARDS"}, {"candidate_index", relicIndex},
+        {"effect", "native executor awarded the relic at the associated offer slot"}
+    });
+
+    StepSimulator cardSelect(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(cardSelect);
+    cardSelect.gc.openCardSelectScreen(CardSelectScreenType::UPGRADE, 1);
+    const auto cardSelectProjection = privilegedProjection(cardSelect);
+    const auto cardSelectActions = verifyPrivilegedCandidateParity(
+            cardSelect, cardSelectProjection);
+    std::map<int, std::size_t> selectableCardCounts;
+    for (const auto &target : cardSelect.gc.info.toSelectCards) {
+        ++selectableCardCounts[static_cast<int>(target.card.getId())];
+    }
+    const bool hasSameKindCandidates = std::any_of(
+            selectableCardCounts.begin(), selectableCardCounts.end(),
+            [](const auto &entry) { return entry.second > 1; });
+    require(hasSameKindCandidates,
+            "card-select native fixture omitted duplicate same-kind card occurrences");
+    const auto selectIndex = 0U;
+    const auto cardSelectRows = cardSelectProjection["candidates"].cast<pybind11::list>();
+    const auto selectedFeatures = cardSelectRows[selectIndex].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    const int selectedDeckIndex = selectedFeatures["target_deck_index"].cast<pybind11::dict>()
+            ["value"].cast<int>();
+    auto executeCardSelect = cardSelect;
+    (void) executeCardSelect.step(cardSelectActions[selectIndex]);
+    require(selectedDeckIndex >= 0
+                    && executeCardSelect.gc.deck.cards[selectedDeckIndex].isUpgraded(),
+            "identified card-select candidate did not upgrade its exact deck occurrence");
+    result["coverage_matrix"]["CARD_SELECT"] = {
+        {"status", "supported"}, {"native_candidate_count", cardSelectActions.size()},
+        {"duplicate_same_kind_occurrences_preserved", true}, {"target_deck_index", selectedDeckIndex}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "CARD_SELECT"}, {"candidate_index", selectIndex},
+        {"effect", "native UPGRADE action changed the associated physical deck occurrence"}
+    });
+
+    StepSimulator rest(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(rest);
+    rest.gc.screenState = ScreenState::REST_ROOM;
+    const auto restProjection = privilegedProjection(rest);
+    const auto restActions = verifyPrivilegedCandidateParity(rest, restProjection);
+    const auto smithIndex = findGameCandidate(restActions, "rest", 1);
+    auto executeSmith = rest;
+    (void) executeSmith.step(restActions[smithIndex]);
+    require(executeSmith.gc.screenState == ScreenState::CARD_SELECT
+                    && executeSmith.gc.info.selectScreenType == CardSelectScreenType::UPGRADE,
+            "identified Rest Smith candidate did not open native upgrade selection");
+    const auto smithTargetProjection = privilegedProjection(executeSmith);
+    const auto smithTargetActions = verifyPrivilegedCandidateParity(
+            executeSmith, smithTargetProjection);
+    const auto smithTarget = smithTargetProjection["candidates"].cast<pybind11::list>()
+            [0].cast<pybind11::dict>()["features"].cast<pybind11::dict>()
+            ["target_deck_index"].cast<pybind11::dict>()["value"].cast<int>();
+    auto executeSmithTarget = executeSmith;
+    (void) executeSmithTarget.step(smithTargetActions[0]);
+    require(executeSmithTarget.gc.deck.cards[smithTarget].isUpgraded(),
+            "Smith target candidate did not upgrade its associated card");
+    result["coverage_matrix"]["REST_ROOM"] = {
+        {"status", "supported"}, {"native_candidate_count", restActions.size()},
+        {"smith_and_card_target", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "REST_ROOM"}, {"candidate_index", smithIndex},
+        {"effect", "native Smith opened CARD_SELECT:UPGRADE and selected target executed"}
+    });
+
+    StepSimulator shop(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(shop);
+    shop.gc.gold = 1000;
+    shop.gc.screenState = ScreenState::SHOP_ROOM;
+    shop.gc.info.shop.setup(shop.gc);
+    const auto shopProjection = privilegedProjection(shop);
+    const auto shopActions = verifyPrivilegedCandidateParity(shop, shopProjection);
+    const auto shopCardIndex = findGameCandidate(shopActions, "shop_reward_card");
+    const auto shopCardSlot = shopActions[shopCardIndex].idx1;
+    const int shopCardPrice = shop.gc.info.shop.cardPrice(shopCardSlot);
+    const int shopDeckSize = shop.gc.deck.size();
+    auto executeShopCard = shop;
+    (void) executeShopCard.step(shopActions[shopCardIndex]);
+    require(executeShopCard.gc.gold == shop.gc.gold - shopCardPrice
+                    && executeShopCard.gc.deck.size() == shopDeckSize + 1,
+            "identified shop-card candidate did not buy its associated card at its price");
+    const auto shopPotionIndex = findGameCandidate(shopActions, "shop_reward_potion");
+    const auto shopPotionSlot = shopActions[shopPotionIndex].idx1;
+    const int shopPotionPrice = shop.gc.info.shop.potionPrice(shopPotionSlot);
+    const int shopPotionCount = shop.gc.potionCount;
+    auto executeShopPotion = shop;
+    (void) executeShopPotion.step(shopActions[shopPotionIndex]);
+    require(executeShopPotion.gc.gold == shop.gc.gold - shopPotionPrice
+                    && executeShopPotion.gc.potionCount == shopPotionCount + 1,
+            "identified shop-potion candidate did not buy its associated potion at its price");
+    const auto shopRemoveIndex = findGameCandidate(shopActions, "shop_card_remove");
+    const int shopRemoveCost = shop.gc.info.shop.removeCost;
+    auto executeShopRemove = shop;
+    (void) executeShopRemove.step(shopActions[shopRemoveIndex]);
+    require(executeShopRemove.gc.gold == shop.gc.gold - shopRemoveCost
+                    && executeShopRemove.gc.screenState == ScreenState::CARD_SELECT
+                    && executeShopRemove.gc.info.selectScreenType == CardSelectScreenType::REMOVE,
+            "identified shop-removal candidate did not pay cost and open card targets");
+    const auto shopRemoveTargetProjection = privilegedProjection(executeShopRemove);
+    const auto shopRemoveTargetActions = verifyPrivilegedCandidateParity(
+            executeShopRemove, shopRemoveTargetProjection);
+    const auto removedDeckIndex = shopRemoveTargetProjection["candidates"].cast<pybind11::list>()
+            [0].cast<pybind11::dict>()["features"].cast<pybind11::dict>()
+            ["target_deck_index"].cast<pybind11::dict>()["value"].cast<int>();
+    auto executeShopRemoveTarget = executeShopRemove;
+    (void) executeShopRemoveTarget.step(shopRemoveTargetActions[0]);
+    require(executeShopRemoveTarget.gc.deck.size() == executeShopRemove.gc.deck.size() - 1,
+            "shop removal target candidate did not remove exactly one deck card");
+    result["coverage_matrix"]["SHOP_ROOM"] = {
+        {"status", "supported"}, {"native_candidate_count", shopActions.size()},
+        {"item_costs_and_card_remove_target", true}, {"removed_deck_index", removedDeckIndex}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "SHOP_ROOM"}, {"candidate_index", shopRemoveIndex},
+        {"effect", "native Shop charged the visible removal cost and the associated card target executed"}
+    });
+
+    StepSimulator treasure(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(treasure);
+    treasure.gc.screenState = ScreenState::TREASURE_ROOM;
+    treasure.gc.info.chestSize = ChestSize::MEDIUM;
+    treasure.gc.info.tier = RelicTier::RARE;
+    treasure.gc.info.haveGold = false;
+    const auto treasurePublicBefore = treasure.publicProjectionV3();
+    const auto treasureProjection = privilegedProjection(treasure);
+    const auto treasureActions = verifyPrivilegedCandidateParity(treasure, treasureProjection);
+    const auto treasureRows = treasureProjection["candidates"].cast<pybind11::list>();
+    const auto treasureFeatures = treasureRows[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    require(treasureFeatures["chest_size"].cast<pybind11::dict>()
+                    ["visibility"].cast<std::string>() == "public_now"
+                    && treasureFeatures["relic_tier"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "oracle_only"
+                    && treasureFeatures["unrevealed_loot"].cast<pybind11::dict>()
+                            ["availability"].cast<std::string>() == "unavailable",
+            "treasure projection failed to separate visible chest type and unrevealed loot");
+    StepSimulator differentHiddenTier = treasure;
+    differentHiddenTier.gc.info.tier = RelicTier::COMMON;
+    require(treasurePublicBefore.equal(differentHiddenTier.publicProjectionV3()),
+            "hidden chest relic tier leaked into normal public projection");
+    require(encodePython(treasureProjection)
+                    != encodePython(privilegedProjection(differentHiddenTier)),
+            "training oracle projection omitted its explicitly tagged hidden chest tier");
+    const auto treasureOpenIndex = findGameCandidate(treasureActions, "treasure_open");
+    auto executeTreasureOpen = treasure;
+    (void) executeTreasureOpen.step(treasureActions[treasureOpenIndex]);
+    require(executeTreasureOpen.gc.screenState == ScreenState::REWARDS,
+            "identified treasure-open candidate did not materialize the native reward screen");
+    const auto treasureLeaveIndex = findGameCandidate(treasureActions, "treasure_leave");
+    auto executeTreasureLeave = treasure;
+    (void) executeTreasureLeave.step(treasureActions[treasureLeaveIndex]);
+    require(executeTreasureLeave.gc.screenState == ScreenState::MAP_SCREEN,
+            "identified treasure-leave candidate did not leave the chest unopened");
+    result["coverage_matrix"]["TREASURE_ROOM"] = {
+        {"status", "supported"}, {"native_candidate_count", treasureActions.size()},
+        {"visible_chest_type", "MEDIUM"}, {"oracle_only_tier", "Rare"},
+        {"exact_loot_unavailable_before_open", true}, {"public_projection_hidden_state_invariant", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "TREASURE_ROOM"}, {"candidate_index", treasureOpenIndex},
+        {"effect", "opening the associated candidate materialized native REWARDS"}
+    });
+    result["execution_witnesses"].push_back({
+        {"family", "TREASURE_ROOM"}, {"candidate_index", treasureLeaveIndex},
+        {"effect", "leaving the associated candidate returned to MAP_SCREEN without opening"}
+    });
+
+    StepSimulator potions(CharacterClass::IRONCLAD, 49, 20);
+    enterNativeMapThroughNeow(potions);
+    potions.gc.obtainPotion(Potion::FRUIT_JUICE);
+    potions.gc.obtainPotion(Potion::ANCIENT_POTION);
+    const auto potionProjection = privilegedProjection(potions);
+    const auto potionActions = verifyPrivilegedCandidateParity(potions, potionProjection);
+    const auto useFruitIndex = findGameCandidate(potionActions, "game_potion_use", 0);
+    const auto discardAncientIndex = findGameCandidate(potionActions, "game_potion_discard", 1);
+    const int hpBeforeFruit = potions.gc.maxHp;
+    auto executeFruit = potions;
+    (void) executeFruit.step(potionActions[useFruitIndex]);
+    require(executeFruit.gc.maxHp == hpBeforeFruit + 5,
+            "identified Fruit Juice candidate did not increase maximum HP by its native effect");
+    auto executeAncientDiscard = potions;
+    (void) executeAncientDiscard.step(potionActions[discardAncientIndex]);
+    require(executeAncientDiscard.gc.potions[1] == Potion::EMPTY_POTION_SLOT
+                    && executeAncientDiscard.gc.potionCount == potions.gc.potionCount - 1,
+            "identified inventory discard candidate did not empty the associated potion slot");
+    result["coverage_matrix"]["GAME_POTION_USE_DISCARD"] = {
+        {"status", "supported"}, {"native_candidate_count", potionActions.size()},
+        {"use_and_discard_execution", true}
+    };
+    result["execution_witnesses"].push_back({
+        {"family", "GAME_POTION_USE_DISCARD"}, {"candidate_index", useFruitIndex},
+        {"effect", "native Fruit Juice action increased maximum HP"}
+    });
+    result["execution_witnesses"].push_back({
+        {"family", "GAME_POTION_USE_DISCARD"}, {"candidate_index", discardAncientIndex},
+        {"effect", "native inventory discard emptied the exact potion slot"}
+    });
+
+    result["coverage_status"] = "NATIVE_CHOICE_SEMANTIC_NOT_READY";
+    result["unsupported_scope"] = {
+        "COLOSSEUM remains fail-closed if forced into EVENT_SCREEN; native generation disables it and GameContext::chooseEventOption is a TODO with no distinct option effects",
+        "LAB has a single legal-action bit but its native chooser asserts that no option is valid; it is not a multi-choice family",
+        "independent native Reviewer information-boundary/provenance report is pending",
+        "per-family execution witnesses are representative rather than an execution of every event branch"
+    };
+    result["no_training_or_evaluation_ran"] = true;
+    return result;
+}
+
 }  // namespace
 
 int main(const int argc, char **argv) {
     try {
         scoped_interpreter interpreter{};
+        if (argc == 2 && std::string(argv[1]) == "--privileged-noncombat-only") {
+            std::cout << checkPrivilegedNoncombatProjection().dump() << std::endl;
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--privileged-projection-benchmark") {
+            std::cout << checkPrivilegedProjectionPerformance().dump() << std::endl;
+            return 0;
+        }
         if (argc == 2 && std::string(argv[1]) == "--smoke-bomb-only") {
             nlohmann::json smokeEvidence;
             checkSmokeBombBattleProjection(smokeEvidence);
