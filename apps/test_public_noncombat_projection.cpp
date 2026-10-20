@@ -1535,7 +1535,6 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     result["unsupported_scope"] = {
         "COLOSSEUM remains fail-closed if forced into EVENT_SCREEN; native generation disables it and GameContext::chooseEventOption is a TODO with no distinct option effects",
         "LAB has a single legal-action bit but its native chooser asserts that no option is valid; it is not a multi-choice family",
-        "independent native Reviewer information-boundary/provenance report is pending",
         "per-family execution witnesses are representative rather than an execution of every event branch"
     };
     result["no_training_or_evaluation_ran"] = true;
