@@ -749,6 +749,34 @@ void installTestMapContinuation(GameContext &gc) {
     };
 }
 
+nlohmann::json eventRngContinuationState(const GameContext &gc) {
+    const auto streamState = [](const sts::Random &stream) {
+        auto continuation = stream;
+        return nlohmann::json{
+            {"counter", stream.counter},
+            {"seed0", stream.seed0},
+            {"seed1", stream.seed1},
+            {"next_random_1000", continuation.random(1000)}
+        };
+    };
+    return {
+        {"misc", streamState(gc.miscRng)},
+        {"relic", streamState(gc.relicRng)}
+    };
+}
+
+nlohmann::json eventDeckState(const GameContext &gc) {
+    nlohmann::json state = nlohmann::json::array();
+    for (int index = 0; index < gc.deck.size(); ++index) {
+        state.push_back({
+            {"deck_index", index},
+            {"card_id", static_cast<int>(gc.deck.cards[index].getId())},
+            {"bottled", gc.deck.isCardBottled(index)}
+        });
+    }
+    return state;
+}
+
 void enterNativeMapThroughNeow(StepSimulator &simulator) {
     require(simulator.gc.screenState == ScreenState::EVENT_SCREEN
                     && simulator.gc.curEvent == Event::NEOW,
@@ -886,6 +914,120 @@ nlohmann::json checkBottledEventExclusions() {
         });
     }
 
+    StepSimulator allBottledFalling(CharacterClass::IRONCLAD, 6904, 20);
+    auto &allBottledGc = allBottledFalling.gc;
+    allBottledGc.deck = Deck{};
+    allBottledGc.deck.obtainRaw(Card(CardId::BASH));
+    allBottledGc.deck.obtainRaw(Card(CardId::ARMAMENTS));
+    allBottledGc.deck.obtainRaw(Card(CardId::INFLAME));
+    allBottledGc.deck.bottleCard(0, CardType::ATTACK);
+    allBottledGc.deck.bottleCard(1, CardType::SKILL);
+    allBottledGc.deck.bottleCard(2, CardType::POWER);
+    allBottledGc.curEvent = Event::FALLING;
+    installTestMapContinuation(allBottledGc);
+    allBottledGc.setupEvent();
+    require(allBottledGc.info.attackCardDeckIdx == -1
+                    && allBottledGc.info.skillCardDeckIdx == -1
+                    && allBottledGc.info.powerCardDeckIdx == -1,
+            "Falling selected a card when every card of each type was bottled");
+    const auto allBottledActions = allBottledFalling.legalActions();
+    require(allBottledActions.size() == 1
+                    && allBottledActions.front().kind == "event"
+                    && allBottledActions.front().idx1 == 3,
+            "Falling exposed a removal action when every candidate was bottled");
+    (void) allBottledFalling.step(allBottledActions.front());
+    require(allBottledGc.deck.size() == 3
+                    && allBottledGc.deck.isCardBottled(0)
+                    && allBottledGc.deck.isCardBottled(1)
+                    && allBottledGc.deck.isCardBottled(2),
+            "leaving all-bottled Falling changed the deck or a bottle attachment");
+    evidence.push_back({
+        {"family", "FALLING"}, {"all_types_ineligible", true},
+        {"attack_selected_deck_index", -1}, {"skill_selected_deck_index", -1},
+        {"power_selected_deck_index", -1}, {"native_legal_action_count", 1},
+        {"only_leave_option_exposed", true}, {"all_bottled_cards_preserved", true}
+    });
+
+    StepSimulator fallingReplay(CharacterClass::IRONCLAD, 6905, 20);
+    auto &fallingReplayGc = fallingReplay.gc;
+    fallingReplayGc.deck = Deck{};
+    fallingReplayGc.deck.obtainRaw(Card(CardId::BASH));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::ARMAMENTS));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::INFLAME));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::ANGER));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::POMMEL_STRIKE));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::BURNING_PACT));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::SHRUG_IT_OFF));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::BARRICADE));
+    fallingReplayGc.deck.obtainRaw(Card(CardId::DARK_EMBRACE));
+    fallingReplayGc.deck.bottleCard(0, CardType::ATTACK);
+    fallingReplayGc.deck.bottleCard(1, CardType::SKILL);
+    fallingReplayGc.deck.bottleCard(2, CardType::POWER);
+    fallingReplayGc.curEvent = Event::FALLING;
+    installTestMapContinuation(fallingReplayGc);
+    const auto fallingCheckpoint = fallingReplay.captureCheckpoint();
+    auto runFallingReplay = [&]() {
+        fallingReplayGc.setupEvent();
+        const std::array<int, 3> selectedDeckIndices = {
+            fallingReplayGc.info.attackCardDeckIdx,
+            fallingReplayGc.info.skillCardDeckIdx,
+            fallingReplayGc.info.powerCardDeckIdx
+        };
+        const std::array<CardType, 3> expectedTypes = {
+            CardType::ATTACK, CardType::SKILL, CardType::POWER
+        };
+        nlohmann::json selectedCards = nlohmann::json::array();
+        for (std::size_t index = 0; index < selectedDeckIndices.size(); ++index) {
+            const int deckIndex = selectedDeckIndices[index];
+            require(deckIndex >= 3 && deckIndex < fallingReplayGc.deck.size()
+                            && !fallingReplayGc.deck.isCardBottled(deckIndex)
+                            && fallingReplayGc.deck.cards[deckIndex].getType() == expectedTypes[index],
+                    "Falling replay selected a bottled, missing, or wrong-type card");
+            selectedCards.push_back({
+                {"deck_index", deckIndex},
+                {"card_id", static_cast<int>(fallingReplayGc.deck.cards[deckIndex].getId())}
+            });
+        }
+        const auto setupRng = eventRngContinuationState(fallingReplayGc);
+        const auto actions = fallingReplay.legalActions();
+        const auto selectedAttackId = fallingReplayGc.deck.cards[selectedDeckIndices[0]].getId();
+        const auto attackActionIndex = findGameCandidate(actions, "event", 2);
+        (void) fallingReplay.step(actions[attackActionIndex]);
+        require(fallingReplayGc.screenState == ScreenState::MAP_SCREEN
+                        && fallingReplayGc.deck.size() == 8
+                        && std::none_of(fallingReplayGc.deck.cards.begin(),
+                                fallingReplayGc.deck.cards.begin() + fallingReplayGc.deck.size(),
+                                [&](const Card &card) { return card.getId() == selectedAttackId; }),
+                "Falling replay did not execute exactly the selected attack removal");
+        for (const auto bottledId : {CardId::BASH, CardId::ARMAMENTS, CardId::INFLAME}) {
+            bool preserved = false;
+            for (int index = 0; index < fallingReplayGc.deck.size(); ++index) {
+                if (fallingReplayGc.deck.cards[index].getId() == bottledId
+                        && fallingReplayGc.deck.isCardBottled(index)) {
+                    preserved = true;
+                    break;
+                }
+            }
+            require(preserved, "Falling replay did not preserve a bottle attachment");
+        }
+        return nlohmann::json{
+            {"selected_cards_by_type", selectedCards},
+            {"setup_rng", setupRng},
+            {"executed_event_action", actions[attackActionIndex].idx1},
+            {"post_action_deck", eventDeckState(fallingReplayGc)},
+            {"continuation_rng", eventRngContinuationState(fallingReplayGc)}
+        };
+    };
+    const auto firstFallingReplay = runFallingReplay();
+    (void) fallingReplay.restoreCheckpoint(fallingCheckpoint);
+    const auto secondFallingReplay = runFallingReplay();
+    require(firstFallingReplay == secondFallingReplay,
+            "Falling setup/choice checkpoint replay changed card selection, bottle state, or RNG continuation");
+    evidence.push_back({
+        {"family", "FALLING"}, {"checkpoint_replay", true},
+        {"checkpoint_stage", "before_setupEvent"}, {"replay", firstFallingReplay}
+    });
+
     // A duplicated card is a single visible identity in this event.  When
     // its first copy is bottled, index normalization must choose the first
     // eligible copy rather than mapping back to the bottled one.
@@ -939,6 +1081,55 @@ nlohmann::json checkBottledEventExclusions() {
         {"unbottled_basic_deck_index", 1}, {"selected_deck_index", -1},
         {"card_trade_option_exposed", false}
     });
+
+    StepSimulator meetAgainReplay(CharacterClass::IRONCLAD, 6906, 20);
+    auto &meetAgainReplayGc = meetAgainReplay.gc;
+    meetAgainReplayGc.deck = Deck{};
+    meetAgainReplayGc.deck.obtainRaw(Card(CardId::ANGER));
+    meetAgainReplayGc.deck.obtainRaw(Card(CardId::ANGER));
+    meetAgainReplayGc.deck.bottleCard(0, CardType::ATTACK);
+    meetAgainReplayGc.obtainPotion(Potion::FRUIT_JUICE);
+    meetAgainReplayGc.gold = 100;
+    meetAgainReplayGc.curEvent = Event::WE_MEET_AGAIN;
+    installTestMapContinuation(meetAgainReplayGc);
+    const auto meetAgainCheckpoint = meetAgainReplay.captureCheckpoint();
+    const int initialRelicCount = meetAgainReplayGc.relics.size();
+    auto runMeetAgainReplay = [&]() {
+        meetAgainReplayGc.setupEvent();
+        require(meetAgainReplayGc.info.cardIdx == 1
+                        && !meetAgainReplayGc.deck.isCardBottled(meetAgainReplayGc.info.cardIdx),
+                "We Meet Again replay did not select the eligible unbottled duplicate");
+        const auto selectedDeckIndex = meetAgainReplayGc.info.cardIdx;
+        const auto selectedCardId = meetAgainReplayGc.deck.cards[selectedDeckIndex].getId();
+        const auto setupRng = eventRngContinuationState(meetAgainReplayGc);
+        const auto actions = meetAgainReplay.legalActions();
+        const auto tradeActionIndex = findGameCandidate(actions, "event", 2);
+        (void) meetAgainReplay.step(actions[tradeActionIndex]);
+        require(meetAgainReplayGc.screenState == ScreenState::MAP_SCREEN
+                        && meetAgainReplayGc.deck.size() == 1
+                        && meetAgainReplayGc.deck.cards[0].getId() == CardId::ANGER
+                        && meetAgainReplayGc.deck.isCardBottled(0)
+                        && meetAgainReplayGc.relics.size() == initialRelicCount + 1,
+                "We Meet Again replay did not trade the selected duplicate while preserving its bottle");
+        return nlohmann::json{
+            {"selected_deck_index", selectedDeckIndex},
+            {"selected_card_id", static_cast<int>(selectedCardId)},
+            {"setup_rng", setupRng},
+            {"executed_event_action", actions[tradeActionIndex].idx1},
+            {"post_action_deck", eventDeckState(meetAgainReplayGc)},
+            {"post_action_relic_count", meetAgainReplayGc.relics.size()},
+            {"continuation_rng", eventRngContinuationState(meetAgainReplayGc)}
+        };
+    };
+    const auto firstMeetAgainReplay = runMeetAgainReplay();
+    (void) meetAgainReplay.restoreCheckpoint(meetAgainCheckpoint);
+    const auto secondMeetAgainReplay = runMeetAgainReplay();
+    require(firstMeetAgainReplay == secondMeetAgainReplay,
+            "We Meet Again setup/choice checkpoint replay changed selection, bottle state, or RNG continuation");
+    evidence.push_back({
+        {"family", "WE_MEET_AGAIN"}, {"checkpoint_replay", true},
+        {"checkpoint_stage", "before_setupEvent"}, {"replay", firstMeetAgainReplay}
+    });
     return evidence;
 }
 
@@ -953,12 +1144,12 @@ nlohmann::json checkRequiredEventMechanics() {
     evidence["coverage_matrix"]["EVENT_SCREEN:FALLING_BOTTLED_CARD_EXCLUSION"] = {
         {"status", "supported"},
         {"classification", "REQUIRED_REPAIR_COMPLETED"},
-        {"native_witness_count", 3}
+        {"native_witness_count", 5}
     };
     evidence["coverage_matrix"]["EVENT_SCREEN:WE_MEET_AGAIN_BOTTLED_CARD_EXCLUSION"] = {
         {"status", "supported"},
         {"classification", "REQUIRED_REPAIR_COMPLETED"},
-        {"native_witness_count", 2}
+        {"native_witness_count", 3}
     };
     for (const auto &witness : bottledEventWitnesses) {
         evidence["execution_witnesses"].push_back(witness);
@@ -1494,9 +1685,9 @@ nlohmann::json checkRequiredEventMechanics() {
         {"eligibility", "reachable Act 3 event; samples one eligible attack, skill, and power independently when present"},
         {"native_legal_choices", "remove one selected unbottled attack, skill, or power, or leave"},
         {"post_action_or_terminal_effect", "focused native fixture executes each type's selected removal and preserves the bottled card"},
-        {"rng_save_restore", "selection remains on the native miscRng path; no separate RNG checkpoint claim is made"},
+        {"rng_save_restore", "before-setup checkpoint replay reselects the same attack/skill/power candidates, preserves bottle attachments after removal, and reproduces misc/relic RNG state plus next draws"},
         {"severity", "scoped native repair completed; live-game parity trace remains unverified"},
-        {"evidence", "native attack/skill/power fixtures select the sole unbottled card and execute the associated event action; the bottled card remains in the deck"},
+        {"evidence", "native attack/skill/power fixtures execute selected removals; all-bottled fixture exposes only leave; before-setup checkpoint replay reproduces candidate indices, deck/bottle state and RNG continuation"},
         {"classification", "REQUIRED_REPAIR_COMPLETED"}
     });
     evidence["mechanism_inventory"].push_back({
@@ -1506,9 +1697,9 @@ nlohmann::json checkRequiredEventMechanics() {
         {"eligibility", "one-time event can be inserted by the native one-time-event path at A20"},
         {"native_legal_choices", "trade a potion, gold or an unbottled nonbasic noncurse card for a relic, or decline"},
         {"post_action_or_terminal_effect", "native duplicate-card fixture trades the eligible second copy while preserving the bottled first copy; no eligible card omits the card option"},
-        {"rng_save_restore", "card/potion choices are selected at setup and relic tier/identity uses native RNG; this fixture does not claim checkpoint replay"},
+        {"rng_save_restore", "before-setup checkpoint replay reproduces the unbottled duplicate selection, post-trade deck/bottle state, relic count, misc/relic RNG state and next draws"},
         {"severity", "scoped native repair completed; live-game parity trace remains unverified"},
-        {"evidence", "native fixtures verify bottled duplicate index normalization, executed removal of the unbottled copy, and absence of a card trade when only bottled nonbasic cards are present"},
+        {"evidence", "native fixtures verify bottled duplicate index normalization, executed removal of the unbottled copy, absence of a card trade when only bottled nonbasic cards are present, and exact before-setup checkpoint replay"},
         {"classification", "REQUIRED_REPAIR_COMPLETED"}
     });
     evidence["mechanism_inventory"].push_back({
