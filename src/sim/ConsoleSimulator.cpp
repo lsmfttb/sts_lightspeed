@@ -897,18 +897,37 @@ void ConsoleSimulator::printEventActions(std::ostream &os) const {
             os << "1: [Fight!]\n";
             break;
 
-        case Event::MATCH_AND_KEEP: { // Match and Keep toSelectCards will store knownCards - actualCards
+        case Event::MATCH_AND_KEEP: { // Card slots record Match and Keep reveal state.
             int attemptsRemaining = gc->info.eventData;
-            os << "Select two: (attempts remaining " << attemptsRemaining <<")\n";
+            const auto firstPickState = static_cast<std::int16_t>(
+                    MatchAndKeepCardState::FIRST_PICK_REVEALED);
+            int firstPickIndex = -1;
+            for (int i = 0; i < static_cast<int>(gc->info.toSelectCards.size()); ++i) {
+                if (gc->info.toSelectCards[i].deckIdx == firstPickState) {
+                    firstPickIndex = i;
+                    break;
+                }
+            }
+            if (firstPickIndex == -1) {
+                os << "Select first card: ";
+            } else {
+                os << "Select second card (first card " << firstPickIndex << "): ";
+            }
+            os << "(attempts remaining " << attemptsRemaining << ")\n";
 
             for (int i = 0; i < gc->info.toSelectCards.size(); ++i) {
                 const auto &c = gc->info.toSelectCards[i];
-                if (c.deckIdx == 0) {
+                if (c.deckIdx == static_cast<std::int16_t>(
+                        MatchAndKeepCardState::MATCHED_HIDDEN)) {
                     continue;
-                } else if (c.deckIdx == 1) {
+                } else if (c.deckIdx == static_cast<std::int16_t>(
+                        MatchAndKeepCardState::REVEALED_MISMATCH)
+                        || c.deckIdx == firstPickState) {
                     os << i << ": " << c.card.getName() << "\n";
                 } else {
-                    os << i << ": -Unknown- " << c.card.getName() << "\n";
+                    // Face-down cards must remain hidden in the normal console
+                    // interface, including from their native card object.
+                    os << i << ": -Unknown-\n";
                 }
             }
             break;
@@ -1121,9 +1140,7 @@ void ConsoleSimulator::printEventActions(std::ostream &os) const {
 void ConsoleSimulator::takeEventAction(const std::string &action) {
 
     if (gc->curEvent == Event::MATCH_AND_KEEP) {
-        int idx1 = std::stoi(action.substr(0, action.find(' ')));
-        int idx2 = std::stoi(action.substr(action.find(' ')+1));
-        gc->chooseMatchAndKeepCards(idx1, idx2);
+        gc->chooseMatchAndKeepCard(std::stoi(action));
 
     } else {
         int idx = std::stoi(action);

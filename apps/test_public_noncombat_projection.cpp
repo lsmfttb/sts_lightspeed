@@ -835,6 +835,648 @@ nlohmann::json checkPrivilegedProjectionPerformance() {
     };
 }
 
+nlohmann::json checkRequiredEventMechanics() {
+    nlohmann::json evidence = {
+        {"coverage_matrix", nlohmann::json::object()},
+        {"execution_witnesses", nlohmann::json::array()},
+        {"mechanism_inventory", nlohmann::json::array()}
+    };
+
+    StepSimulator restrictedShard(CharacterClass::IRONCLAD, 49, 20);
+    const PrivilegedNoncombatProjectionAccess shardAccess(
+            restrictedShard, "training_oracle_only");
+    const auto noShardQualification = shardAccess.trainingPopulationQualificationV1();
+    require(noShardQualification["schema_id"].cast<std::string>()
+                    == "native-training-population-qualification-v1"
+                    && noShardQualification["native_source_commit"].cast<std::string>()
+                            == STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
+                    && noShardQualification["restriction"].cast<std::string>()
+                            == "PRISMATIC_SHARD_DISABLED / CROSS_CLASS_CARDS_OUT_OF_SCOPE"
+                    && noShardQualification["disable_prismatic_shard"].cast<bool>()
+                    && !noShardQualification["prismatic_shard_present"].cast<bool>()
+                    && noShardQualification["eligible_for_restricted_no_shard_population"].cast<bool>(),
+            "source-bound no-Shard training restriction is missing or ineligible at baseline");
+    require(noShardQualification["real_game_trace_status"].cast<std::string>()
+                    == "REAL_GAME_TRACE_NOT_VERIFIED"
+                    && noShardQualification["live_game_parity_status"].cast<std::string>()
+                            == "LIVE_PARITY_NOT_VERIFIED"
+                    && !noShardQualification["training_authorized_by_this_api"].cast<bool>(),
+            "restricted training marker implied a live parity result or training authorization");
+
+    restrictedShard.gc.obtainRelic(RelicId::PRISMATIC_SHARD);
+    const auto shardExposureQualification = shardAccess.trainingPopulationQualificationV1();
+    require(shardExposureQualification["prismatic_shard_present"].cast<bool>()
+                    && !shardExposureQualification["eligible_for_restricted_no_shard_population"].cast<bool>()
+                    && shardExposureQualification["status"].cast<std::string>()
+                            == "PRISMATIC_SHARD_EXPOSURE_REJECTED"
+                    && shardExposureQualification["on_shard_exposure"].cast<std::string>()
+                            == "STOP_OR_APPLY_PREDECLARED_EXCLUSION_CENSORING",
+            "Prismatic Shard exposure did not fail closed for the restricted training population");
+
+    StepSimulator shardCardPool(CharacterClass::IRONCLAD, 73, 20);
+    shardCardPool.gc.obtainRelic(RelicId::PRISMATIC_SHARD);
+    const auto shardCardReward = shardCardPool.gc.createCardReward(Room::EVENT);
+    std::vector<int> shardRewardColors;
+    for (const auto &card : shardCardReward) {
+        const auto color = getCardColor(card.id);
+        shardRewardColors.push_back(static_cast<int>(color));
+        require(color == CardColor::RED,
+                "disabled Prismatic Shard card reward left the Ironclad-only reward pool");
+    }
+    require(!shardRewardColors.empty(),
+            "Prismatic Shard staging-effect probe produced no card reward");
+    evidence["coverage_matrix"]["PRISMATIC_SHARD"] = {
+        {"status", "RESTRICTED_TRAINING_EXCEPTION"},
+        {"cross_class_card_behavior_disabled", GameContext::disablePrismaticShard},
+        {"card_pool_source", "GameContext::createCardReward uses getRandomClassCardOfRarity while disabled"},
+        {"shard_exposure_status", shardExposureQualification["status"].cast<std::string>()},
+        {"exposure_policy", shardExposureQualification["on_shard_exposure"].cast<std::string>()},
+        {"observed_ironclad_reward_colors_with_shard_present", shardRewardColors},
+        {"eligibility", "Prismatic Shard remains obtainable from the standard relic population"},
+        {"native_legal_choices", "relic choice remains a normal relic reward; no cross-class card-pool action is exposed"},
+        {"post_action_effect", "holding Shard does not broaden Ironclad card rewards in the staged simulator"},
+        {"rng_save_restore", "qualification marker is source-bound; no Shard-specific RNG or checkpoint witness is claimed"},
+        {"severity", "restricted training exception; unrestricted real-game population is blocked"},
+        {"evidence", "native Shard-present card-reward probe returned only Ironclad RED cards; exact source marker rejects observed Shard exposure"},
+        {"unrestricted_real_game_qualification", "BLOCKED_UNTIL_PRISMATIC_SHARD_RESTORATION"},
+        {"real_game_trace_status", "REAL_GAME_TRACE_NOT_VERIFIED"},
+        {"live_game_parity_status", "LIVE_PARITY_NOT_VERIFIED"}
+    };
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "PRISMATIC_SHARD"},
+        {"reachability", "relic is obtainable in the standard relic population"},
+        {"native_switch_or_todo", "GameContext::disablePrismaticShard in createCardReward"},
+        {"effect", "held relic does not enable cross-class card rewards"},
+        {"classification", "RESTRICTED_TRAINING_EXCEPTION"},
+        {"eligibility", "standard relic reward population; mechanic is restricted by project stage policy, not hidden from generation"},
+        {"native_legal_choices", "normal relic acquisition remains legal; cross-class reward identities stay Ironclad-only"},
+        {"post_action_or_terminal_effect", "training qualification fails closed on Shard exposure; no censoring is performed here"},
+        {"rng_save_restore", "card reward pool behavior was sampled, not claimed as a cross-version RNG parity proof"},
+        {"severity", "restricted training exception; full real-game qualification remains blocked"},
+        {"evidence", "GameContext::disablePrismaticShard and exact-source trainingPopulationQualificationV1 marker"}
+    });
+
+    StepSimulator colosseum(CharacterClass::IRONCLAD, 49, 20);
+    auto &colosseumGc = colosseum.gc;
+    colosseumGc.act = 2;
+    colosseumGc.curMapNodeX = 3;
+    colosseumGc.curMapNodeY = 8;
+    *colosseumGc.map = Map::fromSeed(colosseumGc.seed, colosseumGc.ascension, 2, true);
+    colosseumGc.eventList = {Event::COLOSSEUM};
+    colosseumGc.shrineList = {Event::ANCIENT_WRITING};
+    colosseumGc.potionChance = 100;
+    const bool colosseumCanBeAdded = colosseumGc.canAddEvent(Event::COLOSSEUM);
+    const Event selectedEvent = colosseumGc.getEvent(colosseumGc.eventRng);
+    require(colosseumCanBeAdded && selectedEvent == Event::COLOSSEUM
+                    && !GameContext::disableColosseum,
+            "Act 2 Colosseum was not eligible through the native event pool");
+    colosseumGc.curRoom = Room::EVENT;
+    colosseumGc.curEvent = selectedEvent;
+    colosseumGc.info.rewardsContainer.clear();
+    installTestMapContinuation(colosseumGc);
+    colosseumGc.setupEvent();
+    require(colosseumGc.screenState == ScreenState::BATTLE
+                    && colosseumGc.info.encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS
+                    && colosseumGc.info.eventData == 0,
+            "Colosseum setup did not start the native Slavers encounter");
+    GameContext expectedColosseumHiddenRoll = colosseumGc;
+    Rewards expectedColosseumHiddenPotion;
+    expectedColosseumHiddenRoll.addPotionRewards(expectedColosseumHiddenPotion);
+    require(expectedColosseumHiddenPotion.potionCount == 1,
+            "Colosseum first-fight hidden-roll fixture did not guarantee a potion drop");
+    (void) colosseum.legalActions(); // initialize the real BattleContext for this encounter
+    colosseum.bc.outcome = Outcome::PLAYER_VICTORY;
+    colosseum.bc.exitBattle(colosseumGc); // native battle-end and event continuation
+    require(colosseumGc.screenState == ScreenState::EVENT_SCREEN
+                    && colosseumGc.info.eventData == 1
+                    && colosseumGc.info.rewardsContainer.getTotalCount() == 0,
+            "first Colosseum victory did not expose leave/challenge without ordinary loot");
+    require(colosseumGc.potionChance == expectedColosseumHiddenRoll.potionChance
+                    && colosseumGc.potionRng.counter
+                            == expectedColosseumHiddenRoll.potionRng.counter,
+            "first Colosseum victory did not consume the hidden potion roll");
+    const auto colosseumPhaseOneProjection = privilegedProjection(colosseum);
+    const auto colosseumChoices = verifyPrivilegedCandidateParity(
+            colosseum, colosseumPhaseOneProjection);
+    require(colosseumChoices.size() == 2
+                    && colosseumPhaseOneProjection["coverage_status"].cast<std::string>() == "supported",
+            "Colosseum leave/challenge projection did not cover its native legal choices");
+    const auto colosseumCandidateRows = colosseumPhaseOneProjection["candidates"]
+            .cast<pybind11::list>();
+    const auto leaveFeatures = colosseumCandidateRows[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    const auto challengeFeatures = colosseumCandidateRows[1].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    require(leaveFeatures["choice"].cast<pybind11::dict>()["value"].cast<pybind11::dict>()
+                    ["effect_type"].cast<std::string>() == "return_to_map_without_event_reward"
+                    && challengeFeatures["choice"].cast<pybind11::dict>()["value"].cast<pybind11::dict>()
+                            ["effect_type"].cast<std::string>() == "enter_COLOSSEUM_EVENT_NOBS",
+            "Colosseum projection did not describe its distinct leave and challenge effects");
+    const auto phaseOneCheckpoint = colosseum.captureCheckpoint();
+    const int goldBeforeLeave = colosseumGc.gold;
+    const auto leaveIndex = findGameCandidate(colosseumChoices, "event", 0);
+    (void) colosseum.step(colosseumChoices[leaveIndex]);
+    require(colosseumGc.screenState == ScreenState::MAP_SCREEN
+                    && colosseumGc.gold == goldBeforeLeave
+                    && colosseumGc.info.rewardsContainer.getTotalCount() == 0,
+            "leaving Colosseum after the Slavers did not return without rewards");
+    (void) colosseum.restoreCheckpoint(phaseOneCheckpoint);
+
+    auto executeSecondFightAndSummarize = [&]() {
+        const auto choices = colosseum.legalActions();
+        const auto challengeIndex = findGameCandidate(choices, "event", 1);
+        (void) colosseum.step(choices[challengeIndex]);
+        require(colosseumGc.screenState == ScreenState::BATTLE
+                        && colosseumGc.info.encounter == MonsterEncounter::COLOSSEUM_EVENT_NOBS
+                        && colosseumGc.info.eventData == 2,
+                "Colosseum challenge did not enter the native Taskmaster/Nob fight");
+        (void) colosseum.legalActions();
+        colosseumGc.afterBattle();
+        require(colosseumGc.screenState == ScreenState::REWARDS,
+                "second Colosseum victory did not enter its reward screen");
+        const auto &reward = colosseumGc.info.rewardsContainer;
+        require(reward.goldRewardCount == 1 && reward.gold[0] == 100
+                        && reward.relicCount == 2
+                        && getRelicTier(reward.relics[0]) == RelicTier::UNCOMMON
+                        && getRelicTier(reward.relics[1]) == RelicTier::RARE
+                        && reward.cardRewardCount == 1
+                        && reward.cardRewards[0].size() > 0,
+                "second Colosseum victory did not produce its event-specific rewards");
+        nlohmann::json summary = {
+            {"gold", reward.gold[0]},
+            {"relics", {static_cast<int>(reward.relics[0]), static_cast<int>(reward.relics[1])}},
+            {"card_reward", nlohmann::json::array()},
+            {"potion_count", reward.potionCount},
+            {"potion_chance", colosseumGc.potionChance},
+            {"relic_rng_counter", colosseumGc.relicRng.counter},
+            {"card_rng_counter", colosseumGc.cardRng.counter},
+            {"potion_rng_counter", colosseumGc.potionRng.counter},
+            {"misc_rng_counter", colosseumGc.miscRng.counter}
+        };
+        for (const auto &card : reward.cardRewards[0]) {
+            summary["card_reward"].push_back(static_cast<int>(card.id));
+        }
+        return summary;
+    };
+    const auto firstRewardReplay = executeSecondFightAndSummarize();
+    (void) colosseum.restoreCheckpoint(phaseOneCheckpoint);
+    const auto secondRewardReplay = executeSecondFightAndSummarize();
+    require(firstRewardReplay == secondRewardReplay,
+            "Colosseum checkpoint replay changed its reward or RNG transition");
+    evidence["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"] = {
+        {"status", "supported"},
+        {"reachability_classification", "actual_reachable_act2_event"},
+        {"native_switch_disabled", GameContext::disableColosseum},
+        {"can_add_at_event_floor", colosseumCanBeAdded},
+        {"opening_encounter", "COLOSSEUM_EVENT_SLAVERS"},
+        {"post_victory_native_choices", 2},
+        {"first_fight_ordinary_rewards", false},
+        {"second_encounter", "COLOSSEUM_EVENT_NOBS"},
+        {"first_fight_smoke_bomb_continues_event", true},
+        {"first_fight_hidden_potion_roll_consumed_but_not_shown", true},
+        {"second_reward_replay", firstRewardReplay},
+        {"checkpoint_replay_exact", true},
+        {"real_game_trace_status", "REAL_GAME_TRACE_NOT_VERIFIED"}
+    };
+    evidence["execution_witnesses"].push_back({
+        {"family", "EVENT_SCREEN:COLOSSEUM"},
+        {"effect", "native pool eligibility, first fight continuation, distinct leave/challenge actions, second fight, and fixed event rewards"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "COLOSSEUM"},
+        {"reachability", "Act 2 event after floor 7"},
+        {"native_switch_or_todo", "GameContext::disableColosseum and chooseEventOption"},
+        {"effect", "two encounter event, first victory no reward, leave or challenge"},
+        {"classification", "REQUIRED_REPAIR_COMPLETED"},
+        {"eligibility", "native Act 2 event pool after floor 7; no A20 exclusion"},
+        {"native_legal_choices", "post-Slavers EVENT_SCREEN exposes leave and challenge; challenge enters Taskmaster/Nob"},
+        {"post_action_or_terminal_effect", "first victory or Smoke Bomb reaches event choice with hidden potion RNG roll and no ordinary loot; second victory awards fixed event rewards"},
+        {"rng_save_restore", "first-fight potion RNG/pity is advanced; second-fight relic/card/gold/potion reward replay matches checkpoint"},
+        {"severity", "P0 required mechanism repaired; live-game parity trace remains unverified"},
+        {"evidence", "Act 2 pool setup, native battle exit, first-fight victory/Smoke Bomb regressions, leave/challenge, second-reward checkpoint replay"}
+    });
+
+    StepSimulator matchAndKeep(CharacterClass::IRONCLAD, 49, 20);
+    auto &matchGc = matchAndKeep.gc;
+    matchGc.act = 1;
+    matchGc.curMapNodeX = 3;
+    matchGc.curMapNodeY = 1;
+    matchGc.shrineList = {Event::MATCH_AND_KEEP};
+    matchGc.specialOneTimeEventList.clear();
+    const Event selectedShrine = matchGc.getShrine(matchGc.eventRng);
+    require(selectedShrine == Event::MATCH_AND_KEEP
+                    && !GameContext::disableMatchAndKeep,
+            "Match and Keep was not reachable through the native shrine pool");
+    matchGc.curRoom = Room::EVENT;
+    matchGc.curEvent = selectedShrine;
+    installTestMapContinuation(matchGc);
+    matchGc.setupEvent();
+    require(matchGc.screenState == ScreenState::EVENT_SCREEN
+                    && matchGc.info.eventData == 5
+                    && matchGc.info.toSelectCards.size() == 12,
+            "Match and Keep setup did not initialize its native 12-card, five-attempt board");
+    const int startingDeckSize = matchGc.deck.size();
+    const auto firstPickActions = matchAndKeep.legalActions();
+    require(firstPickActions.size() == 12,
+            "Match and Keep did not enumerate one first-pick action per concealed card");
+    require(!search::GameAction(0, 1).isValidAction(matchGc)
+                    && !search::GameAction(12).isValidAction(matchGc),
+            "Match and Keep accepted a pair action or an out-of-range first pick");
+
+    const auto publicBeforeHiddenMutation = matchAndKeep.publicProjectionV3();
+    const auto hiddenSlot = firstPickActions.front().idx1;
+    const auto originalHiddenCard = matchGc.info.toSelectCards[hiddenSlot].card;
+    const auto alternateCard = originalHiddenCard.id == CardId::BASH
+            ? Card(CardId::IRON_WAVE) : Card(CardId::BASH);
+    matchGc.info.toSelectCards[hiddenSlot].card = alternateCard;
+    const auto publicAfterHiddenMutation = matchAndKeep.publicProjectionV3();
+    require(publicBeforeHiddenMutation.equal(publicAfterHiddenMutation),
+            "normal-public Match and Keep projection changed when a hidden card identity changed");
+    matchGc.info.toSelectCards[hiddenSlot].card = originalHiddenCard;
+    const auto matchPublicPayload = screenPayload(publicBeforeHiddenMutation);
+    require(matchPublicPayload["coverage_status"].cast<std::string>() == "supported"
+                    && matchPublicPayload["phase"].cast<std::string>() == "select_first_card"
+                    && matchPublicPayload["choices"].cast<pybind11::list>().size() == 12,
+            "normal-public Match and Keep payload does not describe first-card choices");
+    const auto publicSlots = matchPublicPayload["cards"].cast<pybind11::list>();
+    require(publicSlots.size() == 12
+                    && !publicSlots[hiddenSlot].cast<pybind11::dict>().contains("card"),
+            "normal-public Match and Keep exposed a face-down card identity");
+
+    const auto matchProjection = privilegedProjection(matchAndKeep);
+    const auto checkedFirstPickActions = verifyPrivilegedCandidateParity(
+            matchAndKeep, matchProjection);
+    require(checkedFirstPickActions.size() == 12,
+            "privileged Match and Keep projection did not preserve first-pick candidates");
+    const auto firstCandidateRows = matchProjection["candidates"].cast<pybind11::list>();
+    const auto firstCandidateFeatures = firstCandidateRows[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    require(firstCandidateFeatures["choice"].cast<pybind11::dict>()
+                            ["value"].cast<pybind11::dict>()
+                            ["choice_type"].cast<std::string>() == "reveal_first_card"
+                    && firstCandidateFeatures["revealed_card_identity"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "oracle_only",
+            "privileged first-pick projection did not label the card reveal as an oracle-only transition outcome");
+    std::size_t mismatchFirstActionIndex = checkedFirstPickActions.size();
+    int mismatchSecondIndex = -1;
+    for (std::size_t firstActionIndex = 0;
+            firstActionIndex < checkedFirstPickActions.size(); ++firstActionIndex) {
+        const int firstIndex = checkedFirstPickActions[firstActionIndex].idx1;
+        for (const auto &secondAction : checkedFirstPickActions) {
+            const int secondIndex = secondAction.idx1;
+            if (firstIndex != secondIndex
+                    && matchGc.info.toSelectCards[firstIndex].card.id
+                            != matchGc.info.toSelectCards[secondIndex].card.id) {
+                mismatchFirstActionIndex = firstActionIndex;
+                mismatchSecondIndex = secondIndex;
+                break;
+            }
+        }
+        if (mismatchFirstActionIndex != checkedFirstPickActions.size()) {
+            break;
+        }
+    }
+    require(mismatchFirstActionIndex < checkedFirstPickActions.size(),
+            "Match and Keep fixture has no mismatching two-step selection");
+    const int mismatchFirstIndex = checkedFirstPickActions[mismatchFirstActionIndex].idx1;
+    (void) matchAndKeep.step(checkedFirstPickActions[mismatchFirstActionIndex]);
+    const auto intermediatePublicProjection = matchAndKeep.publicProjectionV3();
+    const auto intermediatePublicPayload = screenPayload(intermediatePublicProjection);
+    const auto intermediateCards = intermediatePublicPayload["cards"].cast<pybind11::list>();
+    require(matchGc.info.eventData == 5
+                    && matchGc.info.toSelectCards[mismatchFirstIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::FIRST_PICK_REVEALED)
+                    && matchGc.deck.size() == startingDeckSize
+                    && intermediatePublicPayload["phase"].cast<std::string>() == "select_second_card"
+                    && intermediatePublicPayload["first_card_index"].cast<int>() == mismatchFirstIndex
+                    && intermediateCards[mismatchFirstIndex].cast<pybind11::dict>()
+                            ["state"].cast<std::string>() == "first_pick_revealed"
+                    && intermediateCards[mismatchFirstIndex].cast<pybind11::dict>().contains("card")
+                    && intermediateCards[mismatchFirstIndex].cast<pybind11::dict>()
+                            ["card"].cast<pybind11::dict>()["id"].cast<int>()
+                            == static_cast<int>(matchGc.info.toSelectCards[mismatchFirstIndex].card.getId())
+                    && intermediateCards[mismatchSecondIndex].cast<pybind11::dict>()
+                            ["state"].cast<std::string>() == "face_down"
+                    && !intermediateCards[mismatchSecondIndex].cast<pybind11::dict>().contains("card"),
+            "first Match and Keep selection did not reveal only its own card before the second choice");
+    const auto secondPickActions = matchAndKeep.legalActions();
+    require(secondPickActions.size() == 11
+                    && std::none_of(secondPickActions.begin(), secondPickActions.end(),
+                            [mismatchFirstIndex](const auto &action) {
+                                return action.idx1 == mismatchFirstIndex;
+                            })
+                    && !search::GameAction(mismatchFirstIndex).isValidAction(matchGc),
+            "Match and Keep second-pick legal choices did not exclude the revealed first card");
+    const int hiddenAfterFirstPick = secondPickActions.front().idx1 == mismatchSecondIndex
+            ? secondPickActions.back().idx1 : secondPickActions.front().idx1;
+    const auto hiddenAfterFirstPickOriginal = matchGc.info.toSelectCards[hiddenAfterFirstPick].card;
+    matchGc.info.toSelectCards[hiddenAfterFirstPick].card =
+            hiddenAfterFirstPickOriginal.id == CardId::BASH
+                    ? Card(CardId::IRON_WAVE) : Card(CardId::BASH);
+    require(intermediatePublicProjection.equal(matchAndKeep.publicProjectionV3()),
+            "normal-public Match and Keep second-pick observation changed when an unselected hidden card changed");
+    matchGc.info.toSelectCards[hiddenAfterFirstPick].card = hiddenAfterFirstPickOriginal;
+    const auto secondPickProjection = privilegedProjection(matchAndKeep);
+    const auto checkedSecondPickActions = verifyPrivilegedCandidateParity(
+            matchAndKeep, secondPickProjection);
+    require(checkedSecondPickActions.size() == 11,
+            "privileged Match and Keep projection did not preserve second-pick candidates");
+    const auto secondCandidateRows = secondPickProjection["candidates"].cast<pybind11::list>();
+    const auto secondCandidateFeatures = secondCandidateRows[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    require(secondCandidateFeatures["choice"].cast<pybind11::dict>()
+                            ["value"].cast<pybind11::dict>()
+                            ["choice_type"].cast<std::string>() == "select_second_card"
+                    && secondCandidateFeatures["first_card_identity"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "public_now"
+                    && secondCandidateFeatures["second_card_identity"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "oracle_only",
+            "privileged second-pick projection did not separate public first-card and hidden second-card identities");
+
+    const auto checkpoint = matchAndKeep.captureCheckpoint();
+    const auto publicBeforeSecondPick = encodePython(intermediatePublicProjection);
+    const auto privilegedBeforeSecondPick = encodePython(secondPickProjection);
+    const auto mismatchRngBefore = std::array<std::int32_t, 3>{
+            matchGc.cardRng.counter, matchGc.miscRng.counter, matchGc.eventRng.counter};
+    std::size_t mismatchSecondActionIndex = checkedSecondPickActions.size();
+    for (std::size_t index = 0; index < checkedSecondPickActions.size(); ++index) {
+        if (checkedSecondPickActions[index].idx1 == mismatchSecondIndex) {
+            mismatchSecondActionIndex = index;
+            break;
+        }
+    }
+    require(mismatchSecondActionIndex < checkedSecondPickActions.size(),
+            "Match and Keep did not expose the selected mismatching second card");
+    (void) matchAndKeep.step(checkedSecondPickActions[mismatchSecondActionIndex]);
+    require(matchGc.info.eventData == 4
+                    && matchGc.info.toSelectCards[mismatchFirstIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH)
+                    && matchGc.info.toSelectCards[mismatchSecondIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH)
+                    && matchGc.deck.size() == startingDeckSize,
+            "Match and Keep mismatch did not resolve the pair and consume exactly one attempt");
+    const auto publicAfterMismatch = encodePython(matchAndKeep.publicProjectionV3());
+    const auto mismatchRngAfter = std::array<std::int32_t, 3>{
+            matchGc.cardRng.counter, matchGc.miscRng.counter, matchGc.eventRng.counter};
+    require(mismatchRngBefore == mismatchRngAfter,
+            "Match and Keep two-step card selection unexpectedly advanced card/event RNG");
+    (void) matchAndKeep.restoreCheckpoint(checkpoint);
+    require(matchGc.info.eventData == 5
+                    && matchGc.info.toSelectCards[mismatchFirstIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::FIRST_PICK_REVEALED)
+                    && mismatchRngBefore == std::array<std::int32_t, 3>{
+                            matchGc.cardRng.counter, matchGc.miscRng.counter, matchGc.eventRng.counter}
+                    && encodePython(matchAndKeep.publicProjectionV3()) == publicBeforeSecondPick
+                    && encodePython(privilegedProjection(matchAndKeep)) == privilegedBeforeSecondPick,
+            "Match and Keep checkpoint did not replay the intermediate observation, choices and RNG");
+    std::size_t replaySecondActionIndex = matchAndKeep.legalActions().size();
+    const auto replaySecondActions = matchAndKeep.legalActions();
+    for (std::size_t index = 0; index < replaySecondActions.size(); ++index) {
+        if (replaySecondActions[index].idx1 == mismatchSecondIndex) {
+            replaySecondActionIndex = index;
+            break;
+        }
+    }
+    require(replaySecondActionIndex < replaySecondActions.size(),
+            "restored Match and Keep intermediate board did not recreate its second-pick action");
+    (void) matchAndKeep.step(replaySecondActions[replaySecondActionIndex]);
+    require(matchGc.info.eventData == 4
+                    && encodePython(matchAndKeep.publicProjectionV3()) == publicAfterMismatch,
+            "replayed Match and Keep second pick did not reproduce the mismatch observation");
+
+    auto chooseFirstForMatch = [&]() {
+        const auto actions = matchAndKeep.legalActions();
+        std::size_t firstActionIndex = actions.size();
+        int secondIndex = -1;
+        for (std::size_t firstIndex = 0; firstIndex < actions.size(); ++firstIndex) {
+            for (const auto &candidateSecond : actions) {
+                if (actions[firstIndex].idx1 != candidateSecond.idx1
+                        && matchGc.info.toSelectCards[actions[firstIndex].idx1].card.id
+                                == matchGc.info.toSelectCards[candidateSecond.idx1].card.id) {
+                    firstActionIndex = firstIndex;
+                    secondIndex = candidateSecond.idx1;
+                    break;
+                }
+            }
+            if (firstActionIndex != actions.size()) break;
+        }
+        require(firstActionIndex < actions.size(),
+                "Match and Keep fixture has no remaining matching two-step selection");
+        const int firstIndex = actions[firstActionIndex].idx1;
+        (void) matchAndKeep.step(actions[firstActionIndex]);
+        const auto choices = matchAndKeep.legalActions();
+        std::size_t secondActionIndex = choices.size();
+        for (std::size_t index = 0; index < choices.size(); ++index) {
+            if (choices[index].idx1 == secondIndex) {
+                secondActionIndex = index;
+                break;
+            }
+        }
+        require(secondActionIndex < choices.size(),
+                "Match and Keep hid the matching second card after its first reveal");
+        const int deckBeforeMatch = matchGc.deck.size();
+        (void) matchAndKeep.step(choices[secondActionIndex]);
+        require(matchGc.deck.size() == deckBeforeMatch + 1
+                        && matchGc.info.toSelectCards[firstIndex].deckIdx
+                                == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN)
+                        && matchGc.info.toSelectCards[secondIndex].deckIdx
+                                == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN),
+                "Match and Keep match did not award exactly one card and hide the pair");
+    };
+    chooseFirstForMatch();
+    int matchedRewards = 1;
+
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const auto actions = matchAndKeep.legalActions();
+        require(!actions.empty(), "Match and Keep exhausted first-pick actions before five attempts");
+        const auto firstAction = actions.front();
+        const int firstIndex = firstAction.idx1;
+        const int deckBefore = matchGc.deck.size();
+        (void) matchAndKeep.step(firstAction);
+        const auto secondActions = matchAndKeep.legalActions();
+        require(secondActions.size() == actions.size() - 1,
+                "Match and Keep did not expose one second-pick action per other face-down card");
+        std::size_t secondActionIndex = 0;
+        for (std::size_t index = 0; index < secondActions.size(); ++index) {
+            if (matchGc.info.toSelectCards[firstIndex].card.id
+                    == matchGc.info.toSelectCards[secondActions[index].idx1].card.id) {
+                secondActionIndex = index;
+                break;
+            }
+            if (secondActionIndex == 0) secondActionIndex = index;
+        }
+        const int secondIndex = secondActions[secondActionIndex].idx1;
+        const bool isMatch = matchGc.info.toSelectCards[firstIndex].card.id
+                == matchGc.info.toSelectCards[secondIndex].card.id;
+        (void) matchAndKeep.step(secondActions[secondActionIndex]);
+        if (isMatch) {
+            ++matchedRewards;
+            require(matchGc.deck.size() == deckBefore + 1
+                            && matchGc.info.toSelectCards[firstIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN)
+                            && matchGc.info.toSelectCards[secondIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN),
+                    "Match and Keep match did not award exactly one card and hide the pair");
+        } else {
+            require(matchGc.deck.size() == deckBefore
+                            && matchGc.info.toSelectCards[firstIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH)
+                            && matchGc.info.toSelectCards[secondIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH),
+                    "Match and Keep mismatch changed the deck or failed to reveal both cards");
+        }
+    }
+    require(matchGc.screenState == ScreenState::MAP_SCREEN
+                    && matchGc.info.eventData == 0
+                    && matchGc.info.toSelectCards.empty()
+                    && matchGc.deck.size() == startingDeckSize + matchedRewards,
+            "Match and Keep did not end after five attempts and resume the map continuation");
+    evidence["coverage_matrix"]["EVENT_SCREEN:MATCH_AND_KEEP"] = {
+        {"status", "supported"},
+        {"reachability_classification", "actual_reachable_act1_shrine"},
+        {"native_switch_disabled", GameContext::disableMatchAndKeep},
+        {"starting_first_pick_actions", 12},
+        {"second_pick_actions_after_first_reveal", 11},
+        {"pair_actions_rejected", true},
+        {"first_card_revealed_before_second_choice", true},
+        {"public_projection_hides_other_face_down_card_identities", true},
+        {"privileged_first_and_second_choice_candidate_counts", {checkedFirstPickActions.size(), checkedSecondPickActions.size()}},
+        {"mismatch_match_and_five_attempt_progression", true},
+        {"matching_pair_card_award", true},
+        {"checkpoint_rng_replay", true},
+        {"matches_awarded", matchedRewards},
+        {"real_game_trace_status", "REAL_GAME_TRACE_NOT_VERIFIED"}
+    };
+    evidence["execution_witnesses"].push_back({
+        {"family", "EVENT_SCREEN:MATCH_AND_KEEP"},
+        {"effect", "native shrine eligibility, first-card reveal transition, identity-conditioned second-card choices, card acquisition, attempt exhaustion and map continuation"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "MATCH_AND_KEEP"},
+        {"reachability", "Act 1/2/3 shrine pools"},
+        {"native_switch_or_todo", "GameContext::disableMatchAndKeep and GameAction event action enumeration"},
+        {"effect", "12 shuffled cards, pair matching, five attempts, card acquisition"},
+        {"classification", "REQUIRED_REPAIR_COMPLETED"},
+        {"eligibility", "native shrine pool in Acts 1, 2 and 3; A20 remains eligible"},
+        {"native_legal_choices", "12 first-card choices, then 11 second-card choices after the first selected identity is revealed; each completed pair consumes one attempt"},
+        {"post_action_or_terminal_effect", "matching pairs award the card once; after five attempts the event ends and returns to map"},
+        {"rng_save_restore", "native misc/card RNG checkpoint replay is exercised by the event fixture"},
+        {"severity", "P0 required mechanism repaired; live-game parity trace remains unverified"},
+        {"evidence", "native shrine eligibility, separate first and second pick enumeration, match and mismatch execution, five-attempt end, public hidden-card invariance, intermediate checkpoint replay"}
+    });
+
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "FALLING_BOTTLED_CARD_EXCLUSION"},
+        {"reachability", "Act 3 standard event pool; no A20 exclusion in the inspected eligibility path"},
+        {"native_switch_or_todo", "GameContext::setupEvent FALLING comment says TODO test and CANNOT BE BOTTLED"},
+        {"eligibility", "reachable Act 3 event; setup samples one candidate index for each present attack/skill/power type"},
+        {"native_legal_choices", "remove one selected attack, skill, or power, or leave; this task has no bottled-card fixture for these branches"},
+        {"post_action_or_terminal_effect", "selected deck index is removed; bottled-card protection is not established by the inspected path"},
+        {"rng_save_restore", "setup selection consumes miscRng; no event checkpoint/replay witness was added here"},
+        {"severity", "P2 unresolved reachable mechanics blocker"},
+        {"evidence", "Act3::events includes FALLING; setupEvent samples indices without an inspected bottled-card filter; chooseEventOption removes the stored index"},
+        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "WE_MEET_AGAIN_BOTTLED_CARD_SELECTION"},
+        {"reachability", "one-time event listed in both Ascension 0 and Ascension 15 event sets"},
+        {"native_switch_or_todo", "GameContext::setupEvent WE_MEET_AGAIN comment is TODO @FIX_BOTTLED"},
+        {"eligibility", "one-time event can be inserted by the native one-time-event path at A20"},
+        {"native_legal_choices", "trade a potion, gold or a nonbasic noncurse card for a relic, or decline"},
+        {"post_action_or_terminal_effect", "selected card is removed by stored deck index; bottled-card exclusion is not established by this inspected path"},
+        {"rng_save_restore", "card/potion choices are selected at setup and relic tier/identity uses native RNG; no replay witness was added here"},
+        {"severity", "P2 unresolved reachable mechanics blocker"},
+        {"evidence", "one-time event arrays include WE_MEET_AGAIN at Ascension 15; getRandomPlayerNonBasicCardIdx filters rarity/type but not bottle state"},
+        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "MYSTERIOUS_SPHERE_GOLDEN_IDOL_EVENT_GOLD"},
+        {"reachability", "Act 3 standard event pool; the encounter is entered by the event choice"},
+        {"native_switch_or_todo", "GameContext::afterBattle MYSTERIOUS_SPHERE comment asks TODO gold from Golden Idol?"},
+        {"eligibility", "reachable Act 3 event fight; Golden Idol is obtainable in the standard relic pool"},
+        {"native_legal_choices", "fight for event rewards or take the event's direct gold option"},
+        {"post_action_or_terminal_effect", "victory grants stored event gold and rare relic; Golden Idol scaling of this gold is unresolved"},
+        {"rng_save_restore", "event gold and rare relic are rolled before battle; no Golden Idol-specific replay witness was added here"},
+        {"severity", "P2 unresolved reachable reward parity blocker"},
+        {"evidence", "Act3::events includes MYSTERIOUS_SPHERE; afterBattle adds info.gold directly and retains the source TODO"},
+        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "PRAYER_WHEEL_COMBAT_REWARD"},
+        {"reachability", "Prayer Wheel is an obtainable relic and may be held at any normal monster fight"},
+        {"native_switch_or_todo", "createCombatReward contains a stale TODO Prayer wheel comment followed by an explicit relic check"},
+        {"eligibility", "normal monster-room combat rewards"},
+        {"native_legal_choices", "the standard card reward action set contains the additional card reward"},
+        {"post_action_or_terminal_effect", "hasRelic(PRAYER_WHEEL) adds a second independently generated card reward"},
+        {"rng_save_restore", "each reward uses the native card reward RNG path; not separately replay-tested in this issue"},
+        {"severity", "NO_ISSUE within inspected reward path"},
+        {"evidence", "GameContext::createCombatReward adds a second createCardReward when Prayer Wheel is present"},
+        {"classification", "NO_ISSUE"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "STOLEN_GOLD_REWARD_ORDER"},
+        {"reachability", "normal monster battles against Looter/Mugger encounters"},
+        {"native_switch_or_todo", "GameContext::afterBattle TODO notes the display ordering of stolen gold"},
+        {"eligibility", "triggered only when native battle state reports nonzero stolenGold"},
+        {"native_legal_choices", "gold is represented in the ordinary reward screen; ordering is not a player action"},
+        {"post_action_or_terminal_effect", "the stolen amount is added to the reward; the TODO concerns ordering only"},
+        {"rng_save_restore", "no additional RNG use is associated with this presentation-order TODO"},
+        {"severity", "NO_ISSUE for mechanics within inspected path; presentation ordering not audited"},
+        {"evidence", "afterBattle appends the exact info.stolenGold amount when nonzero"},
+        {"classification", "NO_ISSUE"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "CURSED_TOME_NECRONOMICON_SETUP_COMMENT"},
+        {"reachability", "Act 2 CURSED_TOME event remains in the standard event pool at A20"},
+        {"native_switch_or_todo", "setupEvent has a generic TODO necronomicon event comment; CURSED_TOME has an implemented branch"},
+        {"eligibility", "normal Act 2 event eligibility"},
+        {"native_legal_choices", "Cursed Tome phase choices include continue/leave and the book reward path"},
+        {"post_action_or_terminal_effect", "book reward path selects Necronomicon, Enchiridion or Nilry's Codex and opens its reward screen"},
+        {"rng_save_restore", "book identity uses miscRng; no separate replay witness was added here"},
+        {"severity", "NO_ISSUE within inspected event path; the comment is not a separate missing event"},
+        {"evidence", "Events::CURSED_TOME is in Act2::events and chooseEventOption implements all three book outcomes"},
+        {"classification", "NO_ISSUE"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "DEAD_ADVENTURER_REWARD_OPTION_MAPPING"},
+        {"reachability", "Act 1 standard event pool after floor 6"},
+        {"native_switch_or_todo", "chooseEventOption comment says TODO map onto unique idxs"},
+        {"eligibility", "standard Act 1 event eligibility after floor 6; no A20 exclusion"},
+        {"native_legal_choices", "three stored shuffled reward kinds are exposed by phase; unsupported reward/phase values fail closed in semantic projection"},
+        {"post_action_or_terminal_effect", "native option index selects the mapped gold/card/relic or encounter path"},
+        {"rng_save_restore", "reward order is shuffled during setup with miscRng; no new replay claim is made here"},
+        {"severity", "NO_ISSUE within this bounded scan; not a full event-branch audit"},
+        {"evidence", "Act1::events includes DEAD_ADVENTURER; existing projection fixture rejects out-of-range reward kinds and phases"},
+        {"classification", "NO_ISSUE"}
+    });
+
+    evidence["real_game_trace_status"] = "REAL_GAME_TRACE_NOT_VERIFIED";
+    evidence["live_game_parity_status"] = "LIVE_PARITY_NOT_VERIFIED";
+    evidence["overall_parity_status"] = "REAL_GAME_PARITY_RESTRICTED_PRISMATIC_SHARD";
+    evidence["training_authorized"] = false;
+    evidence["unrestricted_real_game_qualification"] =
+            "BLOCKED_UNTIL_PRISMATIC_SHARD_RESTORATION";
+    evidence["source_disabled_mechanism_inventory_scope"] = {
+        {"method", "bounded source scan of active GameContext disable* switches and material TODO/unsupported annotations in event setup/choice, battle-end and combat-reward paths"},
+        {"inspected_paths", {
+            "include/game/GameContext.h disable* declarations",
+            "include/constants/Events.h standard act and one-time event pools",
+            "GameContext::canAddEvent/getEvent/setupEvent/getShrine/afterBattle/chooseEventOption/createCombatReward",
+            "GameAction::getAllActionsInState and event execution",
+            "BattleContext::initRelics/exitBattle and potion reward RNG path"
+        }},
+        {"observed_classification_counts", {
+            {"required_repairs_completed", 2},
+            {"restricted_training_exceptions", 1},
+            {"unresolved_real_game_parity_blockers", 3},
+            {"no_issue_within_inspected_scope", 4}
+        }},
+        {"full_sts_mechanics_audit", false},
+        {"note", "Other observed reachable mechanisms are recorded and classified below; they were not automatically repaired because this issue only required Colosseum and Match and Keep."}
+    };
+    return evidence;
+}
+
 nlohmann::json checkPrivilegedNoncombatProjection() {
     StepSimulator boundarySimulator(CharacterClass::IRONCLAD, 49, 20);
     bool rejectedPublicAudience = false;
@@ -854,6 +1496,14 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
         {"single_action_fixtures", nlohmann::json::object()},
         {"execution_witnesses", nlohmann::json::array()}
     };
+    const auto requiredEventEvidence = checkRequiredEventMechanics();
+    result["required_event_fidelity"] = requiredEventEvidence;
+    result["coverage_matrix"]["PRISMATIC_SHARD"] =
+            requiredEventEvidence["coverage_matrix"]["PRISMATIC_SHARD"];
+    result["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"] =
+            requiredEventEvidence["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"];
+    result["coverage_matrix"]["EVENT_SCREEN:MATCH_AND_KEEP"] =
+            requiredEventEvidence["coverage_matrix"]["EVENT_SCREEN:MATCH_AND_KEEP"];
 
     // Audit every source-enabled multi-choice event family against the exact
     // native enumerator.  Event state fields are initialized to valid native
@@ -1029,10 +1679,10 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     require(invalidPhaseRow["coverage_status"].cast<std::string>() == "unsupported"
                     && invalidPhaseRow.contains("reason"),
             "out-of-range Dead Adventurer phase did not fail closed per candidate");
-    // Test the real event-pool filter with only COLOSSEUM eligible by floor,
-    // plus one known shrine as the native getEvent() fallback.  The forced
-    // EVENT_SCREEN fixture below remains separately fail-closed.
+    // Keep a small exact event-pool guard alongside the full transition test
+    // above, so future source edits cannot silently disable Act 2 eligibility.
     StepSimulator colosseumEligibility(CharacterClass::IRONCLAD, 49, 20);
+    colosseumEligibility.gc.act = 2;
     colosseumEligibility.gc.curMapNodeY = 8;
     colosseumEligibility.gc.eventList = {Event::COLOSSEUM};
     colosseumEligibility.gc.shrineList = {Event::ANCIENT_WRITING};
@@ -1042,29 +1692,25 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
             colosseumEligibility.gc.getEvent(colosseumEligibility.gc.eventRng);
     const bool colosseumIsReachable =
             eventSelectedByNativePoolFilter == Event::COLOSSEUM;
-    require(!colosseumCanBeAdded && !colosseumIsReachable,
-            "Colosseum became reachable under the current native event eligibility rules; revisit its forced-only classification");
+    require(colosseumCanBeAdded && colosseumIsReachable,
+            "Act 2 Colosseum is not reachable through the native event pool");
 
-    StepSimulator unsupportedColosseum(CharacterClass::IRONCLAD, 49, 20);
-    unsupportedColosseum.gc.screenState = ScreenState::EVENT_SCREEN;
-    unsupportedColosseum.gc.curEvent = Event::COLOSSEUM;
-    unsupportedColosseum.gc.info.eventData = 1;
-    const auto colosseumProjection = privilegedProjection(unsupportedColosseum);
+    StepSimulator colosseumChoiceFixture(CharacterClass::IRONCLAD, 49, 20);
+    colosseumChoiceFixture.gc.screenState = ScreenState::EVENT_SCREEN;
+    colosseumChoiceFixture.gc.curEvent = Event::COLOSSEUM;
+    colosseumChoiceFixture.gc.info.eventData = 1;
+    const auto colosseumProjection = privilegedProjection(colosseumChoiceFixture);
     const auto colosseumActions = verifyPrivilegedCandidateParity(
-            unsupportedColosseum, colosseumProjection, "NATIVE_CHOICE_SEMANTIC_NOT_READY");
+            colosseumChoiceFixture, colosseumProjection);
     require(colosseumActions.size() == 2
-                    && colosseumProjection["unsupported_candidates"].cast<pybind11::list>().size() == 2,
-            "disabled/TODO Colosseum alternatives did not fail closed individually");
-    result["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"] = {
-        {"status", "unsupported_if_forced"},
-        {"reachability_classification", colosseumIsReachable
-                ? "actual_reachable_blocker" : "unreachable_by_current_rules"},
-        {"native_candidate_count", colosseumActions.size()},
-        {"native_generation_disabled", GameContext::disableColosseum},
-        {"can_add_at_event_floor", colosseumCanBeAdded},
-        {"native_event_pool_selected_colosseum", colosseumIsReachable},
-        {"forced_state_reason", "chooseEventOption is TODO; both forced alternatives return to map"}
-    };
+                    && colosseumProjection["unsupported_candidates"].cast<pybind11::list>().empty(),
+            "reachable Colosseum alternatives did not have source-backed semantics");
+    result["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"]["native_candidate_count"] =
+            colosseumActions.size();
+    result["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"]["can_add_at_event_floor"] =
+            colosseumCanBeAdded;
+    result["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"]["native_event_pool_selected_colosseum"] =
+            colosseumIsReachable;
 
     // LAB setup immediately opens the potion reward screen in current native
     // rules, so the event itself contributes no legal choice.  Keep the
@@ -1574,10 +2220,6 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     });
 
     std::vector<std::string> actualReachableBlockers;
-    if (colosseumIsReachable) {
-        actualReachableBlockers.push_back(
-                "EVENT_SCREEN:COLOSSEUM is admitted by the current event pool but its forced candidate semantics remain unsupported");
-    }
     if (!labAutoResolvedNoChoice) {
         actualReachableBlockers.push_back(
                 "EVENT_SCREEN:LAB no longer auto-resolves to REWARDS during native setup");
@@ -1586,6 +2228,10 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     auto &coverageMatrix = result["coverage_matrix"];
     for (auto it = coverageMatrix.begin(); it != coverageMatrix.end(); ++it) {
         if (it.value().contains("reachability_classification")) continue;
+        if (it.value().value("status", std::string()) == "RESTRICTED_TRAINING_EXCEPTION") {
+            it.value()["reachability_classification"] = "restricted_training_exception";
+            continue;
+        }
         if (it.value().value("status", std::string()) == "supported") {
             it.value()["reachability_classification"] = "reachable_multichoice_supported";
         } else {
@@ -1601,10 +2247,27 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     result["registered_scope"] =
             "currently reachable nonbattle decisions with multiple native legal actions";
     result["actual_reachable_blockers"] = actualReachableBlockers;
+    result["mechanism_inventory"] = requiredEventEvidence["mechanism_inventory"];
+    result["mechanism_inventory"].push_back({
+        {"mechanism", "LAB EVENT_SCREEN"},
+        {"reachability", "setupEvent opens REWARDS directly; synthetic forced EVENT_SCREEN is not reached"},
+        {"native_switch_or_todo", "getValidEventSelectBits has one candidate but chooseEventOption does not execute it"},
+        {"effect", "no natural event-screen choice in the active native setup path"},
+        {"classification", "NO_ISSUE"}
+    });
+    result["source_disabled_mechanism_inventory_scope"] =
+            requiredEventEvidence["source_disabled_mechanism_inventory_scope"];
     result["coverage_limitations"] = {
-        "forced Colosseum and Lab EVENT_SCREEN fixtures remain individually fail-closed outside the registered natural decision population",
-        "per-family event execution witnesses are representative rather than an execution of every event branch"
+        "LAB forced EVENT_SCREEN remains unsupported; native setup auto-resolves it to REWARDS, so the forced state is not treated as reachable",
+        "Colosseum and Match and Keep have native transition coverage, but no matched live CommunicationMod trace was available",
+        "per-family event execution witnesses are representative rather than an execution of every event branch",
+        "the bounded source TODO scan retains unresolved reachable Falling, We Meet Again bottled-card, and Mysterious Sphere Golden Idol reward cases; this is not a full STS mechanics audit"
     };
+    result["overall_parity_status"] = "REAL_GAME_PARITY_RESTRICTED_PRISMATIC_SHARD";
+    result["real_game_trace_status"] = "REAL_GAME_TRACE_NOT_VERIFIED";
+    result["live_game_parity_status"] = "LIVE_PARITY_NOT_VERIFIED";
+    result["training_authorized"] = false;
+    result["unrestricted_real_game_qualification"] = "BLOCKED_UNTIL_PRISMATIC_SHARD_RESTORATION";
     result["no_training_or_evaluation_ran"] = true;
     return result;
 }

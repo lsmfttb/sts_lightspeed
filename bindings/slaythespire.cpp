@@ -1102,6 +1102,92 @@ pybind11::dict publicChoiceScreenPayload(
                     "battle choices remain on the separate T096 public-information API";
             return payload;
         case ScreenState::EVENT_SCREEN:
+            if (gc.curEvent == Event::MATCH_AND_KEEP) {
+                if (gc.info.eventData <= 0 || gc.info.toSelectCards.size() != 12) {
+                    payload["coverage_status"] = "unsupported";
+                    payload["reason"] = "Match and Keep has an invalid native board or attempt count";
+                    return payload;
+                }
+                int firstPickIndex = -1;
+                for (std::size_t index = 0; index < gc.info.toSelectCards.size(); ++index) {
+                    if (gc.info.toSelectCards[index].deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+                        if (firstPickIndex != -1) {
+                            payload["coverage_status"] = "unsupported";
+                            payload["reason"] = "Match and Keep board contains multiple pending first picks";
+                            return payload;
+                        }
+                        firstPickIndex = static_cast<int>(index);
+                    }
+                }
+                pybind11::list cardSlots;
+                for (std::size_t index = 0; index < gc.info.toSelectCards.size(); ++index) {
+                    const auto &slot = gc.info.toSelectCards[index];
+                    pybind11::dict card;
+                    card["index"] = index;
+                    if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::MATCHED_HIDDEN)) {
+                        card["state"] = "matched_hidden";
+                    } else if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::REVEALED_MISMATCH)) {
+                        card["state"] = "revealed";
+                        card["card"] = publicCardRewardSnapshot(slot.card);
+                    } else if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+                        card["state"] = "first_pick_revealed";
+                        card["card"] = publicCardRewardSnapshot(slot.card);
+                    } else if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FACE_DOWN) && slot.card.id != CardId::INVALID) {
+                        // Do not inspect or serialize the face-down card ID on
+                        // the normal-public interface.
+                        card["state"] = "face_down";
+                    } else {
+                        payload["coverage_status"] = "unsupported";
+                        payload["reason"] = "Match and Keep board contains an unknown slot state";
+                        return payload;
+                    }
+                    cardSlots.append(card);
+                }
+                pybind11::list choices;
+                for (std::size_t candidateIndex = 0;
+                        candidateIndex < actions.size(); ++candidateIndex) {
+                    const auto &action = actions[candidateIndex];
+                    pybind11::dict choice;
+                    choice["candidate_index"] = candidateIndex;
+                    if (action.kind == "event") {
+                        if (firstPickIndex == -1) {
+                            choice["choice_type"] = "select_first_card";
+                            choice["card_index"] = action.idx1;
+                        } else {
+                            choice["choice_type"] = "select_second_card";
+                            choice["first_card_index"] = firstPickIndex;
+                            choice["card_index"] = action.idx1;
+                        }
+                    } else if (action.kind == "game_potion_use"
+                            || action.kind == "game_potion_discard") {
+                        choice["choice_type"] = action.kind == "game_potion_use"
+                                ? "use_potion" : "discard_potion";
+                        choice["potion"] = gamePotionSnapshot(gc, action.idx1);
+                    } else {
+                        payload["coverage_status"] = "unsupported";
+                        payload["reason"] = "Match and Keep includes an unrendered legal action";
+                        return payload;
+                    }
+                    choices.append(choice);
+                }
+                payload["coverage_status"] = "supported";
+                payload["source"] = "GameContext::info.toSelectCards, GameContext::info.eventData, and GameAction::getAllActionsInState MATCH_AND_KEEP";
+                payload["event"] = "MATCH_AND_KEEP";
+                payload["attempts_remaining"] = gc.info.eventData;
+                payload["phase"] = firstPickIndex == -1 ? "select_first_card" : "select_second_card";
+                if (firstPickIndex != -1) {
+                    payload["first_card_index"] = firstPickIndex;
+                }
+                payload["cards"] = cardSlots;
+                payload["choices"] = choices;
+                payload["hidden_card_note"] = "face-down and matched card identities are withheld; the pending first pick and mismatched identities are public";
+                return payload;
+            }
             payload["coverage_status"] = "unsupported";
             payload["reason"] = "event option text is not source-backed by this choice surface";
             return payload;
@@ -1315,7 +1401,6 @@ pybind11::dict privilegedEventChoice(
             pybind11::str(eventIdStrings[eventIndex]), "public_now",
             "GameContext::curEvent and constants/Events.h");
     if (gc.curEvent != Event::NEOW) {
-        const int idx = action.idx1;
         const bool unfavorable = gc.ascension >= 15;
         auto setUnavailable = [&](const char *reason) {
             features["choice"] = privilegedChoiceUnavailable(reason);
@@ -1323,6 +1408,64 @@ pybind11::dict privilegedEventChoice(
         auto setFutureUnavailable = [&](const char *name, const char *reason) {
             features[name] = privilegedChoiceUnavailable(reason, false);
         };
+        if (gc.curEvent == Event::MATCH_AND_KEEP) {
+            const int selectedIndex = action.idx1;
+            int firstPickIndex = -1;
+            for (int index = 0; index < static_cast<int>(gc.info.toSelectCards.size()); ++index) {
+                if (gc.info.toSelectCards[index].deckIdx == static_cast<std::int16_t>(
+                        MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+                    if (firstPickIndex != -1) {
+                        setUnavailable("Match and Keep board contains multiple pending first picks");
+                        return features;
+                    }
+                    firstPickIndex = index;
+                }
+            }
+            if (gc.info.eventData <= 0 || gc.info.toSelectCards.size() != 12
+                    || selectedIndex < 0 || selectedIndex >= 12 || action.idx2 != 0
+                    || gc.info.toSelectCards[selectedIndex].deckIdx != static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FACE_DOWN)) {
+                setUnavailable("Match and Keep candidate does not bind to a live face-down native card slot");
+                return features;
+            }
+            pybind11::dict choice;
+            choice["attempts_remaining"] = gc.info.eventData;
+            if (firstPickIndex == -1) {
+                const auto &selectedCard = gc.info.toSelectCards[selectedIndex].card;
+                choice["choice_type"] = "reveal_first_card";
+                choice["effect_type"] = "expose_selected_card_and_offer_second_pick";
+                choice["card_index"] = selectedIndex;
+                features["choice"] = privilegedChoiceFeature(
+                        choice, "public_now",
+                        "GameContext::chooseMatchAndKeepCard first-pick transition");
+                features["revealed_card_identity"] = privilegedChoiceFeature(
+                        publicCardRewardSnapshot(selectedCard), "oracle_only",
+                        "ScreenStateInfo::toSelectCards face-down card identity revealed by this action");
+            } else {
+                const auto &firstCard = gc.info.toSelectCards[firstPickIndex].card;
+                const auto &secondCard = gc.info.toSelectCards[selectedIndex].card;
+                choice["choice_type"] = "select_second_card";
+                choice["effect_type"] = firstCard.id == secondCard.id
+                        ? "obtain_matching_card_and_hide_pair"
+                        : "reveal_mismatched_pair";
+                choice["first_card_index"] = firstPickIndex;
+                choice["second_card_index"] = selectedIndex;
+                features["choice"] = privilegedChoiceFeature(
+                        choice, "public_now",
+                        "GameContext::chooseMatchAndKeepCard second-pick transition");
+                features["first_card_identity"] = privilegedChoiceFeature(
+                        publicCardRewardSnapshot(firstCard), "public_now",
+                        "ScreenStateInfo::toSelectCards first-pick revealed identity");
+                features["second_card_identity"] = privilegedChoiceFeature(
+                        publicCardRewardSnapshot(secondCard), "oracle_only",
+                        "ScreenStateInfo::toSelectCards face-down card identity");
+                features["cards_match"] = privilegedChoiceFeature(
+                        pybind11::bool_(firstCard.id == secondCard.id), "oracle_only",
+                        "GameContext::chooseMatchAndKeepCard CardId equality branch");
+            }
+            return features;
+        }
+        const int idx = action.idx1;
         if (gc.curEvent == Event::LAB) {
             features["choice"] = privilegedChoiceUnavailable(
                     "LAB getValidEventSelectBits exposes index 0, but GameContext::chooseEventOption asserts no action is valid");
@@ -1703,7 +1846,20 @@ pybind11::dict privilegedEventChoice(
             return features;
         }
         if (gc.curEvent == Event::COLOSSEUM) {
-            setUnavailable("COLOSSEUM is disabled by native event generation; its chooser is TODO and currently maps alternatives to the same return transition");
+            if (gc.info.eventData != 1 || (idx != 0 && idx != 1)) {
+                setUnavailable("Colosseum candidate is outside the post-Slavers leave/challenge phase");
+                return features;
+            }
+            pybind11::dict choice;
+            choice["choice_type"] = idx == 0
+                    ? "leave_colosseum" : "challenge_second_colosseum_fight";
+            choice["effect_type"] = idx == 0
+                    ? "return_to_map_without_event_reward"
+                    : "enter_COLOSSEUM_EVENT_NOBS";
+            choice["phase"] = "after_COLOSSEUM_EVENT_SLAVERS_victory";
+            features["choice"] = privilegedChoiceFeature(
+                    choice, "oracle_only",
+                    "GameContext::afterBattle and GameContext::chooseEventOption COLOSSEUM branches");
             return features;
         }
         std::ostringstream reason;
@@ -4862,6 +5018,47 @@ struct StepSimulator {
         }
         ret["candidate_actions"] = publicProjectionAvailable(
                 candidates, "ordered StepSimulator::legalActions; action bits are withheld");
+        return ret;
+    }
+
+    pybind11::dict trainingPopulationQualificationV1() const {
+        const bool shardPresent = gc.relics.has(RelicId::PRISMATIC_SHARD);
+        const bool shardDisabled = GameContext::disablePrismaticShard;
+#ifdef STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
+        const std::string sourceCommit = STS_LIGHTSPEED_TESTED_SOURCE_COMMIT;
+#else
+        const std::string sourceCommit = "unavailable_at_compile_time";
+#endif
+        const bool sourceIdentityBound = sourceCommit != "unknown"
+                && sourceCommit != "unavailable_at_compile_time";
+        const std::string status = !sourceIdentityBound
+                ? "SOURCE_IDENTITY_UNAVAILABLE"
+                : !shardDisabled ? "CROSS_CLASS_CARDS_ENABLED"
+                : shardPresent ? "PRISMATIC_SHARD_EXPOSURE_REJECTED"
+                : "RESTRICTED_NO_PRISMATIC_SHARD_POPULATION";
+        pybind11::dict ret;
+        ret["schema_id"] = "native-training-population-qualification-v1";
+        ret["native_source_commit"] = sourceCommit;
+        ret["source_identity_bound"] = sourceIdentityBound;
+        ret["audience"] = "training_contract_only";
+        ret["restriction"] = "PRISMATIC_SHARD_DISABLED / CROSS_CLASS_CARDS_OUT_OF_SCOPE";
+        ret["disable_prismatic_shard"] = shardDisabled;
+        ret["prismatic_shard_present"] = shardPresent;
+        ret["status"] = status;
+        ret["eligible_for_restricted_no_shard_population"] =
+                sourceIdentityBound && shardDisabled && !shardPresent;
+        ret["on_shard_exposure"] =
+                "STOP_OR_APPLY_PREDECLARED_EXCLUSION_CENSORING";
+        ret["this_api_applies_exclusion"] = false;
+        ret["training_authorized_by_this_api"] = false;
+        ret["card_pool_effect"] = shardDisabled
+                ? "createCardReward continues using getRandomClassCardOfRarity even when Prismatic Shard is held"
+                : "createCardReward may use getAnyColorCard when Prismatic Shard is held";
+        ret["overall_parity_status"] = "REAL_GAME_PARITY_RESTRICTED_PRISMATIC_SHARD";
+        ret["real_game_trace_status"] = "REAL_GAME_TRACE_NOT_VERIFIED";
+        ret["live_game_parity_status"] = "LIVE_PARITY_NOT_VERIFIED";
+        ret["unrestricted_real_game_qualification"] =
+                "BLOCKED_UNTIL_PRISMATIC_SHARD_RESTORATION";
         return ret;
     }
 
@@ -8496,6 +8693,10 @@ struct PrivilegedNoncombatProjectionAccess {
     pybind11::dict projectV1() const {
         return simulator.privilegedNoncombatChoiceProjectionV1();
     }
+
+    pybind11::dict trainingPopulationQualificationV1() const {
+        return simulator.trainingPopulationQualificationV1();
+    }
 };
 
 }
@@ -8645,7 +8846,10 @@ PYBIND11_MODULE(slaythespire, m) {
                 pybind11::arg("audience"),
                 pybind11::keep_alive<1, 2>())
         .def("project_v1", &PrivilegedNoncombatProjectionAccess::projectV1,
-                "Return noncombat features tagged public_now or oracle_only.");
+                "Return noncombat features tagged public_now or oracle_only.")
+        .def("training_population_qualification_v1",
+                &PrivilegedNoncombatProjectionAccess::trainingPopulationQualificationV1,
+                "Return a source-bound restricted training-population marker; this does not authorize training.");
 
     pybind11::class_<GameContext> gameContext(m, "GameContext");
     gameContext.def(pybind11::init<CharacterClass, std::uint64_t, int>())

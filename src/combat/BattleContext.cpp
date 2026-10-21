@@ -93,6 +93,8 @@ void BattleContext::initRelics(const GameContext &gc) {
     fixed_list<RelicId, 2> atTurnStartPostDraw;
 
     auto room = gc.curRoom;
+    const bool eliteBattle = room == Room::ELITE
+            || gc.info.encounter == MonsterEncounter::COLOSSEUM_EVENT_NOBS;
 
     auto &p = player;
 
@@ -321,7 +323,7 @@ void BattleContext::initRelics(const GameContext &gc) {
                 break;
 
             case R::PRESERVED_INSECT:
-                if (room == Room::ELITE) {
+                if (eliteBattle) {
                     for (int i = 0; i < monsters.monsterCount; ++i) {
                         Monster &m = monsters.arr[i];
                         m.curHp = static_cast<int>(m.maxHp * .75);
@@ -339,13 +341,13 @@ void BattleContext::initRelics(const GameContext &gc) {
                 break;
 
             case R::SLAVERS_COLLAR:
-                if (room == Room::ELITE || room == Room::BOSS) { // todo this needs to be set by eliteTrigger maybe?
+                if (eliteBattle || room == Room::BOSS) {
                     p.energyPerTurn++;
                 }
                 break;
 
             case R::SLING_OF_COURAGE:
-                if (room == Room::ELITE) {
+                if (eliteBattle) {
                     p.buff<PS::STRENGTH>(2);
                 }
                 break;
@@ -521,15 +523,22 @@ void BattleContext::exitBattle(GameContext &g) const {
     }
 
     if (outcome == Outcome::PLAYER_ESCAPE) {
-        // Escape ends the combat for relic hooks, but deliberately skips
+        // Escape ends the combat for relic hooks and normally skips
         // afterBattle() because that also creates normal/event rewards.
-        // Smoke Bomb abandons the encounter, including any event-specific
-        // post-battle reward callback. Return to the map without running
-        // afterBattle(), which would grant normal combat rewards.
-        g.regainControlAction = [](GameContext &gc) {
-            gc.screenState = ScreenState::MAP_SCREEN;
-            gc.regainControlAction = nullptr;
-        };
+        // The first Colosseum fight is the exception: Smoke Bomb ends the
+        // Slavers encounter but the event still presents its leave/challenge
+        // choice, with no ordinary battle rewards.
+        if (g.curEvent == Event::COLOSSEUM
+                && g.info.encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS
+                && g.info.eventData == 0) {
+            g.regainControlAction = [](GameContext &gc) { gc.afterBattle(); };
+        } else {
+            // Other escaped combats abandon their event and return to the map.
+            g.regainControlAction = [](GameContext &gc) {
+                gc.screenState = ScreenState::MAP_SCREEN;
+                gc.regainControlAction = nullptr;
+            };
+        }
         g.regainControl();
     } else if (outcome == Outcome::PLAYER_LOSS) {
         g.outcome = GameOutcome::PLAYER_LOSS;
@@ -2270,17 +2279,15 @@ void BattleContext::discardPotion(int idx) {
 }
 
 bool BattleContext::canUseSmokeBomb() const {
-    if (encounter == MonsterEncounter::INVALID || isBossEncounter(encounter)
-            || encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS
-            || encounter == MonsterEncounter::COLOSSEUM_EVENT_NOBS) {
+    if (encounter == MonsterEncounter::INVALID || isBossEncounter(encounter)) {
         return false;
     }
 
     // The Act 4 elite's Surrounded debuff prevents escape while both enemies
     // remain. The current simulator does not clear the debuff on the first
     // kill, so use the encounter's live count for this legality check.
-    // Colosseum's multi-fight continuation is not modeled, so fail closed
-    // instead of letting an escape incorrectly end the event.
+    // Event combat escape is handled by BattleContext::endBattle as abandoning
+    // that event encounter without its victory continuation or rewards.
     return encounter != MonsterEncounter::SHIELD_AND_SPEAR || monsters.monstersAlive <= 1;
 }
 

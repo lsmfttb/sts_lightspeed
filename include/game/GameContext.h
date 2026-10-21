@@ -68,6 +68,17 @@ namespace sts {
         BATTLE,
     };
 
+    // Match and Keep reuses SelectScreenCard::deckIdx as a public board-state
+    // marker.  A first pick is revealed for its own transition before the
+    // second pick is offered; matched cards are hidden again and mismatches
+    // remain revealed.
+    enum class MatchAndKeepCardState : std::int16_t {
+        FACE_DOWN = -1,
+        MATCHED_HIDDEN = 0,
+        REVEALED_MISMATCH = 1,
+        FIRST_PICK_REVEALED = 2,
+    };
+
     struct SelectScreenCard {
         Card card;
         std::int16_t deckIdx = -1;
@@ -149,8 +160,11 @@ namespace sts {
 
         sts::Card noteForYourselfCard = Card(CardId::IRON_WAVE);
 
-        static constexpr bool disableColosseum = true;
-        static constexpr bool disableMatchAndKeep = true;
+        static constexpr bool disableColosseum = false;
+        static constexpr bool disableMatchAndKeep = false;
+        // Cross-class card generation is intentionally deferred for the
+        // restricted first-stage training population. See the source-bound
+        // training population qualification exposed by the native binding.
         static constexpr bool disablePrismaticShard = true;
         bool skipBattles = false;
 
@@ -341,7 +355,7 @@ namespace sts {
         void chooseEventOption(int idx);
         void chooseSelectCardScreenOption(int idx);
         void chooseCampfireOption(int idx);
-        void chooseMatchAndKeepCards(int idx1, int idx2);
+        void chooseMatchAndKeepCard(int idx);
         void chooseTreasureRoomOption(bool openChest);
 
         void regainControl();
