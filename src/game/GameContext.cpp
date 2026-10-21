@@ -1204,6 +1204,11 @@ void GameContext::afterBattle() {
                 if (info.eventData == 0) {
                     // The Slavers fight has no ordinary combat rewards. The
                     // player may leave or challenge the Taskmaster/Nob pair.
+                    // The real game still performs its hidden potion drop
+                    // roll; advance the same RNG and pity state, but discard
+                    // any generated potion instead of showing it as loot.
+                    Rewards hiddenPotionRoll;
+                    addPotionRewards(hiddenPotionRoll);
                     info.eventData = 1;
                     screenState = ScreenState::EVENT_SCREEN;
                     regainControlAction = returnToMapAction;

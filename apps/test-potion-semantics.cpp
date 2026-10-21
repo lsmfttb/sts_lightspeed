@@ -525,7 +525,7 @@ void checkSmokeBombExitSkipsRewards() {
             "event escape applied a victory reward, altered the run, or failed to consume potion");
 }
 
-void checkColosseumSmokeBombAbandonsEvent() {
+void checkColosseumSmokeBombTransitions() {
     for (const auto encounter : {
             MonsterEncounter::COLOSSEUM_EVENT_SLAVERS,
             MonsterEncounter::COLOSSEUM_EVENT_NOBS}) {
@@ -537,26 +537,109 @@ void checkColosseumSmokeBombAbandonsEvent() {
         gc.potions[0] = Potion::SMOKE_BOMB;
         gc.potionCount = 1;
         gc.gold = 99;
+        gc.potionChance = 100; // guarantee the hidden first-fight roll creates a discarded potion
         gc.regainControlAction = [](GameContext &next) { next.afterBattle(); };
         const int startingGold = gc.gold;
         const int startingDeckSize = gc.deck.size();
         const int startingRelicCount = gc.relics.size();
+        GameContext expectedHiddenRoll = gc;
+        Rewards expectedHiddenPotion;
+        expectedHiddenRoll.addPotionRewards(expectedHiddenPotion);
+        require(expectedHiddenPotion.potionCount == 1,
+                "first Colosseum hidden-roll fixture did not guarantee a potion drop");
 
         auto bc = battleFixture(gc, encounter, Room::EVENT);
         bc.drinkPotion(0);
         require(bc.outcome == Outcome::PLAYER_ESCAPE,
                 "Colosseum Smoke Bomb did not reach terminal escape");
         bc.exitBattle(gc);
-        require(gc.screenState == ScreenState::MAP_SCREEN
-                        && gc.regainControlAction == nullptr
-                        && gc.outcome == GameOutcome::UNDECIDED,
-                "Colosseum escape did not abandon the event and resume at the map");
+        if (encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS) {
+            require(gc.screenState == ScreenState::EVENT_SCREEN
+                            && gc.info.eventData == 1
+                            && gc.regainControlAction != nullptr
+                            && gc.outcome == GameOutcome::UNDECIDED,
+                    "first-fight Smoke Bomb did not continue to the Colosseum choice");
+            require(gc.potionChance == expectedHiddenRoll.potionChance
+                            && gc.potionRng.counter == expectedHiddenRoll.potionRng.counter,
+                    "first-fight Smoke Bomb skipped or changed the hidden potion roll");
+        } else {
+            require(gc.screenState == ScreenState::MAP_SCREEN
+                            && gc.regainControlAction == nullptr
+                            && gc.outcome == GameOutcome::UNDECIDED,
+                    "second-fight Smoke Bomb did not abandon Colosseum and resume at the map");
+        }
         require(gc.gold == startingGold && gc.deck.size() == startingDeckSize
                         && gc.relics.size() == startingRelicCount
                         && gc.info.rewardsContainer.getTotalCount() == 0
                         && gc.potionCount == 0,
                 "Colosseum escape granted victory loot or failed to consume Smoke Bomb");
     }
+}
+
+void checkColosseumFirstFightVictoryHiddenPotionRoll() {
+    auto gc = gameFixture();
+    gc.curRoom = Room::EVENT;
+    gc.curEvent = Event::COLOSSEUM;
+    gc.info.eventData = 0;
+    gc.info.rewardsContainer.clear();
+    gc.potionChance = 100; // guarantee the hidden roll produces, but does not show, a potion
+    gc.regainControlAction = [](GameContext &next) { next.afterBattle(); };
+
+    GameContext expectedHiddenRoll = gc;
+    Rewards expectedHiddenPotion;
+    expectedHiddenRoll.addPotionRewards(expectedHiddenPotion);
+    require(expectedHiddenPotion.potionCount == 1,
+            "first Colosseum victory fixture did not guarantee a hidden potion drop");
+
+    auto bc = battleFixture(
+            gc, MonsterEncounter::COLOSSEUM_EVENT_SLAVERS, Room::EVENT);
+    bc.outcome = Outcome::PLAYER_VICTORY;
+    bc.exitBattle(gc);
+
+    require(gc.screenState == ScreenState::EVENT_SCREEN && gc.info.eventData == 1,
+            "first Colosseum victory did not continue to its leave/challenge choice");
+    require(gc.info.rewardsContainer.getTotalCount() == 0,
+            "first Colosseum victory exposed ordinary or hidden potion rewards");
+    require(gc.potionChance == expectedHiddenRoll.potionChance
+                    && gc.potionRng.counter == expectedHiddenRoll.potionRng.counter,
+            "first Colosseum victory skipped or changed the hidden potion roll");
+}
+
+void checkColosseumSecondFightEliteStartRelics() {
+    const auto encounter = MonsterEncounter::COLOSSEUM_EVENT_NOBS;
+    auto makeColosseumContext = [encounter](RelicId relic) {
+        auto gc = gameFixture();
+        gc.curRoom = Room::EVENT;
+        gc.curEvent = Event::COLOSSEUM;
+        gc.info.eventData = 2;
+        gc.info.encounter = encounter;
+        if (relic != RelicId::INVALID) {
+            gc.relics.add({relic, 0});
+        }
+        return gc;
+    };
+
+    auto baseline = makeColosseumContext(RelicId::INVALID);
+    auto baselineBattle = battleFixture(baseline, encounter, Room::EVENT);
+
+    auto preservedInsect = makeColosseumContext(RelicId::PRESERVED_INSECT);
+    auto preservedInsectBattle = battleFixture(preservedInsect, encounter, Room::EVENT);
+    for (int i = 0; i < preservedInsectBattle.monsters.monsterCount; ++i) {
+        const auto &monster = preservedInsectBattle.monsters.arr[i];
+        require(monster.curHp == static_cast<int>(monster.maxHp * .75),
+                "second Colosseum fight did not apply Preserved Insect to every enemy");
+    }
+
+    auto slaversCollar = makeColosseumContext(RelicId::SLAVERS_COLLAR);
+    auto slaversCollarBattle = battleFixture(slaversCollar, encounter, Room::EVENT);
+    require(slaversCollarBattle.player.energyPerTurn
+                    == baselineBattle.player.energyPerTurn + 1,
+            "second Colosseum fight did not apply Slaver's Collar elite energy");
+
+    auto slingOfCourage = makeColosseumContext(RelicId::SLING_OF_COURAGE);
+    auto slingOfCourageBattle = battleFixture(slingOfCourage, encounter, Room::EVENT);
+    require(slingOfCourageBattle.player.strength == baselineBattle.player.strength + 2,
+            "second Colosseum fight did not apply Sling of Courage elite strength");
 }
 
 void checkCombatEndRelic(
@@ -755,7 +838,9 @@ int main() {
         checkForbiddenPotionSlotSearch();
         checkProtectedEntropicBrewOccupancy();
         checkSmokeBombExitSkipsRewards();
-        checkColosseumSmokeBombAbandonsEvent();
+        checkColosseumSmokeBombTransitions();
+        checkColosseumFirstFightVictoryHiddenPotionRoll();
+        checkColosseumSecondFightEliteStartRelics();
         checkSmokeBombCombatEndRelics();
         checkCombinedCombatEndRelicOrdering();
         checkFaceOfClericEventVictory(Event::MASKED_BANDITS, 1,

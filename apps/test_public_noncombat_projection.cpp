@@ -887,11 +887,17 @@ nlohmann::json checkRequiredEventMechanics() {
             "Prismatic Shard staging-effect probe produced no card reward");
     evidence["coverage_matrix"]["PRISMATIC_SHARD"] = {
         {"status", "RESTRICTED_TRAINING_EXCEPTION"},
-        {"native_generation_disabled", GameContext::disablePrismaticShard},
+        {"cross_class_card_behavior_disabled", GameContext::disablePrismaticShard},
         {"card_pool_source", "GameContext::createCardReward uses getRandomClassCardOfRarity while disabled"},
         {"shard_exposure_status", shardExposureQualification["status"].cast<std::string>()},
         {"exposure_policy", shardExposureQualification["on_shard_exposure"].cast<std::string>()},
         {"observed_ironclad_reward_colors_with_shard_present", shardRewardColors},
+        {"eligibility", "Prismatic Shard remains obtainable from the standard relic population"},
+        {"native_legal_choices", "relic choice remains a normal relic reward; no cross-class card-pool action is exposed"},
+        {"post_action_effect", "holding Shard does not broaden Ironclad card rewards in the staged simulator"},
+        {"rng_save_restore", "qualification marker is source-bound; no Shard-specific RNG or checkpoint witness is claimed"},
+        {"severity", "restricted training exception; unrestricted real-game population is blocked"},
+        {"evidence", "native Shard-present card-reward probe returned only Ironclad RED cards; exact source marker rejects observed Shard exposure"},
         {"unrestricted_real_game_qualification", "BLOCKED_UNTIL_PRISMATIC_SHARD_RESTORATION"},
         {"real_game_trace_status", "REAL_GAME_TRACE_NOT_VERIFIED"},
         {"live_game_parity_status", "LIVE_PARITY_NOT_VERIFIED"}
@@ -901,7 +907,13 @@ nlohmann::json checkRequiredEventMechanics() {
         {"reachability", "relic is obtainable in the standard relic population"},
         {"native_switch_or_todo", "GameContext::disablePrismaticShard in createCardReward"},
         {"effect", "held relic does not enable cross-class card rewards"},
-        {"classification", "RESTRICTED_TRAINING_EXCEPTION"}
+        {"classification", "RESTRICTED_TRAINING_EXCEPTION"},
+        {"eligibility", "standard relic reward population; mechanic is restricted by project stage policy, not hidden from generation"},
+        {"native_legal_choices", "normal relic acquisition remains legal; cross-class reward identities stay Ironclad-only"},
+        {"post_action_or_terminal_effect", "training qualification fails closed on Shard exposure; no censoring is performed here"},
+        {"rng_save_restore", "card reward pool behavior was sampled, not claimed as a cross-version RNG parity proof"},
+        {"severity", "restricted training exception; full real-game qualification remains blocked"},
+        {"evidence", "GameContext::disablePrismaticShard and exact-source trainingPopulationQualificationV1 marker"}
     });
 
     StepSimulator colosseum(CharacterClass::IRONCLAD, 49, 20);
@@ -912,6 +924,7 @@ nlohmann::json checkRequiredEventMechanics() {
     *colosseumGc.map = Map::fromSeed(colosseumGc.seed, colosseumGc.ascension, 2, true);
     colosseumGc.eventList = {Event::COLOSSEUM};
     colosseumGc.shrineList = {Event::ANCIENT_WRITING};
+    colosseumGc.potionChance = 100;
     const bool colosseumCanBeAdded = colosseumGc.canAddEvent(Event::COLOSSEUM);
     const Event selectedEvent = colosseumGc.getEvent(colosseumGc.eventRng);
     require(colosseumCanBeAdded && selectedEvent == Event::COLOSSEUM
@@ -926,12 +939,22 @@ nlohmann::json checkRequiredEventMechanics() {
                     && colosseumGc.info.encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS
                     && colosseumGc.info.eventData == 0,
             "Colosseum setup did not start the native Slavers encounter");
+    GameContext expectedColosseumHiddenRoll = colosseumGc;
+    Rewards expectedColosseumHiddenPotion;
+    expectedColosseumHiddenRoll.addPotionRewards(expectedColosseumHiddenPotion);
+    require(expectedColosseumHiddenPotion.potionCount == 1,
+            "Colosseum first-fight hidden-roll fixture did not guarantee a potion drop");
     (void) colosseum.legalActions(); // initialize the real BattleContext for this encounter
-    colosseumGc.afterBattle(); // native battle-victory continuation
+    colosseum.bc.outcome = Outcome::PLAYER_VICTORY;
+    colosseum.bc.exitBattle(colosseumGc); // native battle-end and event continuation
     require(colosseumGc.screenState == ScreenState::EVENT_SCREEN
                     && colosseumGc.info.eventData == 1
                     && colosseumGc.info.rewardsContainer.getTotalCount() == 0,
             "first Colosseum victory did not expose leave/challenge without ordinary loot");
+    require(colosseumGc.potionChance == expectedColosseumHiddenRoll.potionChance
+                    && colosseumGc.potionRng.counter
+                            == expectedColosseumHiddenRoll.potionRng.counter,
+            "first Colosseum victory did not consume the hidden potion roll");
     const auto colosseumPhaseOneProjection = privilegedProjection(colosseum);
     const auto colosseumChoices = verifyPrivilegedCandidateParity(
             colosseum, colosseumPhaseOneProjection);
@@ -1009,6 +1032,8 @@ nlohmann::json checkRequiredEventMechanics() {
         {"post_victory_native_choices", 2},
         {"first_fight_ordinary_rewards", false},
         {"second_encounter", "COLOSSEUM_EVENT_NOBS"},
+        {"first_fight_smoke_bomb_continues_event", true},
+        {"first_fight_hidden_potion_roll_consumed_but_not_shown", true},
         {"second_reward_replay", firstRewardReplay},
         {"checkpoint_replay_exact", true},
         {"real_game_trace_status", "REAL_GAME_TRACE_NOT_VERIFIED"}
@@ -1022,7 +1047,13 @@ nlohmann::json checkRequiredEventMechanics() {
         {"reachability", "Act 2 event after floor 7"},
         {"native_switch_or_todo", "GameContext::disableColosseum and chooseEventOption"},
         {"effect", "two encounter event, first victory no reward, leave or challenge"},
-        {"classification", "REQUIRED_REPAIR"}
+        {"classification", "REQUIRED_REPAIR_COMPLETED"},
+        {"eligibility", "native Act 2 event pool after floor 7; no A20 exclusion"},
+        {"native_legal_choices", "post-Slavers EVENT_SCREEN exposes leave and challenge; challenge enters Taskmaster/Nob"},
+        {"post_action_or_terminal_effect", "first victory or Smoke Bomb reaches event choice with hidden potion RNG roll and no ordinary loot; second victory awards fixed event rewards"},
+        {"rng_save_restore", "first-fight potion RNG/pity is advanced; second-fight relic/card/gold/potion reward replay matches checkpoint"},
+        {"severity", "P0 required mechanism repaired; live-game parity trace remains unverified"},
+        {"evidence", "Act 2 pool setup, native battle exit, first-fight victory/Smoke Bomb regressions, leave/challenge, second-reward checkpoint replay"}
     });
 
     StepSimulator matchAndKeep(CharacterClass::IRONCLAD, 49, 20);
@@ -1192,7 +1223,98 @@ nlohmann::json checkRequiredEventMechanics() {
         {"reachability", "Act 1/2/3 shrine pools"},
         {"native_switch_or_todo", "GameContext::disableMatchAndKeep and GameAction event action enumeration"},
         {"effect", "12 shuffled cards, pair matching, five attempts, card acquisition"},
-        {"classification", "REQUIRED_REPAIR"}
+        {"classification", "REQUIRED_REPAIR_COMPLETED"},
+        {"eligibility", "native shrine pool in Acts 1, 2 and 3; A20 remains eligible"},
+        {"native_legal_choices", "66 unordered distinct-slot pairs while all 12 cards are concealed, followed by updated revealed-slot choices"},
+        {"post_action_or_terminal_effect", "matching pairs award the card once; after five attempts the event ends and returns to map"},
+        {"rng_save_restore", "native misc/card RNG checkpoint replay is exercised by the event fixture"},
+        {"severity", "P0 required mechanism repaired; live-game parity trace remains unverified"},
+        {"evidence", "native shrine eligibility, pair enumeration/negative actions, match and mismatch execution, five-attempt end, public hidden-card invariance, checkpoint replay"}
+    });
+
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "FALLING_BOTTLED_CARD_EXCLUSION"},
+        {"reachability", "Act 3 standard event pool; no A20 exclusion in the inspected eligibility path"},
+        {"native_switch_or_todo", "GameContext::setupEvent FALLING comment says TODO test and CANNOT BE BOTTLED"},
+        {"eligibility", "reachable Act 3 event; setup samples one candidate index for each present attack/skill/power type"},
+        {"native_legal_choices", "remove one selected attack, skill, or power, or leave; this task has no bottled-card fixture for these branches"},
+        {"post_action_or_terminal_effect", "selected deck index is removed; bottled-card protection is not established by the inspected path"},
+        {"rng_save_restore", "setup selection consumes miscRng; no event checkpoint/replay witness was added here"},
+        {"severity", "P2 unresolved reachable mechanics blocker"},
+        {"evidence", "Act3::events includes FALLING; setupEvent samples indices without an inspected bottled-card filter; chooseEventOption removes the stored index"},
+        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "WE_MEET_AGAIN_BOTTLED_CARD_SELECTION"},
+        {"reachability", "one-time event listed in both Ascension 0 and Ascension 15 event sets"},
+        {"native_switch_or_todo", "GameContext::setupEvent WE_MEET_AGAIN comment is TODO @FIX_BOTTLED"},
+        {"eligibility", "one-time event can be inserted by the native one-time-event path at A20"},
+        {"native_legal_choices", "trade a potion, gold or a nonbasic noncurse card for a relic, or decline"},
+        {"post_action_or_terminal_effect", "selected card is removed by stored deck index; bottled-card exclusion is not established by this inspected path"},
+        {"rng_save_restore", "card/potion choices are selected at setup and relic tier/identity uses native RNG; no replay witness was added here"},
+        {"severity", "P2 unresolved reachable mechanics blocker"},
+        {"evidence", "one-time event arrays include WE_MEET_AGAIN at Ascension 15; getRandomPlayerNonBasicCardIdx filters rarity/type but not bottle state"},
+        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "MYSTERIOUS_SPHERE_GOLDEN_IDOL_EVENT_GOLD"},
+        {"reachability", "Act 3 standard event pool; the encounter is entered by the event choice"},
+        {"native_switch_or_todo", "GameContext::afterBattle MYSTERIOUS_SPHERE comment asks TODO gold from Golden Idol?"},
+        {"eligibility", "reachable Act 3 event fight; Golden Idol is obtainable in the standard relic pool"},
+        {"native_legal_choices", "fight for event rewards or take the event's direct gold option"},
+        {"post_action_or_terminal_effect", "victory grants stored event gold and rare relic; Golden Idol scaling of this gold is unresolved"},
+        {"rng_save_restore", "event gold and rare relic are rolled before battle; no Golden Idol-specific replay witness was added here"},
+        {"severity", "P2 unresolved reachable reward parity blocker"},
+        {"evidence", "Act3::events includes MYSTERIOUS_SPHERE; afterBattle adds info.gold directly and retains the source TODO"},
+        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "PRAYER_WHEEL_COMBAT_REWARD"},
+        {"reachability", "Prayer Wheel is an obtainable relic and may be held at any normal monster fight"},
+        {"native_switch_or_todo", "createCombatReward contains a stale TODO Prayer wheel comment followed by an explicit relic check"},
+        {"eligibility", "normal monster-room combat rewards"},
+        {"native_legal_choices", "the standard card reward action set contains the additional card reward"},
+        {"post_action_or_terminal_effect", "hasRelic(PRAYER_WHEEL) adds a second independently generated card reward"},
+        {"rng_save_restore", "each reward uses the native card reward RNG path; not separately replay-tested in this issue"},
+        {"severity", "NO_ISSUE within inspected reward path"},
+        {"evidence", "GameContext::createCombatReward adds a second createCardReward when Prayer Wheel is present"},
+        {"classification", "NO_ISSUE"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "STOLEN_GOLD_REWARD_ORDER"},
+        {"reachability", "normal monster battles against Looter/Mugger encounters"},
+        {"native_switch_or_todo", "GameContext::afterBattle TODO notes the display ordering of stolen gold"},
+        {"eligibility", "triggered only when native battle state reports nonzero stolenGold"},
+        {"native_legal_choices", "gold is represented in the ordinary reward screen; ordering is not a player action"},
+        {"post_action_or_terminal_effect", "the stolen amount is added to the reward; the TODO concerns ordering only"},
+        {"rng_save_restore", "no additional RNG use is associated with this presentation-order TODO"},
+        {"severity", "NO_ISSUE for mechanics within inspected path; presentation ordering not audited"},
+        {"evidence", "afterBattle appends the exact info.stolenGold amount when nonzero"},
+        {"classification", "NO_ISSUE"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "CURSED_TOME_NECRONOMICON_SETUP_COMMENT"},
+        {"reachability", "Act 2 CURSED_TOME event remains in the standard event pool at A20"},
+        {"native_switch_or_todo", "setupEvent has a generic TODO necronomicon event comment; CURSED_TOME has an implemented branch"},
+        {"eligibility", "normal Act 2 event eligibility"},
+        {"native_legal_choices", "Cursed Tome phase choices include continue/leave and the book reward path"},
+        {"post_action_or_terminal_effect", "book reward path selects Necronomicon, Enchiridion or Nilry's Codex and opens its reward screen"},
+        {"rng_save_restore", "book identity uses miscRng; no separate replay witness was added here"},
+        {"severity", "NO_ISSUE within inspected event path; the comment is not a separate missing event"},
+        {"evidence", "Events::CURSED_TOME is in Act2::events and chooseEventOption implements all three book outcomes"},
+        {"classification", "NO_ISSUE"}
+    });
+    evidence["mechanism_inventory"].push_back({
+        {"mechanism", "DEAD_ADVENTURER_REWARD_OPTION_MAPPING"},
+        {"reachability", "Act 1 standard event pool after floor 6"},
+        {"native_switch_or_todo", "chooseEventOption comment says TODO map onto unique idxs"},
+        {"eligibility", "standard Act 1 event eligibility after floor 6; no A20 exclusion"},
+        {"native_legal_choices", "three stored shuffled reward kinds are exposed by phase; unsupported reward/phase values fail closed in semantic projection"},
+        {"post_action_or_terminal_effect", "native option index selects the mapped gold/card/relic or encounter path"},
+        {"rng_save_restore", "reward order is shuffled during setup with miscRng; no new replay claim is made here"},
+        {"severity", "NO_ISSUE within this bounded scan; not a full event-branch audit"},
+        {"evidence", "Act1::events includes DEAD_ADVENTURER; existing projection fixture rejects out-of-range reward kinds and phases"},
+        {"classification", "NO_ISSUE"}
     });
 
     evidence["real_game_trace_status"] = "REAL_GAME_TRACE_NOT_VERIFIED";
@@ -1201,8 +1323,24 @@ nlohmann::json checkRequiredEventMechanics() {
     evidence["training_authorized"] = false;
     evidence["unrestricted_real_game_qualification"] =
             "BLOCKED_UNTIL_PRISMATIC_SHARD_RESTORATION";
-    evidence["source_disabled_mechanism_inventory_scope"] =
-            "bounded scan of active GameContext disable* switches and directly affected event/action/reward paths; not a full STS mechanics audit";
+    evidence["source_disabled_mechanism_inventory_scope"] = {
+        {"method", "bounded source scan of active GameContext disable* switches and material TODO/unsupported annotations in event setup/choice, battle-end and combat-reward paths"},
+        {"inspected_paths", {
+            "include/game/GameContext.h disable* declarations",
+            "include/constants/Events.h standard act and one-time event pools",
+            "GameContext::canAddEvent/getEvent/setupEvent/getShrine/afterBattle/chooseEventOption/createCombatReward",
+            "GameAction::getAllActionsInState and event execution",
+            "BattleContext::initRelics/exitBattle and potion reward RNG path"
+        }},
+        {"observed_classification_counts", {
+            {"required_repairs_completed", 2},
+            {"restricted_training_exceptions", 1},
+            {"unresolved_real_game_parity_blockers", 3},
+            {"no_issue_within_inspected_scope", 4}
+        }},
+        {"full_sts_mechanics_audit", false},
+        {"note", "Other observed reachable mechanisms are recorded and classified below; they were not automatically repaired because this issue only required Colosseum and Match and Keep."}
+    };
     return evidence;
 }
 
@@ -1984,10 +2122,13 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
         {"effect", "no natural event-screen choice in the active native setup path"},
         {"classification", "NO_ISSUE"}
     });
+    result["source_disabled_mechanism_inventory_scope"] =
+            requiredEventEvidence["source_disabled_mechanism_inventory_scope"];
     result["coverage_limitations"] = {
         "LAB forced EVENT_SCREEN remains unsupported; native setup auto-resolves it to REWARDS, so the forced state is not treated as reachable",
         "Colosseum and Match and Keep have native transition coverage, but no matched live CommunicationMod trace was available",
-        "per-family event execution witnesses are representative rather than an execution of every event branch"
+        "per-family event execution witnesses are representative rather than an execution of every event branch",
+        "the bounded source TODO scan retains unresolved reachable Falling, We Meet Again bottled-card, and Mysterious Sphere Golden Idol reward cases; this is not a full STS mechanics audit"
     };
     result["overall_parity_status"] = "REAL_GAME_PARITY_RESTRICTED_PRISMATIC_SHARD";
     result["real_game_trace_status"] = "REAL_GAME_TRACE_NOT_VERIFIED";
