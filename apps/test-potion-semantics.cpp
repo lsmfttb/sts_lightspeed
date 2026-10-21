@@ -20,6 +20,24 @@ void require(bool condition, const std::string &message) {
     }
 }
 
+void requireNextPotionRewardMatches(
+        GameContext &actual, GameContext &expected, const std::string &context) {
+    Rewards actualNextReward;
+    Rewards expectedNextReward;
+    actual.addPotionRewards(actualNextReward);
+    expected.addPotionRewards(expectedNextReward);
+
+    require(actualNextReward.potionCount == expectedNextReward.potionCount,
+            context + ": next potion reward count differs after hidden roll");
+    for (int i = 0; i < actualNextReward.potionCount; ++i) {
+        require(actualNextReward.potions[i] == expectedNextReward.potions[i],
+                context + ": next potion reward differs after hidden roll");
+    }
+    require(actual.potionChance == expected.potionChance
+                    && actual.potionRng.counter == expected.potionRng.counter,
+            context + ": next potion reward did not continue from the hidden-roll state");
+}
+
 GameContext gameFixture() {
     GameContext gc(CharacterClass::IRONCLAD, 52026, 0);
     gc.potions.fill(Potion::EMPTY_POTION_SLOT);
@@ -542,6 +560,8 @@ void checkColosseumSmokeBombTransitions() {
         const int startingGold = gc.gold;
         const int startingDeckSize = gc.deck.size();
         const int startingRelicCount = gc.relics.size();
+        const int startingPotionChance = gc.potionChance;
+        const int startingPotionRngCounter = gc.potionRng.counter;
         GameContext expectedHiddenRoll = gc;
         Rewards expectedHiddenPotion;
         expectedHiddenRoll.addPotionRewards(expectedHiddenPotion);
@@ -562,11 +582,16 @@ void checkColosseumSmokeBombTransitions() {
             require(gc.potionChance == expectedHiddenRoll.potionChance
                             && gc.potionRng.counter == expectedHiddenRoll.potionRng.counter,
                     "first-fight Smoke Bomb skipped or changed the hidden potion roll");
+            requireNextPotionRewardMatches(
+                    gc, expectedHiddenRoll, "first-fight Smoke Bomb");
         } else {
             require(gc.screenState == ScreenState::MAP_SCREEN
                             && gc.regainControlAction == nullptr
                             && gc.outcome == GameOutcome::UNDECIDED,
                     "second-fight Smoke Bomb did not abandon Colosseum and resume at the map");
+            require(gc.potionChance == startingPotionChance
+                            && gc.potionRng.counter == startingPotionRngCounter,
+                    "second-fight Smoke Bomb incorrectly consumed a first-fight potion roll");
         }
         require(gc.gold == startingGold && gc.deck.size() == startingDeckSize
                         && gc.relics.size() == startingRelicCount
@@ -603,15 +628,16 @@ void checkColosseumFirstFightVictoryHiddenPotionRoll() {
     require(gc.potionChance == expectedHiddenRoll.potionChance
                     && gc.potionRng.counter == expectedHiddenRoll.potionRng.counter,
             "first Colosseum victory skipped or changed the hidden potion roll");
+    requireNextPotionRewardMatches(gc, expectedHiddenRoll, "first-fight victory");
 }
 
 void checkColosseumSecondFightEliteStartRelics() {
     const auto encounter = MonsterEncounter::COLOSSEUM_EVENT_NOBS;
-    auto makeColosseumContext = [encounter](RelicId relic) {
+    auto makeColosseumContext = [](MonsterEncounter encounter, int phase, RelicId relic) {
         auto gc = gameFixture();
         gc.curRoom = Room::EVENT;
         gc.curEvent = Event::COLOSSEUM;
-        gc.info.eventData = 2;
+        gc.info.eventData = phase;
         gc.info.encounter = encounter;
         if (relic != RelicId::INVALID) {
             gc.relics.add({relic, 0});
@@ -619,10 +645,10 @@ void checkColosseumSecondFightEliteStartRelics() {
         return gc;
     };
 
-    auto baseline = makeColosseumContext(RelicId::INVALID);
+    auto baseline = makeColosseumContext(encounter, 2, RelicId::INVALID);
     auto baselineBattle = battleFixture(baseline, encounter, Room::EVENT);
 
-    auto preservedInsect = makeColosseumContext(RelicId::PRESERVED_INSECT);
+    auto preservedInsect = makeColosseumContext(encounter, 2, RelicId::PRESERVED_INSECT);
     auto preservedInsectBattle = battleFixture(preservedInsect, encounter, Room::EVENT);
     for (int i = 0; i < preservedInsectBattle.monsters.monsterCount; ++i) {
         const auto &monster = preservedInsectBattle.monsters.arr[i];
@@ -630,16 +656,56 @@ void checkColosseumSecondFightEliteStartRelics() {
                 "second Colosseum fight did not apply Preserved Insect to every enemy");
     }
 
-    auto slaversCollar = makeColosseumContext(RelicId::SLAVERS_COLLAR);
+    auto slaversCollar = makeColosseumContext(encounter, 2, RelicId::SLAVERS_COLLAR);
     auto slaversCollarBattle = battleFixture(slaversCollar, encounter, Room::EVENT);
     require(slaversCollarBattle.player.energyPerTurn
                     == baselineBattle.player.energyPerTurn + 1,
             "second Colosseum fight did not apply Slaver's Collar elite energy");
 
-    auto slingOfCourage = makeColosseumContext(RelicId::SLING_OF_COURAGE);
+    auto slingOfCourage = makeColosseumContext(encounter, 2, RelicId::SLING_OF_COURAGE);
     auto slingOfCourageBattle = battleFixture(slingOfCourage, encounter, Room::EVENT);
     require(slingOfCourageBattle.player.strength == baselineBattle.player.strength + 2,
             "second Colosseum fight did not apply Sling of Courage elite strength");
+
+    const auto firstEncounter = MonsterEncounter::COLOSSEUM_EVENT_SLAVERS;
+    auto firstFightBaseline = makeColosseumContext(firstEncounter, 0, RelicId::INVALID);
+    auto firstFightBaselineBattle = battleFixture(
+            firstFightBaseline, firstEncounter, Room::EVENT);
+    auto firstFightInsect = makeColosseumContext(
+            firstEncounter, 0, RelicId::PRESERVED_INSECT);
+    auto firstFightInsectBattle = battleFixture(
+            firstFightInsect, firstEncounter, Room::EVENT);
+    for (int i = 0; i < firstFightInsectBattle.monsters.monsterCount; ++i) {
+        const auto &monster = firstFightInsectBattle.monsters.arr[i];
+        require(monster.curHp == monster.maxHp,
+                "ordinary first Colosseum fight was incorrectly elite-classified for Preserved Insect");
+    }
+    auto firstFightCollar = makeColosseumContext(
+            firstEncounter, 0, RelicId::SLAVERS_COLLAR);
+    auto firstFightCollarBattle = battleFixture(
+            firstFightCollar, firstEncounter, Room::EVENT);
+    require(firstFightCollarBattle.player.energyPerTurn
+                    == firstFightBaselineBattle.player.energyPerTurn,
+            "ordinary first Colosseum fight was incorrectly elite-classified for Slaver's Collar");
+    auto firstFightSling = makeColosseumContext(
+            firstEncounter, 0, RelicId::SLING_OF_COURAGE);
+    auto firstFightSlingBattle = battleFixture(
+            firstFightSling, firstEncounter, Room::EVENT);
+    require(firstFightSlingBattle.player.strength
+                    == firstFightBaselineBattle.player.strength,
+            "ordinary first Colosseum fight was incorrectly elite-classified for Sling of Courage");
+
+    auto blackStar = makeColosseumContext(encounter, 2, RelicId::BLACK_STAR);
+    blackStar.regainControlAction = [](GameContext &next) { next.afterBattle(); };
+    auto blackStarBattle = battleFixture(blackStar, encounter, Room::EVENT);
+    blackStarBattle.outcome = Outcome::PLAYER_VICTORY;
+    blackStarBattle.exitBattle(blackStar);
+    const auto &blackStarReward = blackStar.info.rewardsContainer;
+    require(blackStar.screenState == ScreenState::REWARDS
+                    && blackStarReward.relicCount == 2
+                    && getRelicTier(blackStarReward.relics[0]) == RelicTier::UNCOMMON
+                    && getRelicTier(blackStarReward.relics[1]) == RelicTier::RARE,
+            "event-specific second-fight reward incorrectly received Black Star's extra relic");
 }
 
 void checkCombatEndRelic(
