@@ -2444,30 +2444,55 @@ void GameContext::chooseBossRelic(int idx) {
 }
 
 
-void GameContext::chooseMatchAndKeepCards(int idx1, int idx2) {
+void GameContext::chooseMatchAndKeepCard(int idx) {
     if (curEvent != Event::MATCH_AND_KEEP || screenState != ScreenState::EVENT_SCREEN
             || info.eventData <= 0 || info.toSelectCards.size() != 12
-            || idx1 < 0 || idx1 >= 12 || idx2 <= idx1 || idx2 >= 12
-            || info.toSelectCards[idx1].deckIdx != -1
-            || info.toSelectCards[idx2].deckIdx != -1
-            || info.toSelectCards[idx1].card.id == CardId::INVALID
-            || info.toSelectCards[idx2].card.id == CardId::INVALID) {
+            || idx < 0 || idx >= 12
+            || info.toSelectCards[idx].deckIdx != static_cast<std::int16_t>(
+                    MatchAndKeepCardState::FACE_DOWN)
+            || info.toSelectCards[idx].card.id == CardId::INVALID) {
 #ifdef sts_asserts
-        assert(false && "invalid Match and Keep card pair");
+        assert(false && "invalid Match and Keep card selection");
 #endif
         return;
     }
 
-    auto &s1 = info.toSelectCards[idx1].card;
-    auto &s2 = info.toSelectCards[idx2].card;
+    int firstIdx = -1;
+    for (int i = 0; i < static_cast<int>(info.toSelectCards.size()); ++i) {
+        if (info.toSelectCards[i].deckIdx == static_cast<std::int16_t>(
+                MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+            if (firstIdx != -1) {
+#ifdef sts_asserts
+                assert(false && "Match and Keep board has multiple pending first picks");
+#endif
+                return;
+            }
+            firstIdx = i;
+        }
+    }
 
-    if (s1.id == s2.id) {
-        deck.obtain(*this, s1, 1);
-        info.toSelectCards[idx1].deckIdx = 0;
-        info.toSelectCards[idx2].deckIdx = 0;
+    if (firstIdx == -1) {
+        info.toSelectCards[idx].deckIdx = static_cast<std::int16_t>(
+                MatchAndKeepCardState::FIRST_PICK_REVEALED);
+        return;
+    }
+
+    auto &firstSlot = info.toSelectCards[firstIdx];
+    auto &secondSlot = info.toSelectCards[idx];
+    auto &firstCard = firstSlot.card;
+    auto &secondCard = secondSlot.card;
+
+    if (firstCard.id == secondCard.id) {
+        deck.obtain(*this, firstCard, 1);
+        firstSlot.deckIdx = static_cast<std::int16_t>(
+                MatchAndKeepCardState::MATCHED_HIDDEN);
+        secondSlot.deckIdx = static_cast<std::int16_t>(
+                MatchAndKeepCardState::MATCHED_HIDDEN);
     } else {
-        info.toSelectCards[idx1].deckIdx = 1;
-        info.toSelectCards[idx2].deckIdx = 1;
+        firstSlot.deckIdx = static_cast<std::int16_t>(
+                MatchAndKeepCardState::REVEALED_MISMATCH);
+        secondSlot.deckIdx = static_cast<std::int16_t>(
+                MatchAndKeepCardState::REVEALED_MISMATCH);
     }
 
     if (--info.eventData == 0) {

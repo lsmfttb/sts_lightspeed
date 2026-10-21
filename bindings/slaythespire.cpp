@@ -1108,17 +1108,36 @@ pybind11::dict publicChoiceScreenPayload(
                     payload["reason"] = "Match and Keep has an invalid native board or attempt count";
                     return payload;
                 }
+                int firstPickIndex = -1;
+                for (std::size_t index = 0; index < gc.info.toSelectCards.size(); ++index) {
+                    if (gc.info.toSelectCards[index].deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+                        if (firstPickIndex != -1) {
+                            payload["coverage_status"] = "unsupported";
+                            payload["reason"] = "Match and Keep board contains multiple pending first picks";
+                            return payload;
+                        }
+                        firstPickIndex = static_cast<int>(index);
+                    }
+                }
                 pybind11::list cardSlots;
                 for (std::size_t index = 0; index < gc.info.toSelectCards.size(); ++index) {
                     const auto &slot = gc.info.toSelectCards[index];
                     pybind11::dict card;
                     card["index"] = index;
-                    if (slot.deckIdx == 0) {
+                    if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::MATCHED_HIDDEN)) {
                         card["state"] = "matched_hidden";
-                    } else if (slot.deckIdx == 1) {
+                    } else if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::REVEALED_MISMATCH)) {
                         card["state"] = "revealed";
                         card["card"] = publicCardRewardSnapshot(slot.card);
-                    } else if (slot.deckIdx == -1 && slot.card.id != CardId::INVALID) {
+                    } else if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+                        card["state"] = "first_pick_revealed";
+                        card["card"] = publicCardRewardSnapshot(slot.card);
+                    } else if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FACE_DOWN) && slot.card.id != CardId::INVALID) {
                         // Do not inspect or serialize the face-down card ID on
                         // the normal-public interface.
                         card["state"] = "face_down";
@@ -1136,9 +1155,14 @@ pybind11::dict publicChoiceScreenPayload(
                     pybind11::dict choice;
                     choice["candidate_index"] = candidateIndex;
                     if (action.kind == "event") {
-                        choice["choice_type"] = "select_card_pair";
-                        choice["first_card_index"] = action.idx1;
-                        choice["second_card_index"] = action.idx2;
+                        if (firstPickIndex == -1) {
+                            choice["choice_type"] = "select_first_card";
+                            choice["card_index"] = action.idx1;
+                        } else {
+                            choice["choice_type"] = "select_second_card";
+                            choice["first_card_index"] = firstPickIndex;
+                            choice["card_index"] = action.idx1;
+                        }
                     } else if (action.kind == "game_potion_use"
                             || action.kind == "game_potion_discard") {
                         choice["choice_type"] = action.kind == "game_potion_use"
@@ -1155,9 +1179,13 @@ pybind11::dict publicChoiceScreenPayload(
                 payload["source"] = "GameContext::info.toSelectCards, GameContext::info.eventData, and GameAction::getAllActionsInState MATCH_AND_KEEP";
                 payload["event"] = "MATCH_AND_KEEP";
                 payload["attempts_remaining"] = gc.info.eventData;
+                payload["phase"] = firstPickIndex == -1 ? "select_first_card" : "select_second_card";
+                if (firstPickIndex != -1) {
+                    payload["first_card_index"] = firstPickIndex;
+                }
                 payload["cards"] = cardSlots;
                 payload["choices"] = choices;
-                payload["hidden_card_note"] = "face-down and matched card identities are withheld; revealed mismatched identities are public";
+                payload["hidden_card_note"] = "face-down and matched card identities are withheld; the pending first pick and mismatched identities are public";
                 return payload;
             }
             payload["coverage_status"] = "unsupported";
@@ -1381,37 +1409,60 @@ pybind11::dict privilegedEventChoice(
             features[name] = privilegedChoiceUnavailable(reason, false);
         };
         if (gc.curEvent == Event::MATCH_AND_KEEP) {
-            const int firstIndex = action.idx1;
-            const int secondIndex = action.idx2;
+            const int selectedIndex = action.idx1;
+            int firstPickIndex = -1;
+            for (int index = 0; index < static_cast<int>(gc.info.toSelectCards.size()); ++index) {
+                if (gc.info.toSelectCards[index].deckIdx == static_cast<std::int16_t>(
+                        MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+                    if (firstPickIndex != -1) {
+                        setUnavailable("Match and Keep board contains multiple pending first picks");
+                        return features;
+                    }
+                    firstPickIndex = index;
+                }
+            }
             if (gc.info.eventData <= 0 || gc.info.toSelectCards.size() != 12
-                    || firstIndex < 0 || firstIndex >= secondIndex || secondIndex >= 12
-                    || gc.info.toSelectCards[firstIndex].deckIdx != -1
-                    || gc.info.toSelectCards[secondIndex].deckIdx != -1) {
-                setUnavailable("Match and Keep candidate does not bind to two live face-down native card slots");
+                    || selectedIndex < 0 || selectedIndex >= 12 || action.idx2 != 0
+                    || gc.info.toSelectCards[selectedIndex].deckIdx != static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FACE_DOWN)) {
+                setUnavailable("Match and Keep candidate does not bind to a live face-down native card slot");
                 return features;
             }
-            const auto &firstCard = gc.info.toSelectCards[firstIndex].card;
-            const auto &secondCard = gc.info.toSelectCards[secondIndex].card;
             pybind11::dict choice;
-            choice["choice_type"] = "reveal_two_cards";
-            choice["effect_type"] = firstCard.id == secondCard.id
-                    ? "obtain_matching_card_and_hide_pair"
-                    : "reveal_mismatched_pair";
-            choice["first_card_index"] = firstIndex;
-            choice["second_card_index"] = secondIndex;
             choice["attempts_remaining"] = gc.info.eventData;
-            features["choice"] = privilegedChoiceFeature(
-                    choice, "oracle_only",
-                    "GameContext::chooseMatchAndKeepCards and native pair action enumeration");
-            features["first_card_identity"] = privilegedChoiceFeature(
-                    publicCardRewardSnapshot(firstCard), "oracle_only",
-                    "ScreenStateInfo::toSelectCards face-down card identity");
-            features["second_card_identity"] = privilegedChoiceFeature(
-                    publicCardRewardSnapshot(secondCard), "oracle_only",
-                    "ScreenStateInfo::toSelectCards face-down card identity");
-            features["cards_match"] = privilegedChoiceFeature(
-                    pybind11::bool_(firstCard.id == secondCard.id), "oracle_only",
-                    "GameContext::chooseMatchAndKeepCards CardId equality branch");
+            if (firstPickIndex == -1) {
+                const auto &selectedCard = gc.info.toSelectCards[selectedIndex].card;
+                choice["choice_type"] = "reveal_first_card";
+                choice["effect_type"] = "expose_selected_card_and_offer_second_pick";
+                choice["card_index"] = selectedIndex;
+                features["choice"] = privilegedChoiceFeature(
+                        choice, "public_now",
+                        "GameContext::chooseMatchAndKeepCard first-pick transition");
+                features["revealed_card_identity"] = privilegedChoiceFeature(
+                        publicCardRewardSnapshot(selectedCard), "oracle_only",
+                        "ScreenStateInfo::toSelectCards face-down card identity revealed by this action");
+            } else {
+                const auto &firstCard = gc.info.toSelectCards[firstPickIndex].card;
+                const auto &secondCard = gc.info.toSelectCards[selectedIndex].card;
+                choice["choice_type"] = "select_second_card";
+                choice["effect_type"] = firstCard.id == secondCard.id
+                        ? "obtain_matching_card_and_hide_pair"
+                        : "reveal_mismatched_pair";
+                choice["first_card_index"] = firstPickIndex;
+                choice["second_card_index"] = selectedIndex;
+                features["choice"] = privilegedChoiceFeature(
+                        choice, "public_now",
+                        "GameContext::chooseMatchAndKeepCard second-pick transition");
+                features["first_card_identity"] = privilegedChoiceFeature(
+                        publicCardRewardSnapshot(firstCard), "public_now",
+                        "ScreenStateInfo::toSelectCards first-pick revealed identity");
+                features["second_card_identity"] = privilegedChoiceFeature(
+                        publicCardRewardSnapshot(secondCard), "oracle_only",
+                        "ScreenStateInfo::toSelectCards face-down card identity");
+                features["cards_match"] = privilegedChoiceFeature(
+                        pybind11::bool_(firstCard.id == secondCard.id), "oracle_only",
+                        "GameContext::chooseMatchAndKeepCard CardId equality branch");
+            }
             return features;
         }
         const int idx = action.idx1;

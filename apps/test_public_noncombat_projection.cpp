@@ -1076,15 +1076,15 @@ nlohmann::json checkRequiredEventMechanics() {
                     && matchGc.info.toSelectCards.size() == 12,
             "Match and Keep setup did not initialize its native 12-card, five-attempt board");
     const int startingDeckSize = matchGc.deck.size();
-    const auto matchActions = matchAndKeep.legalActions();
-    require(matchActions.size() == 66,
-            "Match and Keep did not enumerate all 66 starting unordered card pairs");
-    require(!search::GameAction(0, 0).isValidAction(matchGc)
-                    && !search::GameAction(1, 0).isValidAction(matchGc),
-            "Match and Keep accepted a same-slot or reversed duplicate pair");
+    const auto firstPickActions = matchAndKeep.legalActions();
+    require(firstPickActions.size() == 12,
+            "Match and Keep did not enumerate one first-pick action per concealed card");
+    require(!search::GameAction(0, 1).isValidAction(matchGc)
+                    && !search::GameAction(12).isValidAction(matchGc),
+            "Match and Keep accepted a pair action or an out-of-range first pick");
 
     const auto publicBeforeHiddenMutation = matchAndKeep.publicProjectionV3();
-    const auto hiddenSlot = matchActions.front().idx1;
+    const auto hiddenSlot = firstPickActions.front().idx1;
     const auto originalHiddenCard = matchGc.info.toSelectCards[hiddenSlot].card;
     const auto alternateCard = originalHiddenCard.id == CardId::BASH
             ? Card(CardId::IRON_WAVE) : Card(CardId::BASH);
@@ -1095,103 +1095,234 @@ nlohmann::json checkRequiredEventMechanics() {
     matchGc.info.toSelectCards[hiddenSlot].card = originalHiddenCard;
     const auto matchPublicPayload = screenPayload(publicBeforeHiddenMutation);
     require(matchPublicPayload["coverage_status"].cast<std::string>() == "supported"
-                    && matchPublicPayload["choices"].cast<pybind11::list>().size() == 66,
-            "normal-public Match and Keep payload does not describe all visible pair choices");
+                    && matchPublicPayload["phase"].cast<std::string>() == "select_first_card"
+                    && matchPublicPayload["choices"].cast<pybind11::list>().size() == 12,
+            "normal-public Match and Keep payload does not describe first-card choices");
     const auto publicSlots = matchPublicPayload["cards"].cast<pybind11::list>();
     require(publicSlots.size() == 12
                     && !publicSlots[hiddenSlot].cast<pybind11::dict>().contains("card"),
             "normal-public Match and Keep exposed a face-down card identity");
 
     const auto matchProjection = privilegedProjection(matchAndKeep);
-    const auto checkedMatchActions = verifyPrivilegedCandidateParity(
+    const auto checkedFirstPickActions = verifyPrivilegedCandidateParity(
             matchAndKeep, matchProjection);
-    require(checkedMatchActions.size() == 66,
-            "privileged Match and Keep projection did not preserve the full native pair order");
-    const auto checkpoint = matchAndKeep.captureCheckpoint();
-    std::size_t mismatchIndex = checkedMatchActions.size();
-    for (std::size_t index = 0; index < checkedMatchActions.size(); ++index) {
-        const auto &action = checkedMatchActions[index];
-        if (matchGc.info.toSelectCards[action.idx1].card.id
-                != matchGc.info.toSelectCards[action.idx2].card.id) {
-            mismatchIndex = index;
+    require(checkedFirstPickActions.size() == 12,
+            "privileged Match and Keep projection did not preserve first-pick candidates");
+    const auto firstCandidateRows = matchProjection["candidates"].cast<pybind11::list>();
+    const auto firstCandidateFeatures = firstCandidateRows[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    require(firstCandidateFeatures["choice"].cast<pybind11::dict>()
+                            ["value"].cast<pybind11::dict>()
+                            ["choice_type"].cast<std::string>() == "reveal_first_card"
+                    && firstCandidateFeatures["revealed_card_identity"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "oracle_only",
+            "privileged first-pick projection did not label the card reveal as an oracle-only transition outcome");
+    std::size_t mismatchFirstActionIndex = checkedFirstPickActions.size();
+    int mismatchSecondIndex = -1;
+    for (std::size_t firstActionIndex = 0;
+            firstActionIndex < checkedFirstPickActions.size(); ++firstActionIndex) {
+        const int firstIndex = checkedFirstPickActions[firstActionIndex].idx1;
+        for (const auto &secondAction : checkedFirstPickActions) {
+            const int secondIndex = secondAction.idx1;
+            if (firstIndex != secondIndex
+                    && matchGc.info.toSelectCards[firstIndex].card.id
+                            != matchGc.info.toSelectCards[secondIndex].card.id) {
+                mismatchFirstActionIndex = firstActionIndex;
+                mismatchSecondIndex = secondIndex;
+                break;
+            }
+        }
+        if (mismatchFirstActionIndex != checkedFirstPickActions.size()) {
             break;
         }
     }
-    require(mismatchIndex < checkedMatchActions.size(),
-            "Match and Keep fixture has no mismatching legal pair");
-    const auto mismatchAction = checkedMatchActions[mismatchIndex];
+    require(mismatchFirstActionIndex < checkedFirstPickActions.size(),
+            "Match and Keep fixture has no mismatching two-step selection");
+    const int mismatchFirstIndex = checkedFirstPickActions[mismatchFirstActionIndex].idx1;
+    (void) matchAndKeep.step(checkedFirstPickActions[mismatchFirstActionIndex]);
+    const auto intermediatePublicProjection = matchAndKeep.publicProjectionV3();
+    const auto intermediatePublicPayload = screenPayload(intermediatePublicProjection);
+    const auto intermediateCards = intermediatePublicPayload["cards"].cast<pybind11::list>();
+    require(matchGc.info.eventData == 5
+                    && matchGc.info.toSelectCards[mismatchFirstIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::FIRST_PICK_REVEALED)
+                    && matchGc.deck.size() == startingDeckSize
+                    && intermediatePublicPayload["phase"].cast<std::string>() == "select_second_card"
+                    && intermediatePublicPayload["first_card_index"].cast<int>() == mismatchFirstIndex
+                    && intermediateCards[mismatchFirstIndex].cast<pybind11::dict>()
+                            ["state"].cast<std::string>() == "first_pick_revealed"
+                    && intermediateCards[mismatchFirstIndex].cast<pybind11::dict>().contains("card")
+                    && intermediateCards[mismatchFirstIndex].cast<pybind11::dict>()
+                            ["card"].cast<pybind11::dict>()["id"].cast<int>()
+                            == static_cast<int>(matchGc.info.toSelectCards[mismatchFirstIndex].card.getId())
+                    && intermediateCards[mismatchSecondIndex].cast<pybind11::dict>()
+                            ["state"].cast<std::string>() == "face_down"
+                    && !intermediateCards[mismatchSecondIndex].cast<pybind11::dict>().contains("card"),
+            "first Match and Keep selection did not reveal only its own card before the second choice");
+    const auto secondPickActions = matchAndKeep.legalActions();
+    require(secondPickActions.size() == 11
+                    && std::none_of(secondPickActions.begin(), secondPickActions.end(),
+                            [mismatchFirstIndex](const auto &action) {
+                                return action.idx1 == mismatchFirstIndex;
+                            })
+                    && !search::GameAction(mismatchFirstIndex).isValidAction(matchGc),
+            "Match and Keep second-pick legal choices did not exclude the revealed first card");
+    const int hiddenAfterFirstPick = secondPickActions.front().idx1 == mismatchSecondIndex
+            ? secondPickActions.back().idx1 : secondPickActions.front().idx1;
+    const auto hiddenAfterFirstPickOriginal = matchGc.info.toSelectCards[hiddenAfterFirstPick].card;
+    matchGc.info.toSelectCards[hiddenAfterFirstPick].card =
+            hiddenAfterFirstPickOriginal.id == CardId::BASH
+                    ? Card(CardId::IRON_WAVE) : Card(CardId::BASH);
+    require(intermediatePublicProjection.equal(matchAndKeep.publicProjectionV3()),
+            "normal-public Match and Keep second-pick observation changed when an unselected hidden card changed");
+    matchGc.info.toSelectCards[hiddenAfterFirstPick].card = hiddenAfterFirstPickOriginal;
+    const auto secondPickProjection = privilegedProjection(matchAndKeep);
+    const auto checkedSecondPickActions = verifyPrivilegedCandidateParity(
+            matchAndKeep, secondPickProjection);
+    require(checkedSecondPickActions.size() == 11,
+            "privileged Match and Keep projection did not preserve second-pick candidates");
+    const auto secondCandidateRows = secondPickProjection["candidates"].cast<pybind11::list>();
+    const auto secondCandidateFeatures = secondCandidateRows[0].cast<pybind11::dict>()
+            ["features"].cast<pybind11::dict>();
+    require(secondCandidateFeatures["choice"].cast<pybind11::dict>()
+                            ["value"].cast<pybind11::dict>()
+                            ["choice_type"].cast<std::string>() == "select_second_card"
+                    && secondCandidateFeatures["first_card_identity"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "public_now"
+                    && secondCandidateFeatures["second_card_identity"].cast<pybind11::dict>()
+                            ["visibility"].cast<std::string>() == "oracle_only",
+            "privileged second-pick projection did not separate public first-card and hidden second-card identities");
+
+    const auto checkpoint = matchAndKeep.captureCheckpoint();
+    const auto publicBeforeSecondPick = encodePython(intermediatePublicProjection);
+    const auto privilegedBeforeSecondPick = encodePython(secondPickProjection);
     const auto mismatchRngBefore = std::array<std::int32_t, 3>{
             matchGc.cardRng.counter, matchGc.miscRng.counter, matchGc.eventRng.counter};
-    (void) matchAndKeep.step(mismatchAction);
+    std::size_t mismatchSecondActionIndex = checkedSecondPickActions.size();
+    for (std::size_t index = 0; index < checkedSecondPickActions.size(); ++index) {
+        if (checkedSecondPickActions[index].idx1 == mismatchSecondIndex) {
+            mismatchSecondActionIndex = index;
+            break;
+        }
+    }
+    require(mismatchSecondActionIndex < checkedSecondPickActions.size(),
+            "Match and Keep did not expose the selected mismatching second card");
+    (void) matchAndKeep.step(checkedSecondPickActions[mismatchSecondActionIndex]);
     require(matchGc.info.eventData == 4
-                    && matchGc.info.toSelectCards[mismatchAction.idx1].deckIdx == 1
-                    && matchGc.info.toSelectCards[mismatchAction.idx2].deckIdx == 1
-                    && matchGc.deck.size() == startingDeckSize
-                    && !search::GameAction(mismatchAction.idx1, mismatchAction.idx2)
-                            .isValidAction(matchGc),
-            "Match and Keep mismatch did not reveal, consume one attempt, and prohibit reselecting");
+                    && matchGc.info.toSelectCards[mismatchFirstIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH)
+                    && matchGc.info.toSelectCards[mismatchSecondIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH)
+                    && matchGc.deck.size() == startingDeckSize,
+            "Match and Keep mismatch did not resolve the pair and consume exactly one attempt");
+    const auto publicAfterMismatch = encodePython(matchAndKeep.publicProjectionV3());
     const auto mismatchRngAfter = std::array<std::int32_t, 3>{
             matchGc.cardRng.counter, matchGc.miscRng.counter, matchGc.eventRng.counter};
     require(mismatchRngBefore == mismatchRngAfter,
-            "Match and Keep pair selection unexpectedly advanced card/event RNG");
+            "Match and Keep two-step card selection unexpectedly advanced card/event RNG");
     (void) matchAndKeep.restoreCheckpoint(checkpoint);
     require(matchGc.info.eventData == 5
-                    && matchGc.info.toSelectCards[mismatchAction.idx1].deckIdx == -1
+                    && matchGc.info.toSelectCards[mismatchFirstIndex].deckIdx
+                            == static_cast<std::int16_t>(MatchAndKeepCardState::FIRST_PICK_REVEALED)
                     && mismatchRngBefore == std::array<std::int32_t, 3>{
-                            matchGc.cardRng.counter, matchGc.miscRng.counter, matchGc.eventRng.counter},
-            "Match and Keep checkpoint restore did not restore board state and RNG");
-    const auto replayActions = matchAndKeep.legalActions();
-    std::size_t replayMismatchIndex = replayActions.size();
-    for (std::size_t index = 0; index < replayActions.size(); ++index) {
-        if (replayActions[index].idx1 == mismatchAction.idx1
-                && replayActions[index].idx2 == mismatchAction.idx2) {
-            replayMismatchIndex = index;
+                            matchGc.cardRng.counter, matchGc.miscRng.counter, matchGc.eventRng.counter}
+                    && encodePython(matchAndKeep.publicProjectionV3()) == publicBeforeSecondPick
+                    && encodePython(privilegedProjection(matchAndKeep)) == privilegedBeforeSecondPick,
+            "Match and Keep checkpoint did not replay the intermediate observation, choices and RNG");
+    std::size_t replaySecondActionIndex = matchAndKeep.legalActions().size();
+    const auto replaySecondActions = matchAndKeep.legalActions();
+    for (std::size_t index = 0; index < replaySecondActions.size(); ++index) {
+        if (replaySecondActions[index].idx1 == mismatchSecondIndex) {
+            replaySecondActionIndex = index;
             break;
         }
     }
-    require(replayMismatchIndex < replayActions.size(),
-            "restored Match and Keep board did not recreate its exact candidate");
-    (void) matchAndKeep.step(replayActions[replayMismatchIndex]);
-    int matchedRewards = 0;
-    const auto matchingActions = matchAndKeep.legalActions();
-    std::size_t matchingPairIndex = matchingActions.size();
-    for (std::size_t index = 0; index < matchingActions.size(); ++index) {
-        const auto &action = matchingActions[index];
-        if (matchGc.info.toSelectCards[action.idx1].card.id
-                == matchGc.info.toSelectCards[action.idx2].card.id) {
-            matchingPairIndex = index;
-            break;
-        }
-    }
-    require(matchingPairIndex < matchingActions.size(),
-            "Match and Keep fixture has no remaining matching pair after the mismatch");
-    const auto matchingPair = matchingActions[matchingPairIndex];
-    const int deckBeforeMatch = matchGc.deck.size();
-    (void) matchAndKeep.step(matchingPair);
-    matchedRewards = 1;
-    require(matchGc.deck.size() == deckBeforeMatch + 1
-                    && matchGc.info.toSelectCards[matchingPair.idx1].deckIdx == 0
-                    && matchGc.info.toSelectCards[matchingPair.idx2].deckIdx == 0,
-            "Match and Keep match did not award exactly one card and hide the pair");
+    require(replaySecondActionIndex < replaySecondActions.size(),
+            "restored Match and Keep intermediate board did not recreate its second-pick action");
+    (void) matchAndKeep.step(replaySecondActions[replaySecondActionIndex]);
+    require(matchGc.info.eventData == 4
+                    && encodePython(matchAndKeep.publicProjectionV3()) == publicAfterMismatch,
+            "replayed Match and Keep second pick did not reproduce the mismatch observation");
 
-    for (int pair = 0; pair < 3; ++pair) {
+    auto chooseFirstForMatch = [&]() {
         const auto actions = matchAndKeep.legalActions();
-        require(!actions.empty(), "Match and Keep exhausted live pairs before five attempts");
-        const auto action = actions.front();
+        std::size_t firstActionIndex = actions.size();
+        int secondIndex = -1;
+        for (std::size_t firstIndex = 0; firstIndex < actions.size(); ++firstIndex) {
+            for (const auto &candidateSecond : actions) {
+                if (actions[firstIndex].idx1 != candidateSecond.idx1
+                        && matchGc.info.toSelectCards[actions[firstIndex].idx1].card.id
+                                == matchGc.info.toSelectCards[candidateSecond.idx1].card.id) {
+                    firstActionIndex = firstIndex;
+                    secondIndex = candidateSecond.idx1;
+                    break;
+                }
+            }
+            if (firstActionIndex != actions.size()) break;
+        }
+        require(firstActionIndex < actions.size(),
+                "Match and Keep fixture has no remaining matching two-step selection");
+        const int firstIndex = actions[firstActionIndex].idx1;
+        (void) matchAndKeep.step(actions[firstActionIndex]);
+        const auto choices = matchAndKeep.legalActions();
+        std::size_t secondActionIndex = choices.size();
+        for (std::size_t index = 0; index < choices.size(); ++index) {
+            if (choices[index].idx1 == secondIndex) {
+                secondActionIndex = index;
+                break;
+            }
+        }
+        require(secondActionIndex < choices.size(),
+                "Match and Keep hid the matching second card after its first reveal");
+        const int deckBeforeMatch = matchGc.deck.size();
+        (void) matchAndKeep.step(choices[secondActionIndex]);
+        require(matchGc.deck.size() == deckBeforeMatch + 1
+                        && matchGc.info.toSelectCards[firstIndex].deckIdx
+                                == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN)
+                        && matchGc.info.toSelectCards[secondIndex].deckIdx
+                                == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN),
+                "Match and Keep match did not award exactly one card and hide the pair");
+    };
+    chooseFirstForMatch();
+    int matchedRewards = 1;
+
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const auto actions = matchAndKeep.legalActions();
+        require(!actions.empty(), "Match and Keep exhausted first-pick actions before five attempts");
+        const auto firstAction = actions.front();
+        const int firstIndex = firstAction.idx1;
         const int deckBefore = matchGc.deck.size();
-        const bool isMatch = matchGc.info.toSelectCards[action.idx1].card.id
-                == matchGc.info.toSelectCards[action.idx2].card.id;
-        (void) matchAndKeep.step(action);
+        (void) matchAndKeep.step(firstAction);
+        const auto secondActions = matchAndKeep.legalActions();
+        require(secondActions.size() == actions.size() - 1,
+                "Match and Keep did not expose one second-pick action per other face-down card");
+        std::size_t secondActionIndex = 0;
+        for (std::size_t index = 0; index < secondActions.size(); ++index) {
+            if (matchGc.info.toSelectCards[firstIndex].card.id
+                    == matchGc.info.toSelectCards[secondActions[index].idx1].card.id) {
+                secondActionIndex = index;
+                break;
+            }
+            if (secondActionIndex == 0) secondActionIndex = index;
+        }
+        const int secondIndex = secondActions[secondActionIndex].idx1;
+        const bool isMatch = matchGc.info.toSelectCards[firstIndex].card.id
+                == matchGc.info.toSelectCards[secondIndex].card.id;
+        (void) matchAndKeep.step(secondActions[secondActionIndex]);
         if (isMatch) {
             ++matchedRewards;
             require(matchGc.deck.size() == deckBefore + 1
-                            && matchGc.info.toSelectCards[action.idx1].deckIdx == 0
-                            && matchGc.info.toSelectCards[action.idx2].deckIdx == 0,
+                            && matchGc.info.toSelectCards[firstIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN)
+                            && matchGc.info.toSelectCards[secondIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::MATCHED_HIDDEN),
                     "Match and Keep match did not award exactly one card and hide the pair");
         } else {
             require(matchGc.deck.size() == deckBefore
-                            && matchGc.info.toSelectCards[action.idx1].deckIdx == 1
-                            && matchGc.info.toSelectCards[action.idx2].deckIdx == 1,
+                            && matchGc.info.toSelectCards[firstIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH)
+                            && matchGc.info.toSelectCards[secondIndex].deckIdx
+                                    == static_cast<std::int16_t>(MatchAndKeepCardState::REVEALED_MISMATCH),
                     "Match and Keep mismatch changed the deck or failed to reveal both cards");
         }
     }
@@ -1204,10 +1335,12 @@ nlohmann::json checkRequiredEventMechanics() {
         {"status", "supported"},
         {"reachability_classification", "actual_reachable_act1_shrine"},
         {"native_switch_disabled", GameContext::disableMatchAndKeep},
-        {"starting_unordered_pair_actions", 66},
-        {"negative_same_slot_and_duplicate_pair_actions_rejected", true},
-        {"public_projection_hidden_card_mutation_invariant", true},
-        {"privileged_pair_projection_candidate_count", checkedMatchActions.size()},
+        {"starting_first_pick_actions", 12},
+        {"second_pick_actions_after_first_reveal", 11},
+        {"pair_actions_rejected", true},
+        {"first_card_revealed_before_second_choice", true},
+        {"public_projection_hides_other_face_down_card_identities", true},
+        {"privileged_first_and_second_choice_candidate_counts", {checkedFirstPickActions.size(), checkedSecondPickActions.size()}},
         {"mismatch_match_and_five_attempt_progression", true},
         {"matching_pair_card_award", true},
         {"checkpoint_rng_replay", true},
@@ -1216,7 +1349,7 @@ nlohmann::json checkRequiredEventMechanics() {
     };
     evidence["execution_witnesses"].push_back({
         {"family", "EVENT_SCREEN:MATCH_AND_KEEP"},
-        {"effect", "native shrine eligibility, hidden/revealed slot projection, pair action execution, card acquisition, attempt exhaustion and map continuation"}
+        {"effect", "native shrine eligibility, first-card reveal transition, identity-conditioned second-card choices, card acquisition, attempt exhaustion and map continuation"}
     });
     evidence["mechanism_inventory"].push_back({
         {"mechanism", "MATCH_AND_KEEP"},
@@ -1225,11 +1358,11 @@ nlohmann::json checkRequiredEventMechanics() {
         {"effect", "12 shuffled cards, pair matching, five attempts, card acquisition"},
         {"classification", "REQUIRED_REPAIR_COMPLETED"},
         {"eligibility", "native shrine pool in Acts 1, 2 and 3; A20 remains eligible"},
-        {"native_legal_choices", "66 unordered distinct-slot pairs while all 12 cards are concealed, followed by updated revealed-slot choices"},
+        {"native_legal_choices", "12 first-card choices, then 11 second-card choices after the first selected identity is revealed; each completed pair consumes one attempt"},
         {"post_action_or_terminal_effect", "matching pairs award the card once; after five attempts the event ends and returns to map"},
         {"rng_save_restore", "native misc/card RNG checkpoint replay is exercised by the event fixture"},
         {"severity", "P0 required mechanism repaired; live-game parity trace remains unverified"},
-        {"evidence", "native shrine eligibility, pair enumeration/negative actions, match and mismatch execution, five-attempt end, public hidden-card invariance, checkpoint replay"}
+        {"evidence", "native shrine eligibility, separate first and second pick enumeration, match and mismatch execution, five-attempt end, public hidden-card invariance, intermediate checkpoint replay"}
     });
 
     evidence["mechanism_inventory"].push_back({

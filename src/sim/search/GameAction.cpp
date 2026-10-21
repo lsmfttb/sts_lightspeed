@@ -48,16 +48,27 @@ std::ostream &search::GameAction::printDesc(std::ostream &os, const GameContext 
 
 bool isValidMatchAndKeepEventAction(const GameContext &gc, const search::GameAction a) {
     if (a.isPotionAction() || gc.info.eventData <= 0
-            || gc.info.toSelectCards.size() != 12) {
+            || gc.info.toSelectCards.size() != 12 || a.getIdx2() != 0) {
         return false;
     }
-    const int idx1 = a.getIdx1();
-    const int idx2 = a.getIdx2();
-    return idx1 >= 0 && idx1 < idx2 && idx2 < 12
-            && gc.info.toSelectCards[idx1].deckIdx == -1
-            && gc.info.toSelectCards[idx2].deckIdx == -1
-            && gc.info.toSelectCards[idx1].card.id != CardId::INVALID
-            && gc.info.toSelectCards[idx2].card.id != CardId::INVALID;
+    const int idx = a.getIdx1();
+    if (idx < 0 || idx >= 12
+            || gc.info.toSelectCards[idx].deckIdx != static_cast<std::int16_t>(
+                    MatchAndKeepCardState::FACE_DOWN)
+            || gc.info.toSelectCards[idx].card.id == CardId::INVALID) {
+        return false;
+    }
+    int pendingFirstIdx = -1;
+    for (int i = 0; i < static_cast<int>(gc.info.toSelectCards.size()); ++i) {
+        if (gc.info.toSelectCards[i].deckIdx == static_cast<std::int16_t>(
+                MatchAndKeepCardState::FIRST_PICK_REVEALED)) {
+            if (pendingFirstIdx != -1) {
+                return false;
+            }
+            pendingFirstIdx = i;
+        }
+    }
+    return pendingFirstIdx != idx;
 }
 
 bool isValidDesignerInSpireEventAction(const GameContext &gc, const search::GameAction a) {
@@ -441,7 +452,7 @@ void search::GameAction::execute(GameContext &gc) const {
     switch (gc.screenState) {
         case ScreenState::EVENT_SCREEN:
             if (gc.curEvent == Event::MATCH_AND_KEEP) {
-                gc.chooseMatchAndKeepCards(getIdx1(), getIdx2());
+                gc.chooseMatchAndKeepCard(getIdx1());
             } else {
                 gc.chooseEventOption(getIdx1());
             }
@@ -640,17 +651,21 @@ std::vector<search::GameAction> search::GameAction::getAllActionsInState(const s
                 if (gc.info.eventData <= 0 || gc.info.toSelectCards.size() != 12) {
                     return actions;
                 }
+                int pendingFirstPicks = 0;
+                for (const auto &slot : gc.info.toSelectCards) {
+                    if (slot.deckIdx == static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FIRST_PICK_REVEALED)
+                            && ++pendingFirstPicks > 1) {
+                        return actions;
+                    }
+                }
                 for (int idx1 = 0; idx1 < 12; ++idx1) {
-                    if (gc.info.toSelectCards[idx1].deckIdx != -1
+                    if (gc.info.toSelectCards[idx1].deckIdx != static_cast<std::int16_t>(
+                            MatchAndKeepCardState::FACE_DOWN)
                             || gc.info.toSelectCards[idx1].card.id == CardId::INVALID) {
                         continue;
                     }
-                    for (int idx2 = idx1 + 1; idx2 < 12; ++idx2) {
-                        if (gc.info.toSelectCards[idx2].deckIdx == -1
-                                && gc.info.toSelectCards[idx2].card.id != CardId::INVALID) {
-                            actions.emplace_back(idx1, idx2);
-                        }
-                    }
+                    actions.emplace_back(idx1);
                 }
                 return actions;
             } else {
