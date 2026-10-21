@@ -1132,6 +1132,934 @@ pybind11::dict publicChoiceScreenPayload(
             return payload;
     }
 }
+
+// Privileged training features are deliberately additive and separate from the
+// frozen normal-public projections above.  Every feature value states whether
+// it is observable on the live screen or comes from simulator state that only
+// a training-time oracle may see.
+pybind11::dict privilegedChoiceFeature(
+        const pybind11::object &value,
+        const char *visibility,
+        const char *source) {
+    pybind11::dict ret;
+    ret["availability"] = "available";
+    ret["visibility"] = visibility;
+    ret["source"] = source;
+    ret["value"] = value;
+    return ret;
+}
+
+pybind11::dict privilegedChoiceUnavailable(const char *reason, const bool required = true) {
+    pybind11::dict ret;
+    ret["availability"] = "unavailable";
+    ret["required_for_choice_semantics"] = required;
+    ret["reason"] = reason;
+    return ret;
+}
+
+bool privilegedRequiredFeatureUnavailable(const pybind11::dict &feature) {
+    if (!feature.contains("availability")
+            || feature["availability"].cast<std::string>() != "unavailable") {
+        return false;
+    }
+    return !feature.contains("required_for_choice_semantics")
+            || feature["required_for_choice_semantics"].cast<bool>();
+}
+
+const char *cardSelectTypeLabel(const CardSelectScreenType type) {
+    switch (type) {
+        case CardSelectScreenType::TRANSFORM: return "TRANSFORM";
+        case CardSelectScreenType::TRANSFORM_UPGRADE: return "TRANSFORM_UPGRADE";
+        case CardSelectScreenType::UPGRADE: return "UPGRADE";
+        case CardSelectScreenType::REMOVE: return "REMOVE";
+        case CardSelectScreenType::DUPLICATE: return "DUPLICATE";
+        case CardSelectScreenType::OBTAIN: return "OBTAIN";
+        case CardSelectScreenType::BOTTLE: return "BOTTLE";
+        case CardSelectScreenType::BONFIRE_SPIRITS: return "BONFIRE_SPIRITS";
+        case CardSelectScreenType::INVALID:
+        default: return "INVALID";
+    }
+}
+
+const char *cardSelectEffectLabel(const CardSelectScreenType type) {
+    switch (type) {
+        case CardSelectScreenType::TRANSFORM: return "transform_selected_card";
+        case CardSelectScreenType::TRANSFORM_UPGRADE: return "transform_and_upgrade_selected_cards";
+        case CardSelectScreenType::UPGRADE: return "upgrade_selected_card";
+        case CardSelectScreenType::REMOVE: return "remove_selected_card";
+        case CardSelectScreenType::DUPLICATE: return "duplicate_selected_card";
+        case CardSelectScreenType::OBTAIN: return "obtain_selected_card";
+        case CardSelectScreenType::BOTTLE: return "bottle_selected_card";
+        case CardSelectScreenType::BONFIRE_SPIRITS: return "bonfire_spirits_selected_card";
+        case CardSelectScreenType::INVALID:
+        default: return "unsupported_card_select_type";
+    }
+}
+
+const char *neowBonusEffectLabel(const Neow::Bonus bonus) {
+    switch (bonus) {
+        case Neow::Bonus::THREE_CARDS: return "open_card_reward";
+        case Neow::Bonus::ONE_RANDOM_RARE_CARD: return "obtain_random_rare_card";
+        case Neow::Bonus::REMOVE_CARD: return "open_card_removal";
+        case Neow::Bonus::UPGRADE_CARD: return "open_card_upgrade";
+        case Neow::Bonus::TRANSFORM_CARD: return "open_card_transform";
+        case Neow::Bonus::RANDOM_COLORLESS: return "open_colorless_card_reward";
+        case Neow::Bonus::THREE_SMALL_POTIONS: return "obtain_three_random_potions";
+        case Neow::Bonus::RANDOM_COMMON_RELIC: return "obtain_random_common_relic";
+        case Neow::Bonus::TEN_PERCENT_HP_BONUS: return "increase_max_hp_by_ten_percent";
+        case Neow::Bonus::THREE_ENEMY_KILL: return "obtain_neows_lament";
+        case Neow::Bonus::HUNDRED_GOLD: return "obtain_100_gold";
+        case Neow::Bonus::RANDOM_COLORLESS_2: return "open_rare_colorless_card_reward";
+        case Neow::Bonus::REMOVE_TWO: return "open_two_card_removal";
+        case Neow::Bonus::ONE_RARE_RELIC: return "obtain_random_rare_relic";
+        case Neow::Bonus::THREE_RARE_CARDS: return "open_rare_card_reward";
+        case Neow::Bonus::TWO_FIFTY_GOLD: return "obtain_250_gold";
+        case Neow::Bonus::TRANSFORM_TWO_CARDS: return "open_two_card_transform";
+        case Neow::Bonus::TWENTY_PERCENT_HP_BONUS: return "increase_max_hp_by_twenty_percent";
+        case Neow::Bonus::BOSS_RELIC: return "obtain_random_boss_relic";
+        case Neow::Bonus::INVALID:
+        default: return "unsupported_neow_bonus";
+    }
+}
+
+const char *neowDrawbackEffectLabel(const Neow::Drawback drawback) {
+    switch (drawback) {
+        case Neow::Drawback::NONE: return "no_drawback";
+        case Neow::Drawback::TEN_PERCENT_HP_LOSS: return "reduce_max_hp_by_ten_percent";
+        case Neow::Drawback::NO_GOLD: return "lose_all_gold";
+        case Neow::Drawback::CURSE: return "obtain_random_curse";
+        case Neow::Drawback::PERCENT_DAMAGE: return "lose_thirty_percent_current_hp";
+        case Neow::Drawback::LOSE_STARTER_RELIC: return "lose_starter_relic";
+        case Neow::Drawback::INVALID:
+        default: return "unsupported_neow_drawback";
+    }
+}
+
+pybind11::dict privilegedPotionChoice(
+        const GameContext &gc,
+        const LightSpeedAction &action) {
+    pybind11::dict features;
+    if (action.idx1 < 0 || action.idx1 >= gc.potionCapacity) {
+        features["potion"] = privilegedChoiceUnavailable(
+                "native potion action points outside GameContext::potionCapacity");
+        return features;
+    }
+    features["potion"] = privilegedChoiceFeature(
+            gamePotionSnapshot(gc, action.idx1), "public_now",
+            "GameContext::potions and GameContext::drinkPotionAtIdx");
+    if (action.kind == "game_potion_discard") {
+        features["choice_type"] = privilegedChoiceFeature(
+                pybind11::str("discard_potion"), "public_now",
+                "GameContext::discardPotionAtIdx");
+        features["effect_type"] = privilegedChoiceFeature(
+                pybind11::str("remove_potion_from_associated_slot"), "public_now",
+                "GameContext::discardPotionAtIdx");
+        return features;
+    }
+
+    const auto potion = gc.potions[action.idx1];
+    const char *effect = nullptr;
+    switch (potion) {
+        case Potion::BLOOD_POTION: effect = "heal_fraction_of_max_hp"; break;
+        case Potion::ENTROPIC_BREW: effect = "fill_empty_slots_using_potion_rng"; break;
+        case Potion::FRUIT_JUICE: effect = "increase_max_hp"; break;
+        default: break;
+    }
+    if (effect == nullptr) {
+        features["choice_type"] = privilegedChoiceUnavailable(
+                "native use effect has no nonbattle source-backed descriptor");
+        return features;
+    }
+    features["choice_type"] = privilegedChoiceFeature(
+            pybind11::str("use_potion"), "public_now",
+            "GameContext::drinkPotionAtIdx");
+    features["effect_type"] = privilegedChoiceFeature(
+            pybind11::str(effect), "public_now", "GameContext::drinkPotion");
+    if (potion == Potion::BLOOD_POTION) {
+        const bool sacredBark = gc.relics.has(RelicId::SACRED_BARK);
+        features["sacred_bark"] = privilegedChoiceFeature(
+                pybind11::bool_(sacredBark), "public_now",
+                "GameContext::drinkPotion and GameContext::relics");
+        features["effect_amount_hp"] = privilegedChoiceFeature(
+                pybind11::int_(gc.fractionMaxHp(sacredBark ? 0.40F : 0.20F)),
+                "public_now", "GameContext::drinkPotion and GameContext::fractionMaxHp");
+    } else if (potion == Potion::FRUIT_JUICE) {
+        const bool sacredBark = gc.relics.has(RelicId::SACRED_BARK);
+        features["sacred_bark"] = privilegedChoiceFeature(
+                pybind11::bool_(sacredBark), "public_now",
+                "GameContext::drinkPotion and GameContext::relics");
+        features["effect_amount_max_hp"] = privilegedChoiceFeature(
+                pybind11::int_(sacredBark ? 10 : 5), "public_now",
+                "GameContext::drinkPotion FRUIT_JUICE branch");
+    } else if (potion == Potion::ENTROPIC_BREW) {
+        features["free_slots"] = privilegedChoiceFeature(
+                pybind11::int_(gc.potionCapacity - gc.potionCount), "public_now",
+                "GameContext::potionCapacity and GameContext::potionCount");
+        features["result_potions"] = privilegedChoiceUnavailable(
+                "result depends on future PotionRng draws", false);
+    }
+    return features;
+}
+
+pybind11::dict privilegedEventChoice(
+        const GameContext &gc,
+        const LightSpeedAction &action) {
+    pybind11::dict features;
+    const auto eventIndex = static_cast<std::size_t>(gc.curEvent);
+    if (eventIndex >= std::size(eventIdStrings)) {
+        features["event"] = privilegedChoiceUnavailable(
+                "current native event id has no source enum label");
+        return features;
+    }
+    features["event"] = privilegedChoiceFeature(
+            pybind11::str(eventIdStrings[eventIndex]), "public_now",
+            "GameContext::curEvent and constants/Events.h");
+    if (gc.curEvent != Event::NEOW) {
+        const int idx = action.idx1;
+        const bool unfavorable = gc.ascension >= 15;
+        auto setUnavailable = [&](const char *reason) {
+            features["choice"] = privilegedChoiceUnavailable(reason);
+        };
+        auto setFutureUnavailable = [&](const char *name, const char *reason) {
+            features[name] = privilegedChoiceUnavailable(reason, false);
+        };
+        if (gc.curEvent == Event::LAB) {
+            features["choice"] = privilegedChoiceUnavailable(
+                    "LAB getValidEventSelectBits exposes index 0, but GameContext::chooseEventOption asserts no action is valid");
+            return features;
+        }
+        if (gc.curEvent == Event::OLD_BEGGAR
+                && (action.idx1 == 0 || action.idx1 == 1)) {
+            pybind11::dict choice;
+            choice["choice_type"] = action.idx1 == 0
+                    ? "pay_old_beggar" : "leave_old_beggar";
+            choice["gold_cost"] = action.idx1 == 0 ? 75 : 0;
+            choice["effect_type"] = action.idx1 == 0
+                    ? "open_card_removal" : "return_to_map";
+            if (action.idx1 == 0) choice["target_family"] = "CARD_SELECT:REMOVE";
+            features["choice"] = privilegedChoiceFeature(
+                    choice, "oracle_only",
+                    "GameContext::chooseEventOption OLD_BEGGAR branch");
+            return features;
+        }
+        if (gc.curEvent == Event::PLEADING_VAGRANT
+                && action.idx1 >= 0 && action.idx1 <= 2) {
+            pybind11::dict choice;
+            choice["gold_cost"] = action.idx1 == 0 ? 85 : 0;
+            choice["choice_type"] = action.idx1 == 0 ? "pay_vagrant"
+                    : action.idx1 == 1 ? "accept_relic_and_curse" : "leave_vagrant";
+            choice["effect_type"] = action.idx1 == 2 ? "return_to_map"
+                    : action.idx1 == 1 ? "obtain_random_relic_and_shame"
+                    : "obtain_random_relic";
+            if (action.idx1 != 2) {
+                features["random_relic"] = privilegedChoiceUnavailable(
+                        "relic identity depends on future RelicRng state", false);
+            }
+            features["choice"] = privilegedChoiceFeature(
+                    choice, "oracle_only",
+                    "GameContext::chooseEventOption PLEADING_VAGRANT branch");
+            return features;
+        }
+        if (gc.curEvent == Event::THE_WOMAN_IN_BLUE
+                && action.idx1 >= 0 && action.idx1 <= 3) {
+            pybind11::dict choice;
+            choice["choice_type"] = action.idx1 < 3
+                    ? "select_random_potion_reward_count" : "leave_woman_in_blue";
+            choice["effect_type"] = action.idx1 < 3
+                    ? "obtain_random_potion_reward" : "return_to_map";
+            if (action.idx1 < 3) {
+                choice["potion_reward_count"] = action.idx1 + 1;
+                features["result_potions"] = privilegedChoiceUnavailable(
+                        "potion identities depend on future PotionRng state", false);
+            } else if (gc.ascension >= 15) {
+                choice["hp_cost"] = static_cast<int>(std::ceil(
+                        static_cast<float>(gc.maxHp) * 0.05f));
+            }
+            features["choice"] = privilegedChoiceFeature(
+                    choice, "oracle_only",
+                    "GameContext::chooseEventOption THE_WOMAN_IN_BLUE branch");
+            return features;
+        }
+        if (gc.curEvent == Event::KNOWING_SKULL) {
+            pybind11::dict choice;
+            if (action.idx1 == 0) {
+                choice["choice_type"] = "pay_hp_for_gold";
+                choice["effect_type"] = "lose_hp_and_obtain_gold";
+                choice["hp_cost"] = gc.info.hpAmount0;
+                choice["gold_amount"] = 90;
+                choice["next_hp_cost"] = gc.info.hpAmount0 + 1;
+            } else if (action.idx1 == 1) {
+                choice["choice_type"] = "pay_hp_for_uncommon_colorless_card";
+                choice["effect_type"] = "lose_hp_and_obtain_random_uncommon_colorless_card";
+                choice["hp_cost"] = gc.info.hpAmount1;
+                choice["card_rarity"] = "UNCOMMON";
+                features["result_card"] = privilegedChoiceUnavailable(
+                        "colorless card identity depends on future CardRng state", false);
+            } else if (action.idx1 == 2) {
+                choice["choice_type"] = "pay_hp_for_potion";
+                choice["effect_type"] = "lose_hp_and_obtain_random_potion";
+                choice["hp_cost"] = gc.info.hpAmount2;
+                features["result_potion"] = privilegedChoiceUnavailable(
+                        "potion identity depends on future PotionRng state", false);
+            } else if (action.idx1 == 3) {
+                choice["choice_type"] = "leave_knowing_skull";
+                choice["effect_type"] = "lose_6_hp_and_return_to_map";
+                choice["hp_cost"] = 6;
+            } else {
+                features["choice"] = privilegedChoiceUnavailable(
+                        "KNOWING_SKULL candidate index is outside the native chooser branches");
+                return features;
+            }
+            features["choice"] = privilegedChoiceFeature(
+                    choice, "oracle_only", "GameContext::chooseEventOption KNOWING_SKULL branch");
+            return features;
+        }
+        using EventChoiceDescriptor = std::pair<const char *, const char *>;
+        static const std::map<Event, std::vector<EventChoiceDescriptor>> sourceBackedEventChoices = {
+            {Event::OMINOUS_FORGE, {{"upgrade_one_card", "open_card_select_upgrade"}, {"accept_pain_and_warped_tongs", "obtain_pain_and_warped_tongs"}, {"leave_ominous_forge", "return_to_map"}}},
+            {Event::ANCIENT_WRITING, {{"remove_one_card", "open_card_select_remove"}, {"upgrade_strikes_and_defends", "upgrade_all_strikes_and_defends"}}},
+            {Event::BIG_FISH, {{"heal", "heal_one_third_max_hp"}, {"gain_max_hp", "increase_max_hp_by_five"}, {"take_random_relic_and_regret", "obtain_random_relic_and_regret"}}},
+            {Event::CURSED_TOME, {{"continue_reading", "advance_cursed_tome_phase"}, {"leave_cursed_tome", "return_to_map"}, {"continue_reading_after_hp_loss", "lose_phase_hp_and_advance"}, {"continue_reading_after_hp_loss", "lose_phase_hp_and_advance"}, {"continue_reading_after_hp_loss", "lose_phase_hp_and_advance"}, {"claim_random_book", "lose_hp_and_offer_random_book_relic"}, {"leave_after_hp_loss", "lose_three_hp_and_return_to_map"}}},
+            {Event::DEAD_ADVENTURER, {{"search_dead_adventurer_site", "native_phase_reward_or_encounter_transition"}, {"leave_dead_adventurer", "return_to_map"}}},
+            {Event::DESIGNER_IN_SPIRE, {{"pay_for_one_card_upgrade", "spend_gold_and_open_card_select_upgrade"}, {"upgrade_two_random_cards", "upgrade_two_random_cards"}, {"pay_for_one_card_removal", "spend_gold_and_open_card_select_remove"}, {"pay_for_two_random_transforms_then_cleanup", "transform_then_open_remove_screen_then_native_fallthrough_upgrade_and_lose_hp"}, {"pay_for_cleanup_and_upgrade", "open_remove_screen_then_native_fallthrough_upgrade_and_lose_hp"}, {"lose_hp_and_leave", "lose_hp_and_return_to_map"}}},
+            {Event::AUGMENTER, {{"obtain_jax", "obtain_jax_and_return_to_map"}, {"transform_two_random_cards", "transform_two_random_cards"}, {"obtain_mutagenic_strength", "obtain_mutagenic_strength_and_return_to_map"}}},
+            {Event::DUPLICATOR, {{"duplicate_one_card", "open_card_select_duplicate"}, {"leave_duplicator", "return_to_map"}}},
+            {Event::FACE_TRADER, {{"take_gold_and_lose_hp", "obtain_gold_and_take_hp_damage"}, {"take_random_face_relic", "obtain_random_face_relic"}, {"leave_face_trader", "return_to_map"}}},
+            {Event::FALLING, {{"remove_skill_card", "remove_selected_deck_card_and_return_to_map"}, {"remove_power_card", "remove_selected_deck_card_and_return_to_map"}, {"remove_attack_card", "remove_selected_deck_card_and_return_to_map"}, {"lose_no_card", "return_to_map"}}},
+            {Event::FORGOTTEN_ALTAR, {{"replace_golden_idol_with_bloody_idol", "replace_relic_and_return_to_map"}, {"gain_max_hp_and_lose_hp", "increase_max_hp_then_lose_current_hp"}, {"obtain_decay", "obtain_decay_and_return_to_map"}}},
+            {Event::THE_DIVINE_FOUNTAIN, {{"remove_all_removable_curses", "remove_all_transformable_curses_and_return_to_map"}, {"leave_divine_fountain", "return_to_map"}}},
+            {Event::GHOSTS, {{"accept_apparitions", "lose_max_hp_and_obtain_apparitions"}, {"leave_ghosts", "return_to_map"}}},
+            {Event::GOLDEN_IDOL, {{"take_golden_idol", "obtain_golden_idol"}, {"leave_golden_idol", "return_to_map"}, {"take_injury_for_golden_idol", "obtain_injury_and_return_to_map"}, {"take_hp_damage_for_golden_idol", "take_hp_damage_and_return_to_map"}, {"lose_max_hp_for_golden_idol", "lose_max_hp_and_return_to_map"}}},
+            {Event::GOLDEN_SHRINE, {{"take_gold", "obtain_gold_and_return_to_map"}, {"take_more_gold_and_regret", "obtain_275_gold_and_regret"}, {"leave_golden_shrine", "return_to_map"}}},
+            {Event::WING_STATUE, {{"pay_hp_to_remove_card", "take_seven_hp_damage_and_open_remove"}, {"take_random_gold", "obtain_random_gold_and_return_to_map"}, {"leave_wing_statue", "return_to_map"}}},
+            {Event::THE_SSSSSERPENT, {{"take_gold_and_doubt", "obtain_gold_and_doubt"}, {"leave_serpent", "return_to_map"}}},
+            {Event::LIVING_WALL, {{"remove_one_card", "open_card_select_remove"}, {"transform_one_card", "open_card_select_transform"}, {"upgrade_one_card", "open_card_select_upgrade"}}},
+            {Event::MASKED_BANDITS, {{"surrender_all_gold", "lose_all_gold_and_return_to_map"}, {"fight_masked_bandits", "enter_masked_bandits_battle_with_rewards"}}},
+            {Event::MINDBLOOM, {{"fight_act_1_boss", "enter_random_act_1_boss_battle_with_rewards"}, {"upgrade_all_cards_and_take_mark_of_the_bloom", "upgrade_all_and_obtain_mark_of_the_bloom"}, {"take_999_gold_and_two_normality", "obtain_999_gold_and_two_normality"}, {"heal_to_full_and_take_doubt", "heal_to_max_hp_and_obtain_doubt"}}},
+            {Event::HYPNOTIZING_COLORED_MUSHROOMS, {{"fight_mushrooms", "enter_mushroom_battle_with_rewards"}, {"take_gold_and_leave", "obtain_gold_and_return_to_map"}}},
+            {Event::MYSTERIOUS_SPHERE, {{"fight_orbs", "enter_mysterious_sphere_battle_with_rewards"}, {"take_gold_and_leave", "obtain_gold_and_return_to_map"}}},
+            {Event::THE_NEST, {{"take_gold", "obtain_gold_and_return_to_map"}, {"take_ritual_dagger", "take_six_hp_damage_and_obtain_ritual_dagger"}}},
+            {Event::NLOTH, {{"trade_offered_relic_for_nloths_gift", "remove_selected_relic_and_obtain_nloths_gift"}, {"trade_offered_relic_for_nloths_gift", "remove_selected_relic_and_obtain_nloths_gift"}, {"leave_nloth", "return_to_map"}}},
+            {Event::NOTE_FOR_YOURSELF, {{"take_saved_card_and_remove_one_card", "obtain_saved_card_and_open_card_select_remove"}, {"leave_note_for_yourself", "return_to_map"}}},
+            {Event::PURIFIER, {{"remove_one_card", "open_card_select_remove"}, {"leave_purifier", "return_to_map"}}},
+            {Event::SCRAP_OOZE, {{"reach_into_scrap_ooze", "take_hp_damage_and_random_relic_or_continue"}, {"leave_scrap_ooze", "return_to_map"}}},
+            {Event::SECRET_PORTAL, {{"enter_secret_portal", "transition_to_floor_15_map_node"}, {"leave_secret_portal", "return_to_map"}}},
+            {Event::SENSORY_STONE, {{"choose_colorless_card_reward_count", "lose_hp_if_needed_and_offer_colorless_cards"}, {"choose_colorless_card_reward_count", "lose_hp_if_needed_and_offer_colorless_cards"}, {"choose_colorless_card_reward_count", "lose_hp_if_needed_and_offer_colorless_cards"}, {"choose_colorless_card_reward_count", "offer_colorless_cards"}}},
+            {Event::SHINING_LIGHT, {{"pay_hp_to_upgrade_cards", "take_configured_damage_and_upgrade_random_cards"}, {"leave_shining_light", "return_to_map"}}},
+            {Event::THE_CLERIC, {{"pay_gold_to_heal", "spend_gold_and_heal_configured_hp"}, {"pay_gold_to_remove_one_card", "spend_gold_and_open_card_select_remove"}, {"leave_the_cleric", "return_to_map"}}},
+            {Event::THE_JOUST, {{"bet_on_owner_losing", "pay_gold_and_gain_100_if_owner_loses"}, {"bet_on_owner_winning", "pay_gold_and_gain_250_if_owner_wins"}}},
+            {Event::THE_LIBRARY, {{"read_library", "open_card_select_obtain_from_generated_cards"}, {"rest_at_library", "heal_configured_hp_and_return_to_map"}}},
+            {Event::THE_MAUSOLEUM, {{"open_mausoleum", "randomly_obtain_writhe_or_return_to_map"}, {"leave_mausoleum", "return_to_map"}}},
+            {Event::THE_MOAI_HEAD, {{"lose_max_hp_to_heal_to_full", "lose_configured_max_hp_and_heal_to_full"}, {"trade_golden_idol_for_gold", "obtain_333_gold_and_remove_golden_idol"}, {"leave_the_moai_head", "return_to_map"}}},
+            {Event::TOMB_OF_LORD_RED_MASK, {{"take_gold", "obtain_222_gold_and_return_to_map"}, {"trade_all_gold_for_red_mask", "lose_all_gold_and_obtain_red_mask"}, {"leave_tomb", "return_to_map"}}},
+            {Event::TRANSMORGRIFIER, {{"transform_one_card", "open_card_select_transform"}, {"leave_transmorgrifier", "return_to_map"}}},
+            {Event::UPGRADE_SHRINE, {{"upgrade_one_card", "open_card_select_upgrade"}, {"leave_upgrade_shrine", "return_to_map"}}},
+            {Event::VAMPIRES, {{"trade_blood_vial_for_bites", "remove_blood_vial_replace_starter_strikes_with_bites"}, {"lose_max_hp_for_bites", "lose_max_hp_replace_starter_strikes_with_bites"}, {"leave_vampires", "return_to_map"}}},
+            {Event::WE_MEET_AGAIN, {{"give_one_potion_for_relic", "discard_selected_potion_and_obtain_random_relic"}, {"give_all_gold_for_relic", "lose_configured_gold_and_obtain_random_relic"}, {"give_one_card_for_relic", "remove_selected_card_and_obtain_random_relic"}, {"leave_we_meet_again", "return_to_map"}}},
+            {Event::WINDING_HALLS, {{"lose_hp_for_madness", "lose_configured_hp_obtain_two_madness_and_return_to_map"}, {"heal_and_take_writhe", "heal_configured_hp_obtain_writhe_and_return_to_map"}, {"lose_max_hp", "lose_configured_max_hp_and_return_to_map"}}},
+            {Event::WORLD_OF_GOOP, {{"take_gold_after_hp_damage", "take_eleven_hp_damage_and_obtain_75_gold"}, {"pay_gold_to_leave_clean", "lose_configured_gold_and_return_to_map"}}},
+            {Event::WHEEL_OF_CHANGE, {{"spin_wheel", "resolve_random_wheel_outcome"}}}
+        };
+        const auto mappedEvent = sourceBackedEventChoices.find(gc.curEvent);
+        if (mappedEvent != sourceBackedEventChoices.end()
+                && action.idx1 >= 0
+                && action.idx1 < static_cast<int>(mappedEvent->second.size())
+                && mappedEvent->second[action.idx1].first != nullptr) {
+            const auto [choiceType, effectType] = mappedEvent->second[action.idx1];
+            pybind11::dict choice;
+            choice["choice_type"] = choiceType;
+            choice["effect_type"] = effectType;
+            switch (gc.curEvent) {
+                case Event::BIG_FISH:
+                    if (idx == 0) choice["heal_amount_hp"] = gc.fractionMaxHp(1.0f / 3.0f);
+                    if (idx == 1) choice["max_hp_amount"] = 5;
+                    if (idx == 2) setFutureUnavailable("result_relic", "relic identity depends on future RelicRng state");
+                    break;
+                case Event::CURSED_TOME:
+                    choice["current_tome_phase"] = gc.info.eventData;
+                    if (idx >= 2 && idx <= 4) choice["hp_cost"] = gc.info.eventData;
+                    if (idx == 5) {
+                        choice["hp_cost"] = unfavorable ? 15 : 10;
+                        setFutureUnavailable("result_book_relic", "book relic identity depends on future MiscRng state");
+                    }
+                    if (idx == 6) choice["hp_cost"] = 3;
+                    break;
+                case Event::DEAD_ADVENTURER:
+                    if (idx == 0) {
+                        choice["current_phase"] = gc.info.phase;
+                        if (gc.info.phase < 0
+                                || gc.info.phase >= static_cast<int>(gc.info.rewards.size())) {
+                            setUnavailable(
+                                    "Dead Adventurer phase has no native reward entry");
+                            return features;
+                        }
+                        switch (gc.info.rewards[gc.info.phase]) {
+                            case 0:
+                                choice["phase_reward_kind"] = "gold";
+                                break;
+                            case 1:
+                                choice["phase_reward_kind"] = "no_reward";
+                                break;
+                            case 2:
+                                choice["phase_reward_kind"] = "relic";
+                                break;
+                            default:
+                                setUnavailable(
+                                        "Dead Adventurer phase reward code has no source-backed mapping");
+                                return features;
+                        }
+                        setFutureUnavailable("search_result", "encounter and reward depend on future MiscRng and RelicRng state");
+                    }
+                    break;
+                case Event::DESIGNER_IN_SPIRE:
+                    if (idx == 0) choice["gold_cost"] = unfavorable ? 50 : 40;
+                    if (idx == 2) choice["gold_cost"] = unfavorable ? 75 : 60;
+                    if (idx == 3) {
+                        choice["gold_cost"] = (unfavorable ? 75 : 60) + (unfavorable ? 110 : 90);
+                        choice["source_fallthrough_to_option_4"] = true;
+                        choice["source_fallthrough_to_option_5"] = true;
+                        choice["hp_cost"] = unfavorable ? 5 : 3;
+                        setFutureUnavailable("result_card_targets", "random transform and upgrade card occurrences depend on future MiscRng state");
+                    }
+                    if (idx == 4) {
+                        choice["gold_cost"] = unfavorable ? 110 : 90;
+                        choice["source_fallthrough_to_option_5"] = true;
+                        choice["hp_cost"] = unfavorable ? 5 : 3;
+                        setFutureUnavailable("result_card_target", "random upgrade target depends on future MiscRng state");
+                    }
+                    if (idx == 1) setFutureUnavailable("result_card_targets", "random upgrade targets depend on future MiscRng state");
+                    if (idx == 5) choice["hp_cost"] = unfavorable ? 5 : 3;
+                    break;
+                case Event::AUGMENTER:
+                    if (idx == 1) setFutureUnavailable("result_card_targets", "random transform targets depend on future MiscRng state");
+                    break;
+                case Event::FACE_TRADER:
+                    if (idx == 0) {
+                        choice["gold_amount"] = unfavorable ? 50 : 75;
+                        choice["hp_cost"] = std::max(gc.fractionMaxHp(0.10F), 1);
+                    }
+                    if (idx == 1) setFutureUnavailable("result_relic", "face relic depends on future MiscRng state");
+                    break;
+                case Event::FALLING: {
+                    const int targetIndex = idx == 0 ? gc.info.skillCardDeckIdx
+                            : idx == 1 ? gc.info.powerCardDeckIdx
+                            : idx == 2 ? gc.info.attackCardDeckIdx : -1;
+                    if (targetIndex >= 0 && targetIndex < gc.deck.size()) {
+                        features["target_deck_index"] = privilegedChoiceFeature(
+                                pybind11::int_(targetIndex), "oracle_only",
+                                "ScreenStateInfo::skillCardDeckIdx/powerCardDeckIdx/attackCardDeckIdx");
+                        features["target_card"] = privilegedChoiceFeature(
+                                publicCardRewardSnapshot(gc.deck.cards[targetIndex]), "public_now",
+                                "GameContext::chooseEventOption FALLING target card");
+                    } else if (idx != 3) {
+                        setUnavailable("FALLING candidate has no valid native card occurrence for its category");
+                    }
+                    break;
+                }
+                case Event::FORGOTTEN_ALTAR:
+                    if (idx == 1) { choice["max_hp_amount"] = 5; choice["hp_cost"] = gc.info.hpAmount0; }
+                    break;
+                case Event::GHOSTS:
+                    if (idx == 0) {
+                        choice["max_hp_cost"] = gc.info.hpAmount0;
+                        choice["apparition_count"] = unfavorable ? 3 : 5;
+                    }
+                    break;
+                case Event::GOLDEN_IDOL:
+                    if (idx == 3) choice["hp_cost"] = gc.info.hpAmount0;
+                    if (idx == 4) choice["max_hp_cost"] = gc.info.hpAmount1;
+                    break;
+                case Event::GOLDEN_SHRINE:
+                    if (idx == 0) choice["gold_amount"] = unfavorable ? 50 : 100;
+                    if (idx == 1) choice["gold_amount"] = 275;
+                    break;
+                case Event::WING_STATUE:
+                    if (idx == 0) choice["hp_cost"] = 7;
+                    if (idx == 1) {
+                        choice["gold_amount_min"] = 50;
+                        choice["gold_amount_max"] = 80;
+                        setFutureUnavailable("result_gold", "exact gold amount depends on future MiscRng state");
+                    }
+                    break;
+                case Event::THE_SSSSSERPENT:
+                    if (idx == 0) choice["gold_amount"] = unfavorable ? 150 : 175;
+                    break;
+                case Event::MASKED_BANDITS:
+                    if (idx == 0) choice["gold_cost"] = gc.gold;
+                    if (idx == 1) setFutureUnavailable("battle_rewards", "battle reward details depend on subsequent battle and RNG state");
+                    break;
+                case Event::MINDBLOOM:
+                    if (idx == 0) {
+                        choice["gold_amount"] = unfavorable ? 25 : 50;
+                        setFutureUnavailable("battle_and_reward", "boss encounter and reward depend on future RNG and battle state");
+                    }
+                    if (idx == 2) { choice["gold_amount"] = 999; choice["normality_count"] = 2; }
+                    break;
+                case Event::HYPNOTIZING_COLORED_MUSHROOMS:
+                    if (idx == 0) setFutureUnavailable("battle_rewards", "battle reward details depend on subsequent battle and RNG state");
+                    if (idx == 1) choice["gold_amount"] = unfavorable ? 50 : 99;
+                    break;
+                case Event::MYSTERIOUS_SPHERE:
+                    if (idx == 0) setFutureUnavailable("battle_rewards", "battle reward details depend on subsequent battle and RNG state");
+                    if (idx == 1) choice["gold_amount"] = unfavorable ? 50 : 99;
+                    break;
+                case Event::THE_NEST:
+                    if (idx == 0) choice["gold_amount"] = unfavorable ? 50 : 99;
+                    if (idx == 1) choice["hp_cost"] = 6;
+                    break;
+                case Event::NLOTH: {
+                    if (idx == 0 || idx == 1) {
+                        const int relicIndex = idx == 0 ? gc.info.relicIdx0 : gc.info.relicIdx1;
+                        if (relicIndex >= 0 && relicIndex < gc.relics.relics.size()) {
+                            features["target_relic"] = privilegedChoiceFeature(
+                                    publicRelicRewardSnapshot(gc.relics.relics[relicIndex].id),
+                                    "public_now", "GameContext::chooseEventOption NLOTH relic offer");
+                        } else {
+                            setUnavailable("NLOTH candidate has no valid offered relic target");
+                        }
+                    }
+                    break;
+                }
+                case Event::SENSORY_STONE:
+                    choice["colorless_card_reward_count"] = idx + 1;
+                    choice["hp_cost"] = idx == 1 ? 5 : idx == 2 ? 10 : 0;
+                    setFutureUnavailable("result_cards", "colorless card identities depend on future CardRng state");
+                    break;
+                case Event::SHINING_LIGHT:
+                    if (idx == 0) {
+                        choice["hp_cost"] = gc.info.hpAmount0;
+                        setFutureUnavailable("result_card_targets", "random upgrade targets depend on future MiscRng state");
+                    }
+                    break;
+                case Event::THE_CLERIC:
+                    if (idx == 0) { choice["gold_cost"] = 35; choice["heal_amount_hp"] = gc.info.hpAmount0; }
+                    if (idx == 1) choice["gold_cost"] = unfavorable ? 75 : 50;
+                    break;
+                case Event::THE_JOUST:
+                    choice["gold_cost"] = 50;
+                    setFutureUnavailable("bet_result", "winner outcome depends on future MiscRng state");
+                    break;
+                case Event::THE_LIBRARY:
+                    if (idx == 0) {
+                        choice["selection_purpose"] = "OBTAIN";
+                        choice["selection_count"] = 1;
+                        setFutureUnavailable("generated_card_choices", "displayed card identities depend on future CardRng state");
+                    }
+                    if (idx == 1) choice["heal_amount_hp"] = gc.info.hpAmount0;
+                    break;
+                case Event::THE_MAUSOLEUM:
+                    if (idx == 0) setFutureUnavailable("writhe_result", "Writhe outcome depends on future MiscRng state and ascension");
+                    break;
+                case Event::THE_MOAI_HEAD:
+                    if (idx == 0) choice["max_hp_cost"] = gc.fractionMaxHp(unfavorable ? 0.18F : 0.125F, ROUND);
+                    if (idx == 1) choice["gold_amount"] = 333;
+                    break;
+                case Event::TOMB_OF_LORD_RED_MASK:
+                    if (idx == 0) choice["gold_amount"] = 222;
+                    if (idx == 1) choice["gold_cost"] = gc.gold;
+                    break;
+                case Event::VAMPIRES:
+                    if (idx == 1) choice["max_hp_cost"] = std::min(gc.maxHp - 1, gc.fractionMaxHp(0.3F, CEIL));
+                    break;
+                case Event::WE_MEET_AGAIN:
+                    if (idx == 0 && gc.info.potionIdx >= 0 && gc.info.potionIdx < gc.potionCapacity) {
+                        choice["potion_index"] = gc.info.potionIdx;
+                        choice["potion_id"] = static_cast<int>(gc.potions[gc.info.potionIdx]);
+                        setFutureUnavailable("result_relic", "relic identity depends on future RelicRng state");
+                    } else if (idx == 1) {
+                        choice["gold_cost"] = gc.info.gold;
+                        setFutureUnavailable("result_relic", "relic identity depends on future RelicRng state");
+                    } else if (idx == 2 && gc.info.cardIdx >= 0 && gc.info.cardIdx < gc.deck.size()) {
+                        features["target_deck_index"] = privilegedChoiceFeature(
+                                pybind11::int_(gc.info.cardIdx), "oracle_only", "ScreenStateInfo::cardIdx");
+                        features["target_card"] = privilegedChoiceFeature(
+                                publicCardRewardSnapshot(gc.deck.cards[gc.info.cardIdx]), "public_now",
+                                "GameContext::chooseEventOption WE_MEET_AGAIN target card");
+                        setFutureUnavailable("result_relic", "relic identity depends on future RelicRng state");
+                    }
+                    break;
+                case Event::WINDING_HALLS:
+                    if (idx == 0) { choice["hp_cost"] = gc.info.hpAmount0; choice["madness_count"] = 2; }
+                    if (idx == 1) choice["heal_amount_hp"] = gc.info.hpAmount1;
+                    if (idx == 2) choice["max_hp_cost"] = gc.info.hpAmount2;
+                    break;
+                case Event::WORLD_OF_GOOP:
+                    if (idx == 0) { choice["hp_cost"] = 11; choice["gold_amount"] = 75; }
+                    if (idx == 1) choice["gold_cost"] = gc.info.goldLoss;
+                    break;
+                case Event::WHEEL_OF_CHANGE:
+                    setFutureUnavailable("wheel_result", "wheel result depends on future MiscRng state");
+                    break;
+                default:
+                    break;
+            }
+            if (!features.contains("choice")) {
+                const char *choiceSource = gc.curEvent == Event::DEAD_ADVENTURER
+                        ? "GameContext::chooseEventOption DEAD_ADVENTURER reward codes"
+                        : "GameContext::chooseEventOption and source-backed native event branch";
+                features["choice"] = privilegedChoiceFeature(
+                        choice, "oracle_only", choiceSource);
+            }
+            return features;
+        }
+        if (gc.curEvent == Event::COLOSSEUM) {
+            setUnavailable("COLOSSEUM is disabled by native event generation; its chooser is TODO and currently maps alternatives to the same return transition");
+            return features;
+        }
+        std::ostringstream reason;
+        reason << "multi-choice event " << eventIdStrings[eventIndex]
+               << " has source-backed execution semantics that are not yet mapped";
+        features["choice"] = privilegedChoiceUnavailable(reason.str().c_str());
+        return features;
+    }
+    if (action.idx1 < 0 || action.idx1 >= static_cast<int>(gc.info.neowRewards.size())) {
+        features["choice"] = privilegedChoiceUnavailable(
+                "Neow event candidate does not bind to a native Neow option");
+        return features;
+    }
+    const auto &option = gc.info.neowRewards[action.idx1];
+    const auto bonusIndex = static_cast<std::size_t>(option.r);
+    const auto drawbackIndex = static_cast<std::size_t>(option.d);
+    if (bonusIndex >= std::size(Neow::bonusStrings)
+            || drawbackIndex >= std::size(Neow::drawbackStrings)) {
+        features["choice"] = privilegedChoiceUnavailable(
+                "Neow option contains an enum outside its native string table");
+        return features;
+    }
+    if (std::string(neowBonusEffectLabel(option.r)).find("unsupported_") == 0
+            || std::string(neowDrawbackEffectLabel(option.d)).find("unsupported_") == 0) {
+        features["choice"] = privilegedChoiceUnavailable(
+                "Neow option contains an invalid bonus or drawback enum");
+        return features;
+    }
+    pybind11::dict choice;
+    choice["bonus_id"] = static_cast<int>(option.r);
+    choice["bonus_name"] = Neow::bonusStrings[bonusIndex];
+    choice["bonus_effect_type"] = neowBonusEffectLabel(option.r);
+    choice["drawback_id"] = static_cast<int>(option.d);
+    choice["drawback_name"] = Neow::drawbackStrings[drawbackIndex];
+    choice["drawback_effect_type"] = neowDrawbackEffectLabel(option.d);
+    features["choice"] = privilegedChoiceFeature(
+            choice, "oracle_only",
+            "GameContext::info.neowRewards, Neow::Option, Neow string tables, and GameContext::chooseNeowOption");
+    return features;
+}
+
+pybind11::dict privilegedNonbattleCandidateMeaning(
+        const GameContext &gc,
+        const LightSpeedAction &action,
+        const std::vector<LightSpeedAction> &actions,
+        const std::size_t candidateIndex) {
+    pybind11::dict result;
+    pybind11::dict binding;
+    binding["candidate_index"] = candidateIndex;
+    binding["candidate_action"] = publicChoiceActionSnapshot(action);
+    result["candidate_binding"] = privilegedChoiceFeature(
+            binding, "oracle_only",
+            "ordered StepSimulator::legalActions occurrence; exact executor binding, not model semantics");
+    pybind11::dict features;
+    bool supported = true;
+    std::string unsupportedReason;
+    const auto addUnsupported = [&](const char *reason) {
+        supported = false;
+        unsupportedReason = reason;
+    };
+
+    if (action.kind == "game_potion_use" || action.kind == "game_potion_discard") {
+        features = privilegedPotionChoice(gc, action);
+        for (const auto &featureHandle : features) {
+            const auto feature = featureHandle.second.cast<pybind11::dict>();
+            if (privilegedRequiredFeatureUnavailable(feature)) {
+                addUnsupported(feature.contains("reason")
+                        ? feature["reason"].cast<std::string>().c_str()
+                        : "potion semantic feature is unavailable");
+                break;
+            }
+        }
+    } else switch (gc.screenState) {
+        case ScreenState::REWARDS: {
+            const auto payload = publicRewardScreenPayload(gc, actions);
+            if (payload["coverage_status"].cast<std::string>() != "supported") {
+                addUnsupported(payload.contains("reason")
+                        ? payload["reason"].cast<std::string>().c_str()
+                        : "native reward semantics are not supported");
+                break;
+            }
+            const auto choices = payload["choices"].cast<pybind11::list>();
+            bool found = false;
+            for (const auto &choiceHandle : choices) {
+                const auto choice = choiceHandle.cast<pybind11::dict>();
+                if (choice["candidate_index"].cast<std::size_t>() == candidateIndex) {
+                    pybind11::dict content;
+                    for (const auto &item : choice) {
+                        const auto key = pybind11::str(item.first).cast<std::string>();
+                        if (key != "candidate_index" && key != "candidate_action") {
+                            content[item.first] = item.second;
+                        }
+                    }
+                    features["choice"] = privilegedChoiceFeature(
+                            content, "public_now",
+                            "GameContext::info.rewardsContainer and native reward action execution");
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) addUnsupported("native reward candidate has no ordered choice binding");
+            break;
+        }
+        case ScreenState::MAP_SCREEN: {
+            if (action.kind != "map" || !gc.map) {
+                addUnsupported("MAP_SCREEN candidate is neither a map route nor a potion action");
+                break;
+            }
+            const int destinationY = gc.curMapNodeY + 1;
+            const int destinationX = action.idx1;
+            pybind11::dict destination;
+            if (gc.curMapNodeY == 14) {
+                destination["location"] = "act_boss_entry";
+                destination["public_room_symbol"] = privilegedChoiceFeature(
+                        pybind11::str("B"), "public_now", "MapNode::getRoomSymbol");
+                const int bossIndex = static_cast<int>(gc.boss);
+                if (bossIndex >= 0
+                        && bossIndex < static_cast<int>(std::size(monsterEncounterStrings))) {
+                    features["oracle_destination_encounter"] = privilegedChoiceFeature(
+                            pybind11::str(monsterEncounterStrings[bossIndex]),
+                            "oracle_only", "GameContext::boss; underlying room encounter");
+                } else {
+                    features["oracle_destination_encounter"] = privilegedChoiceUnavailable(
+                            "boss encounter identity is not initialized", false);
+                }
+            } else if (destinationY >= 0 && destinationY < 15
+                    && destinationX >= 0 && destinationX < 7) {
+                const auto &node = gc.map->getNode(destinationX, destinationY);
+                destination["location"] = "map_node";
+                destination["x"] = node.x;
+                destination["y"] = node.y;
+                destination["public_room_symbol"] = privilegedChoiceFeature(
+                        pybind11::str(std::string(1, node.getRoomSymbol())), "public_now",
+                        "MapNode::getRoomSymbol");
+                const int roomIndex = static_cast<int>(node.room);
+                if (roomIndex >= 0 && roomIndex < static_cast<int>(std::size(roomStrings))) {
+                    features["oracle_destination_room"] = privilegedChoiceFeature(
+                            pybind11::str(roomStrings[roomIndex]), "oracle_only",
+                            "MapNode::room; distinguishes hidden EVENT room contents");
+                } else {
+                    features["oracle_destination_room"] = privilegedChoiceUnavailable(
+                            "underlying room enum is invalid", false);
+                }
+            } else {
+                addUnsupported("native MAP_SCREEN action points outside a reachable map destination");
+                break;
+            }
+            features["choice_type"] = privilegedChoiceFeature(
+                    pybind11::str("map_route"), "public_now", "GameAction::execute MAP_SCREEN");
+            features["public_destination"] = privilegedChoiceFeature(
+                    destination, "public_now", "GameContext::map and MapNode public room symbols");
+            break;
+        }
+        case ScreenState::EVENT_SCREEN: {
+            features = privilegedEventChoice(gc, action);
+            for (const auto &featureHandle : features) {
+                const auto feature = featureHandle.second.cast<pybind11::dict>();
+                if (privilegedRequiredFeatureUnavailable(feature)) {
+                    addUnsupported(feature["reason"].cast<std::string>().c_str());
+                    break;
+                }
+            }
+            break;
+        }
+        case ScreenState::BOSS_RELIC_REWARDS: {
+            if (action.kind != "boss_relic" || action.idx1 < 0 || action.idx1 > 3) {
+                addUnsupported("boss relic candidate does not bind to an offered relic slot");
+                break;
+            }
+            if (action.idx1 == 3) {
+                features["choice_type"] = privilegedChoiceFeature(
+                        pybind11::str("skip_boss_relics"), "public_now",
+                        "GameContext::chooseBossRelic idx == 3");
+                break;
+            }
+            const auto relic = gc.info.bossRelics[action.idx1];
+            features["choice_type"] = privilegedChoiceFeature(
+                    pybind11::str("choose_boss_relic"), "public_now",
+                    "GameContext::chooseBossRelic and ScreenStateInfo::bossRelics");
+            features["offered_relic"] = privilegedChoiceFeature(
+                    publicRelicRewardSnapshot(relic), "public_now",
+                    "GameContext::info.bossRelics");
+            break;
+        }
+        case ScreenState::CARD_SELECT: {
+            if (action.kind != "card_select" || action.idx1 < 0
+                    || action.idx1 >= gc.info.toSelectCards.size()) {
+                addUnsupported("card-select candidate does not bind to a visible native card option");
+                break;
+            }
+            const auto &target = gc.info.toSelectCards[action.idx1];
+            const auto type = gc.info.selectScreenType;
+            if (type == CardSelectScreenType::INVALID) {
+                addUnsupported("CARD_SELECT has no source-backed selection purpose");
+                break;
+            }
+            features["choice_type"] = privilegedChoiceFeature(
+                    pybind11::str(cardSelectEffectLabel(type)), "public_now",
+                    "GameContext::chooseSelectCardScreenOption");
+            features["selection_purpose"] = privilegedChoiceFeature(
+                    pybind11::str(cardSelectTypeLabel(type)), "public_now",
+                    "ScreenStateInfo::selectScreenType");
+            features["target_card"] = privilegedChoiceFeature(
+                    publicCardRewardSnapshot(target.card), "public_now",
+                    "ScreenStateInfo::toSelectCards; card shown on the selection screen");
+            features["target_deck_index"] = privilegedChoiceFeature(
+                    pybind11::int_(target.deckIdx), "oracle_only",
+                    "SelectScreenCard::deckIdx; physical target occurrence for execution");
+            features["selection_count"] = privilegedChoiceFeature(
+                    pybind11::int_(gc.info.toSelectCount), "public_now",
+                    "ScreenStateInfo::toSelectCount");
+            break;
+        }
+        case ScreenState::TREASURE_ROOM: {
+            if (action.kind != "treasure_open" && action.kind != "treasure_leave") {
+                addUnsupported("TREASURE_ROOM candidate has an unknown native action kind");
+                break;
+            }
+            features["choice_type"] = privilegedChoiceFeature(
+                    pybind11::str(action.kind == "treasure_open"
+                            ? "open_chest" : "leave_chest_unopened"), "public_now",
+                    "GameAction::execute TREASURE_ROOM");
+            const int chestIndex = static_cast<int>(gc.info.chestSize);
+            if (chestIndex < 0 || chestIndex >= 3) {
+                features["chest_size"] = privilegedChoiceUnavailable(
+                        "native chest size is invalid");
+                addUnsupported("TREASURE_ROOM has an invalid native chest size");
+                break;
+            }
+            features["chest_size"] = privilegedChoiceFeature(
+                    pybind11::str(chestSizeNames[chestIndex]), "public_now",
+                    "ScreenStateInfo::chestSize and chestSizeNames");
+            const int relicTierIndex = static_cast<int>(gc.info.tier);
+            if (relicTierIndex < 0 || relicTierIndex >= static_cast<int>(std::size(relicTierStrings))) {
+                features["relic_tier"] = privilegedChoiceUnavailable(
+                        "native relic tier is invalid");
+                addUnsupported("TREASURE_ROOM has an invalid native relic tier");
+                break;
+            }
+            features["relic_tier"] = privilegedChoiceFeature(
+                    pybind11::str(relicTierStrings[relicTierIndex]),
+                    "oracle_only", "ScreenStateInfo::tier");
+            features["unrevealed_loot"] = privilegedChoiceUnavailable(
+                    "specific chest loot is not materialized until openTreasureRoomChest executes",
+                    false);
+            break;
+        }
+        case ScreenState::REST_ROOM: {
+            static constexpr const char *restChoices[] = {
+                "rest", "smith", "recall_ruby_key", "girya_strength",
+                "peace_pipe_remove_card", "shovel_dig", "continue"
+            };
+            if (action.kind != "rest" || action.idx1 < 0
+                    || action.idx1 >= static_cast<int>(std::size(restChoices))) {
+                addUnsupported("REST_ROOM candidate does not bind to a native campfire option");
+                break;
+            }
+            features["choice_type"] = privilegedChoiceFeature(
+                    pybind11::str(restChoices[action.idx1]), "public_now",
+                    "GameContext::chooseCampfireOption");
+            if (action.idx1 == 0) {
+                const int heal = gc.fractionMaxHp(0.30F)
+                        + (gc.relics.has(RelicId::REGAL_PILLOW) ? 15 : 0);
+                features["heal_amount"] = privilegedChoiceFeature(
+                        pybind11::int_(heal), "public_now",
+                        "GameContext::chooseCampfireOption REST branch");
+            } else if (action.idx1 == 1) {
+                features["target_family"] = privilegedChoiceFeature(
+                        pybind11::str("CARD_SELECT:UPGRADE"), "public_now",
+                        "GameContext::chooseCampfireOption SMITH branch");
+            } else if (action.idx1 == 2) {
+                features["key"] = privilegedChoiceFeature(
+                        pybind11::str("RUBY_KEY"), "public_now",
+                        "GameContext::chooseCampfireOption RECALL branch");
+            } else if (action.idx1 == 3) {
+                features["current_strength"] = privilegedChoiceFeature(
+                        pybind11::int_(gc.relics.getRelicValue(RelicId::GIRYA)),
+                        "public_now", "GameContext::relics and GIRYA campfire action");
+            } else if (action.idx1 == 4) {
+                features["target_family"] = privilegedChoiceFeature(
+                        pybind11::str("CARD_SELECT:REMOVE"), "public_now",
+                        "GameContext::chooseCampfireOption PEACE_PIPE branch");
+            } else if (action.idx1 == 5) {
+                features["result_relic"] = privilegedChoiceUnavailable(
+                        "Shovel result depends on future RelicRng state", false);
+            }
+            break;
+        }
+        case ScreenState::SHOP_ROOM: {
+            const auto &shop = gc.info.shop;
+            features["choice_type"] = privilegedChoiceFeature(
+                    pybind11::str(action.kind), "public_now",
+                    "GameAction::execute SHOP_ROOM and Shop purchase methods");
+            features["gold_available"] = privilegedChoiceFeature(
+                    pybind11::int_(gc.gold), "public_now", "GameContext::gold");
+            if (action.kind == "shop_reward_card" && action.idx1 >= 0 && action.idx1 < 7) {
+                features["item"] = privilegedChoiceFeature(
+                        publicCardRewardSnapshot(shop.cards[action.idx1]), "public_now",
+                        "ScreenStateInfo::shop.cards");
+                features["price"] = privilegedChoiceFeature(
+                        pybind11::int_(shop.cardPrice(action.idx1)), "public_now",
+                        "Shop::cardPrice");
+            } else if (action.kind == "shop_reward_relic" && action.idx1 >= 0 && action.idx1 < 3) {
+                features["item"] = privilegedChoiceFeature(
+                        publicRelicRewardSnapshot(shop.relics[action.idx1]), "public_now",
+                        "ScreenStateInfo::shop.relics");
+                features["price"] = privilegedChoiceFeature(
+                        pybind11::int_(shop.relicPrice(action.idx1)), "public_now",
+                        "Shop::relicPrice");
+            } else if (action.kind == "shop_reward_potion" && action.idx1 >= 0 && action.idx1 < 3) {
+                pybind11::dict potion;
+                potion["id"] = static_cast<int>(shop.potions[action.idx1]);
+                potion["id_label"] = potionIdLabel(shop.potions[action.idx1]);
+                potion["name"] = potionLabel(shop.potions[action.idx1]);
+                features["item"] = privilegedChoiceFeature(
+                        potion, "public_now", "ScreenStateInfo::shop.potions");
+                features["price"] = privilegedChoiceFeature(
+                        pybind11::int_(shop.potionPrice(action.idx1)), "public_now",
+                        "Shop::potionPrice");
+            } else if (action.kind == "shop_card_remove") {
+                features["price"] = privilegedChoiceFeature(
+                        pybind11::int_(shop.removeCost), "public_now", "Shop::removeCost");
+                features["target_family"] = privilegedChoiceFeature(
+                        pybind11::str("CARD_SELECT:REMOVE"), "public_now",
+                        "Shop::buyCardRemove");
+            } else if (action.kind == "shop_skip") {
+                features["choice_type"] = privilegedChoiceFeature(
+                        pybind11::str("leave_shop"), "public_now", "GameAction::execute SKIP");
+            } else {
+                addUnsupported("SHOP_ROOM candidate cannot be associated with an offered item or service");
+            }
+            break;
+        }
+        case ScreenState::BATTLE:
+        case ScreenState::INVALID:
+        default:
+            addUnsupported("privileged nonbattle projection called for an unsupported screen");
+            break;
+    }
+
+    for (const auto &featureHandle : features) {
+        const auto feature = featureHandle.second.cast<pybind11::dict>();
+        if (privilegedRequiredFeatureUnavailable(feature)) {
+            supported = false;
+            if (unsupportedReason.empty()) {
+                unsupportedReason = feature.contains("reason")
+                        ? feature["reason"].cast<std::string>()
+                        : "one or more native semantic fields are unavailable";
+            }
+        }
+    }
+    result["coverage_status"] = supported ? "supported" : "unsupported";
+    result["features"] = features;
+    if (!supported) result["reason"] = unsupportedReason;
+    return result;
+}
 std::size_t knownDrawTopCount(const BattleContext &bc);
 bool knownDrawStateConsistent(const BattleContext &bc);
 
@@ -3936,6 +4864,79 @@ struct StepSimulator {
                 candidates, "ordered StepSimulator::legalActions; action bits are withheld");
         return ret;
     }
+
+    pybind11::dict privilegedNoncombatChoiceProjectionV1() {
+        ensureBattleContext();
+        if (gc.screenState == ScreenState::BATTLE) {
+            throw std::runtime_error(
+                    "privileged noncombat choice projection requested in BATTLE");
+        }
+        const auto actions = legalActions();
+        pybind11::dict ret;
+        ret["schema_id"] = "native-privileged-noncombat-choice-projection-v1";
+        ret["audience"] = "training_oracle_only";
+        ret["public_api_safe"] = false;
+        ret["policy_training_authorized"] = false;
+        ret["screen_identity"] = privilegedChoiceFeature(
+                pybind11::str(screenStateLabel(gc.screenState)), "public_now",
+                "GameContext::screenState");
+#ifdef STS_LIGHTSPEED_TESTED_SOURCE_COMMIT
+        ret["native_source_commit"] = STS_LIGHTSPEED_TESTED_SOURCE_COMMIT;
+#else
+        ret["native_source_commit"] = "unavailable_at_compile_time";
+#endif
+        ret["candidate_order_source"] =
+                "StepSimulator::legalActions; ordered occurrences are retained without deduplication";
+
+        pybind11::dict sharedContext;
+        sharedContext["current_hp"] = privilegedChoiceFeature(
+                pybind11::int_(gc.curHp), "public_now", "GameContext::curHp");
+        sharedContext["max_hp"] = privilegedChoiceFeature(
+                pybind11::int_(gc.maxHp), "public_now", "GameContext::maxHp");
+        sharedContext["gold"] = privilegedChoiceFeature(
+                pybind11::int_(gc.gold), "public_now", "GameContext::gold");
+        sharedContext["floor"] = privilegedChoiceFeature(
+                pybind11::int_(gc.floorNum), "public_now", "GameContext::floorNum");
+        sharedContext["act"] = privilegedChoiceFeature(
+                pybind11::int_(gc.act), "public_now", "GameContext::act");
+        sharedContext["potions"] = privilegedChoiceFeature(
+                gamePotionListSnapshot(gc), "public_now", "GameContext::potions");
+        sharedContext["deck"] = privilegedChoiceFeature(
+                deckSnapshot(gc), "public_now", "GameContext::deck");
+        sharedContext["relics"] = privilegedChoiceFeature(
+                relicListSnapshot(gc), "public_now", "GameContext::relics");
+        ret["shared_context"] = sharedContext;
+
+        pybind11::list candidates;
+        pybind11::list unsupportedCandidates;
+        std::size_t supportedCount = 0;
+        for (std::size_t index = 0; index < actions.size(); ++index) {
+            auto candidate = privilegedNonbattleCandidateMeaning(
+                    gc, actions[index], actions, index);
+            if (candidate["coverage_status"].cast<std::string>() == "supported") {
+                ++supportedCount;
+            } else {
+                pybind11::dict unsupported;
+                unsupported["candidate_index"] = index;
+                unsupported["kind"] = actions[index].kind;
+                unsupported["reason"] = candidate["reason"];
+                unsupportedCandidates.append(unsupported);
+            }
+            candidates.append(candidate);
+        }
+        const bool complete = supportedCount == actions.size();
+        ret["candidates"] = candidates;
+        ret["candidate_count"] = actions.size();
+        ret["supported_candidate_count"] = supportedCount;
+        ret["unsupported_candidates"] = unsupportedCandidates;
+        ret["coverage_status"] = actions.empty() ? "no_legal_candidates"
+                : complete ? "supported"
+                : "NATIVE_CHOICE_SEMANTIC_NOT_READY";
+        ret["public_information_note"] =
+                "This separate oracle projection is not part of publicProjection or publicProjectionV3";
+        return ret;
+    }
+
     pybind11::dict t096PublicInformationProjection() {
         ensureBattleContext();
         if (!battleActive) {
@@ -7479,6 +8480,24 @@ struct StepSimulator {
     }
 };
 
+struct PrivilegedNoncombatProjectionAccess {
+    StepSimulator &simulator;
+
+    PrivilegedNoncombatProjectionAccess(
+            StepSimulator &simulator,
+            const std::string &audience)
+        : simulator(simulator) {
+        if (audience != "training_oracle_only") {
+            throw std::invalid_argument(
+                    "privileged noncombat projection requires audience=training_oracle_only");
+        }
+    }
+
+    pybind11::dict projectV1() const {
+        return simulator.privilegedNoncombatChoiceProjectionV1();
+    }
+};
+
 }
 
 
@@ -7617,6 +8636,16 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
         .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
         .def("step", &StepSimulator::step);
+
+    pybind11::class_<PrivilegedNoncombatProjectionAccess>(
+            m, "PrivilegedNoncombatProjectionAccess",
+            "Explicit opt-in handle for training-oracle-only noncombat features.")
+        .def(pybind11::init<StepSimulator &, const std::string &>(),
+                pybind11::arg("simulator"),
+                pybind11::arg("audience"),
+                pybind11::keep_alive<1, 2>())
+        .def("project_v1", &PrivilegedNoncombatProjectionAccess::projectV1,
+                "Return noncombat features tagged public_now or oracle_only.");
 
     pybind11::class_<GameContext> gameContext(m, "GameContext");
     gameContext.def(pybind11::init<CharacterClass, std::uint64_t, int>())
