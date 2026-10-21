@@ -835,12 +835,134 @@ nlohmann::json checkPrivilegedProjectionPerformance() {
     };
 }
 
+nlohmann::json checkBottledEventExclusions() {
+    struct FallingCase {
+        const char *name;
+        CardId bottledCard;
+        CardId removableCard;
+        CardType type;
+        int eventOption;
+    };
+    const std::vector<FallingCase> fallingCases = {
+        {"attack", CardId::ANGER, CardId::BASH, CardType::ATTACK, 2},
+        {"skill", CardId::ARMAMENTS, CardId::BURNING_PACT, CardType::SKILL, 0},
+        {"power", CardId::INFLAME, CardId::BARRICADE, CardType::POWER, 1}
+    };
+    nlohmann::json evidence = nlohmann::json::array();
+
+    int seed = 6900;
+    for (const auto &testCase : fallingCases) {
+        StepSimulator fixture(CharacterClass::IRONCLAD, seed++, 20);
+        auto &gc = fixture.gc;
+        gc.deck = Deck{};
+        gc.deck.obtainRaw(Card(testCase.bottledCard));
+        gc.deck.obtainRaw(Card(testCase.removableCard));
+        gc.deck.bottleCard(0, testCase.type);
+        gc.curEvent = Event::FALLING;
+        gc.setupEvent();
+        installTestMapContinuation(gc);
+
+        const int selectedDeckIdx = testCase.type == CardType::ATTACK
+                ? gc.info.attackCardDeckIdx
+                : testCase.type == CardType::SKILL
+                        ? gc.info.skillCardDeckIdx
+                        : gc.info.powerCardDeckIdx;
+        require(selectedDeckIdx == 1,
+                std::string("Falling selected a bottled ") + testCase.name
+                        + " card or omitted the only eligible card");
+        const auto actions = fixture.legalActions();
+        const auto selectedAction = findGameCandidate(actions, "event", testCase.eventOption);
+        (void) fixture.step(actions[selectedAction]);
+        require(gc.deck.size() == 1
+                        && gc.deck.cards[0].getId() == testCase.bottledCard
+                        && gc.deck.isCardBottled(0),
+                std::string("Falling removal did not preserve the bottled ")
+                        + testCase.name + " card");
+        evidence.push_back({
+            {"family", "FALLING"}, {"card_type", testCase.name},
+            {"bottled_deck_index", 0}, {"selected_deck_index", selectedDeckIdx},
+            {"native_event_option", testCase.eventOption},
+            {"bottled_card_preserved_after_native_choice", true}
+        });
+    }
+
+    // A duplicated card is a single visible identity in this event.  When
+    // its first copy is bottled, index normalization must choose the first
+    // eligible copy rather than mapping back to the bottled one.
+    StepSimulator duplicated(CharacterClass::IRONCLAD, 6903, 20);
+    auto &duplicateGc = duplicated.gc;
+    duplicateGc.deck = Deck{};
+    duplicateGc.deck.obtainRaw(Card(CardId::ANGER));
+    duplicateGc.deck.obtainRaw(Card(CardId::ANGER));
+    duplicateGc.deck.bottleCard(0, CardType::ATTACK);
+    duplicateGc.obtainPotion(Potion::FRUIT_JUICE);
+    duplicateGc.gold = 100;
+    duplicateGc.curEvent = Event::WE_MEET_AGAIN;
+    duplicateGc.setupEvent();
+    installTestMapContinuation(duplicateGc);
+    require(duplicateGc.info.cardIdx == 1,
+            "We Meet Again mapped an eligible duplicate back to its bottled first copy");
+    const auto duplicateActions = duplicated.legalActions();
+    const auto duplicateAction = findGameCandidate(duplicateActions, "event", 2);
+    (void) duplicated.step(duplicateActions[duplicateAction]);
+    require(duplicateGc.deck.size() == 1
+                    && duplicateGc.deck.cards[0].getId() == CardId::ANGER
+                    && duplicateGc.deck.isCardBottled(0),
+            "We Meet Again card trade removed the bottled duplicate");
+    evidence.push_back({
+        {"family", "WE_MEET_AGAIN"}, {"bottled_duplicate_deck_index", 0},
+        {"eligible_duplicate_deck_index", 1},
+        {"selected_deck_index", 1},
+        {"bottled_card_preserved_after_native_choice", true}
+    });
+
+    StepSimulator noEligibleCard(CharacterClass::IRONCLAD, 6904, 20);
+    auto &noEligibleGc = noEligibleCard.gc;
+    noEligibleGc.deck = Deck{};
+    noEligibleGc.deck.obtainRaw(Card(CardId::ANGER));
+    noEligibleGc.deck.bottleCard(0, CardType::ATTACK);
+    noEligibleGc.deck.obtainRaw(Card(CardId::BASH));
+    noEligibleGc.obtainPotion(Potion::FRUIT_JUICE);
+    noEligibleGc.gold = 100;
+    noEligibleGc.curEvent = Event::WE_MEET_AGAIN;
+    noEligibleGc.setupEvent();
+    require(noEligibleGc.info.cardIdx == -1,
+            "We Meet Again offered a card when its only nonbasic choice was bottled");
+    const auto noEligibleActions = noEligibleCard.legalActions();
+    require(std::none_of(noEligibleActions.begin(), noEligibleActions.end(),
+                    [](const LightSpeedAction &action) {
+                        return action.kind == "event" && action.idx1 == 2;
+                    }),
+            "We Meet Again exposed the card-trade option without an eligible card");
+    evidence.push_back({
+        {"family", "WE_MEET_AGAIN"}, {"bottled_nonbasic_deck_index", 0},
+        {"unbottled_basic_deck_index", 1}, {"selected_deck_index", -1},
+        {"card_trade_option_exposed", false}
+    });
+    return evidence;
+}
+
 nlohmann::json checkRequiredEventMechanics() {
     nlohmann::json evidence = {
         {"coverage_matrix", nlohmann::json::object()},
         {"execution_witnesses", nlohmann::json::array()},
         {"mechanism_inventory", nlohmann::json::array()}
     };
+
+    const auto bottledEventWitnesses = checkBottledEventExclusions();
+    evidence["coverage_matrix"]["EVENT_SCREEN:FALLING_BOTTLED_CARD_EXCLUSION"] = {
+        {"status", "supported"},
+        {"classification", "REQUIRED_REPAIR_COMPLETED"},
+        {"native_witness_count", 3}
+    };
+    evidence["coverage_matrix"]["EVENT_SCREEN:WE_MEET_AGAIN_BOTTLED_CARD_EXCLUSION"] = {
+        {"status", "supported"},
+        {"classification", "REQUIRED_REPAIR_COMPLETED"},
+        {"native_witness_count", 2}
+    };
+    for (const auto &witness : bottledEventWitnesses) {
+        evidence["execution_witnesses"].push_back(witness);
+    }
 
     StepSimulator restrictedShard(CharacterClass::IRONCLAD, 49, 20);
     const PrivilegedNoncombatProjectionAccess shardAccess(
@@ -1368,26 +1490,26 @@ nlohmann::json checkRequiredEventMechanics() {
     evidence["mechanism_inventory"].push_back({
         {"mechanism", "FALLING_BOTTLED_CARD_EXCLUSION"},
         {"reachability", "Act 3 standard event pool; no A20 exclusion in the inspected eligibility path"},
-        {"native_switch_or_todo", "GameContext::setupEvent FALLING comment says TODO test and CANNOT BE BOTTLED"},
-        {"eligibility", "reachable Act 3 event; setup samples one candidate index for each present attack/skill/power type"},
-        {"native_legal_choices", "remove one selected attack, skill, or power, or leave; this task has no bottled-card fixture for these branches"},
-        {"post_action_or_terminal_effect", "selected deck index is removed; bottled-card protection is not established by the inspected path"},
-        {"rng_save_restore", "setup selection consumes miscRng; no event checkpoint/replay witness was added here"},
-        {"severity", "P2 unresolved reachable mechanics blocker"},
-        {"evidence", "Act3::events includes FALLING; setupEvent samples indices without an inspected bottled-card filter; chooseEventOption removes the stored index"},
-        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+        {"native_switch_or_todo", "GameContext::setupEvent FALLING now builds type-specific candidate indices after excluding Deck::isCardBottled"},
+        {"eligibility", "reachable Act 3 event; samples one eligible attack, skill, and power independently when present"},
+        {"native_legal_choices", "remove one selected unbottled attack, skill, or power, or leave"},
+        {"post_action_or_terminal_effect", "focused native fixture executes each type's selected removal and preserves the bottled card"},
+        {"rng_save_restore", "selection remains on the native miscRng path; no separate RNG checkpoint claim is made"},
+        {"severity", "scoped native repair completed; live-game parity trace remains unverified"},
+        {"evidence", "native attack/skill/power fixtures select the sole unbottled card and execute the associated event action; the bottled card remains in the deck"},
+        {"classification", "REQUIRED_REPAIR_COMPLETED"}
     });
     evidence["mechanism_inventory"].push_back({
         {"mechanism", "WE_MEET_AGAIN_BOTTLED_CARD_SELECTION"},
         {"reachability", "one-time event listed in both Ascension 0 and Ascension 15 event sets"},
-        {"native_switch_or_todo", "GameContext::setupEvent WE_MEET_AGAIN comment is TODO @FIX_BOTTLED"},
+        {"native_switch_or_todo", "GameContext::setupEvent WE_MEET_AGAIN and getRandomPlayerNonBasicCardIdx now exclude bottled cards"},
         {"eligibility", "one-time event can be inserted by the native one-time-event path at A20"},
-        {"native_legal_choices", "trade a potion, gold or a nonbasic noncurse card for a relic, or decline"},
-        {"post_action_or_terminal_effect", "selected card is removed by stored deck index; bottled-card exclusion is not established by this inspected path"},
-        {"rng_save_restore", "card/potion choices are selected at setup and relic tier/identity uses native RNG; no replay witness was added here"},
-        {"severity", "P2 unresolved reachable mechanics blocker"},
-        {"evidence", "one-time event arrays include WE_MEET_AGAIN at Ascension 15; getRandomPlayerNonBasicCardIdx filters rarity/type but not bottle state"},
-        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+        {"native_legal_choices", "trade a potion, gold or an unbottled nonbasic noncurse card for a relic, or decline"},
+        {"post_action_or_terminal_effect", "native duplicate-card fixture trades the eligible second copy while preserving the bottled first copy; no eligible card omits the card option"},
+        {"rng_save_restore", "card/potion choices are selected at setup and relic tier/identity uses native RNG; this fixture does not claim checkpoint replay"},
+        {"severity", "scoped native repair completed; live-game parity trace remains unverified"},
+        {"evidence", "native fixtures verify bottled duplicate index normalization, executed removal of the unbottled copy, and absence of a card trade when only bottled nonbasic cards are present"},
+        {"classification", "REQUIRED_REPAIR_COMPLETED"}
     });
     evidence["mechanism_inventory"].push_back({
         {"mechanism", "MYSTERIOUS_SPHERE_GOLDEN_IDOL_EVENT_GOLD"},
@@ -1395,11 +1517,11 @@ nlohmann::json checkRequiredEventMechanics() {
         {"native_switch_or_todo", "GameContext::afterBattle MYSTERIOUS_SPHERE comment asks TODO gold from Golden Idol?"},
         {"eligibility", "reachable Act 3 event fight; Golden Idol is obtainable in the standard relic pool"},
         {"native_legal_choices", "fight for event rewards or take the event's direct gold option"},
-        {"post_action_or_terminal_effect", "victory grants stored event gold and rare relic; Golden Idol scaling of this gold is unresolved"},
+        {"post_action_or_terminal_effect", "victory grants stored event gold and rare relic; whether Golden Idol scales this event gold remains GAME_RULE_UNRESOLVED"},
         {"rng_save_restore", "event gold and rare relic are rolled before battle; no Golden Idol-specific replay witness was added here"},
         {"severity", "P2 unresolved reachable reward parity blocker"},
         {"evidence", "Act3::events includes MYSTERIOUS_SPHERE; afterBattle adds info.gold directly and retains the source TODO"},
-        {"classification", "UNRESOLVED_REAL_GAME_PARITY_BLOCKER"}
+        {"classification", "GAME_RULE_UNRESOLVED"}
     });
     evidence["mechanism_inventory"].push_back({
         {"mechanism", "PRAYER_WHEEL_COMBAT_REWARD"},
@@ -1466,13 +1588,13 @@ nlohmann::json checkRequiredEventMechanics() {
             "BattleContext::initRelics/exitBattle and potion reward RNG path"
         }},
         {"observed_classification_counts", {
-            {"required_repairs_completed", 2},
+            {"required_repairs_completed", 4},
             {"restricted_training_exceptions", 1},
-            {"unresolved_real_game_parity_blockers", 3},
+            {"unresolved_real_game_parity_blockers", 1},
             {"no_issue_within_inspected_scope", 4}
         }},
         {"full_sts_mechanics_audit", false},
-        {"note", "Other observed reachable mechanisms are recorded and classified below; they were not automatically repaired because this issue only required Colosseum and Match and Keep."}
+        {"note", "The bounded Batch A repairs cover Colosseum, Match and Keep, Falling bottled-card exclusion, and We Meet Again bottled-card exclusion. Mysterious Sphere Golden Idol gold remains explicitly unresolved; unrelated mechanisms were not repaired."}
     };
     return evidence;
 }
@@ -1504,6 +1626,12 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
             requiredEventEvidence["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"];
     result["coverage_matrix"]["EVENT_SCREEN:MATCH_AND_KEEP"] =
             requiredEventEvidence["coverage_matrix"]["EVENT_SCREEN:MATCH_AND_KEEP"];
+    result["coverage_matrix"]["EVENT_SCREEN:FALLING_BOTTLED_CARD_EXCLUSION"] =
+            requiredEventEvidence["coverage_matrix"]
+                    ["EVENT_SCREEN:FALLING_BOTTLED_CARD_EXCLUSION"];
+    result["coverage_matrix"]["EVENT_SCREEN:WE_MEET_AGAIN_BOTTLED_CARD_EXCLUSION"] =
+            requiredEventEvidence["coverage_matrix"]
+                    ["EVENT_SCREEN:WE_MEET_AGAIN_BOTTLED_CARD_EXCLUSION"];
 
     // Audit every source-enabled multi-choice event family against the exact
     // native enumerator.  Event state fields are initialized to valid native
@@ -2261,7 +2389,8 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
         "LAB forced EVENT_SCREEN remains unsupported; native setup auto-resolves it to REWARDS, so the forced state is not treated as reachable",
         "Colosseum and Match and Keep have native transition coverage, but no matched live CommunicationMod trace was available",
         "per-family event execution witnesses are representative rather than an execution of every event branch",
-        "the bounded source TODO scan retains unresolved reachable Falling, We Meet Again bottled-card, and Mysterious Sphere Golden Idol reward cases; this is not a full STS mechanics audit"
+        "Falling and We Meet Again bottled-card exclusions have focused native fixtures but no matched live CommunicationMod parity trace",
+        "Mysterious Sphere Golden Idol scaling remains GAME_RULE_UNRESOLVED and was not changed; this is not a full STS mechanics audit"
     };
     result["overall_parity_status"] = "REAL_GAME_PARITY_RESTRICTED_PRISMATIC_SHARD";
     result["real_game_trace_status"] = "REAL_GAME_TRACE_NOT_VERIFIED";
