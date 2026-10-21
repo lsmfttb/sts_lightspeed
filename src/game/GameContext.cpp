@@ -5,6 +5,7 @@
 #include "game/GameContext.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 
 #include "constants/RelicPools.h"
@@ -883,47 +884,43 @@ void GameContext::setupEvent() { // todo necronomicon event
             info.hpAmount0 = std::max(1, fractionMaxHp(.10f, FLOOR));
             break;
 
-        case Event::FALLING: { // todo test and CANNOT BE BOTTLED
-            int counts[3] {0,0,0};
-            for (const auto &c : deck.cards) {
-                ++counts[static_cast<int>(c.getType())];
-            }
-
-            int attacksIdx = counts[0] > 0 ? miscRng.random(counts[0] - 1) : -1;
-            int skillsIdx = counts[1] > 0 ? miscRng.random(counts[1] - 1) : -1;
-            int powersIdx = counts[2] > 0 ? miscRng.random(counts[2] - 1) : -1;
-
-            int attackCount = 0;
-            int skillCount = 0;
-            int powerCount = 0;
-
+        case Event::FALLING: {
+            std::array<std::array<int, Deck::MAX_SIZE>, 3> eligibleDeckIdxs {};
+            std::array<int, 3> eligibleCounts {};
             info.attackCardDeckIdx = -1;
             info.skillCardDeckIdx = -1;
             info.powerCardDeckIdx = -1;
 
             for (int i = 0; i < deck.cards.size(); ++i) {
+                if (deck.isCardBottled(i)) {
+                    continue;
+                }
                 switch (deck.cards[i].getType()) {
                     case CardType::ATTACK:
-                        if (attackCount++ == attacksIdx) {
-                            info.attackCardDeckIdx = i;
-                        }
+                        eligibleDeckIdxs[0][eligibleCounts[0]++] = i;
                         break;
 
                     case CardType::SKILL:
-                        if (skillCount++ == skillsIdx) {
-                            info.skillCardDeckIdx = i;
-                        }
+                        eligibleDeckIdxs[1][eligibleCounts[1]++] = i;
                         break;
 
                     case CardType::POWER:
-                        if (powerCount++ == powersIdx) {
-                            info.powerCardDeckIdx = i;
-                        }
+                        eligibleDeckIdxs[2][eligibleCounts[2]++] = i;
                         break;
 
                     default:
                         break;
                 }
+            }
+
+            if (eligibleCounts[0] > 0) {
+                info.attackCardDeckIdx = eligibleDeckIdxs[0][miscRng.random(eligibleCounts[0] - 1)];
+            }
+            if (eligibleCounts[1] > 0) {
+                info.skillCardDeckIdx = eligibleDeckIdxs[1][miscRng.random(eligibleCounts[1] - 1)];
+            }
+            if (eligibleCounts[2] > 0) {
+                info.powerCardDeckIdx = eligibleDeckIdxs[2][miscRng.random(eligibleCounts[2] - 1)];
             }
             break;
         }
@@ -1042,7 +1039,7 @@ void GameContext::setupEvent() { // todo necronomicon event
             info.hpAmount0 = std::min(maxHp-1, fractionMaxHp(0.3f, CEIL));
             break;
 
-        case Event::WE_MEET_AGAIN: { //todo @FIX_BOTTLED
+        case Event::WE_MEET_AGAIN: {
             info.potionIdx = getRandomPlayerPotionIdx();
             if (gold < 50) {
                 info.gold = -1;
@@ -1752,7 +1749,9 @@ int GameContext::getRandomPlayerNonBasicCardIdx() {
 
     for (int i = 0; i < deck.cards.size(); ++i) {
         const auto &c = deck.cards[i];
-        if (c.getRarity() != CardRarity::BASIC && c.getType() != CardType::CURSE) {
+        if (!deck.isCardBottled(i)
+                && c.getRarity() != CardRarity::BASIC
+                && c.getType() != CardType::CURSE) {
             cardIdxs.push_back(i);
         }
     }
@@ -1765,7 +1764,7 @@ int GameContext::getRandomPlayerNonBasicCardIdx() {
 
     int retIdx = cardIdxs[0];
     for (int i = 0; i < retIdx; ++i) {
-        if (deck.cards[i] == deck.cards[retIdx]) {
+        if (!deck.isCardBottled(i) && deck.cards[i] == deck.cards[retIdx]) {
             return i;
         }
     }
