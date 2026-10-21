@@ -908,7 +908,9 @@ void ConsoleSimulator::printEventActions(std::ostream &os) const {
                 } else if (c.deckIdx == 1) {
                     os << i << ": " << c.card.getName() << "\n";
                 } else {
-                    os << i << ": -Unknown- " << c.card.getName() << "\n";
+                    // Face-down cards must remain hidden in the normal console
+                    // interface, including from their native card object.
+                    os << i << ": -Unknown-\n";
                 }
             }
             break;

@@ -47,13 +47,17 @@ std::ostream &search::GameAction::printDesc(std::ostream &os, const GameContext 
 }
 
 bool isValidMatchAndKeepEventAction(const GameContext &gc, const search::GameAction a) {
-//    const auto &m = matchAndKeepCardMap;
-//    const int idx1 = option / m.size();
-//    int idx2 = option % m.size();
-//    if (idx2 == idx1) {
-//        idx2 = idx1+1;
-//    }
-    return true;
+    if (a.isPotionAction() || gc.info.eventData <= 0
+            || gc.info.toSelectCards.size() != 12) {
+        return false;
+    }
+    const int idx1 = a.getIdx1();
+    const int idx2 = a.getIdx2();
+    return idx1 >= 0 && idx1 < idx2 && idx2 < 12
+            && gc.info.toSelectCards[idx1].deckIdx == -1
+            && gc.info.toSelectCards[idx2].deckIdx == -1
+            && gc.info.toSelectCards[idx1].card.id != CardId::INVALID
+            && gc.info.toSelectCards[idx2].card.id != CardId::INVALID;
 }
 
 bool isValidDesignerInSpireEventAction(const GameContext &gc, const search::GameAction a) {
@@ -436,7 +440,11 @@ void search::GameAction::execute(GameContext &gc) const {
 
     switch (gc.screenState) {
         case ScreenState::EVENT_SCREEN:
-            gc.chooseEventOption(getIdx1());
+            if (gc.curEvent == Event::MATCH_AND_KEEP) {
+                gc.chooseMatchAndKeepCards(getIdx1(), getIdx2());
+            } else {
+                gc.chooseEventOption(getIdx1());
+            }
             break;
 
         case ScreenState::REWARDS:
@@ -628,7 +636,23 @@ std::vector<search::GameAction> search::GameAction::getAllActionsInState(const s
 
         case ScreenState::EVENT_SCREEN:
             if (gc.curEvent == Event::MATCH_AND_KEEP) {
-                return {};
+                std::vector<search::GameAction> actions;
+                if (gc.info.eventData <= 0 || gc.info.toSelectCards.size() != 12) {
+                    return actions;
+                }
+                for (int idx1 = 0; idx1 < 12; ++idx1) {
+                    if (gc.info.toSelectCards[idx1].deckIdx != -1
+                            || gc.info.toSelectCards[idx1].card.id == CardId::INVALID) {
+                        continue;
+                    }
+                    for (int idx2 = idx1 + 1; idx2 < 12; ++idx2) {
+                        if (gc.info.toSelectCards[idx2].deckIdx == -1
+                                && gc.info.toSelectCards[idx2].card.id != CardId::INVALID) {
+                            actions.emplace_back(idx1, idx2);
+                        }
+                    }
+                }
+                return actions;
             } else {
                 return getAllActionsInEventState(gc);
             }
@@ -719,11 +743,9 @@ int search::GameAction::getValidEventSelectBits(const GameContext &gc) {
             }
 
         case Event::COLOSSEUM:
-            if (gc.info.eventData == 0) { // first phase
-                return 0x1;
-            } else {
-                return 0x3;
-            }
+            // The opening phase immediately starts the Slavers battle. Only
+            // the post-victory leave/challenge screen is a player decision.
+            return gc.info.eventData == 1 ? 0x3 : 0;
 
         case Event::CURSED_TOME:
             switch (gc.info.eventData) { // event phase

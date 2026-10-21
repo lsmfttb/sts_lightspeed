@@ -468,15 +468,15 @@ void checkSmokeBombLegalityAndSearch() {
         colosseumGame.potions[0] = Potion::SMOKE_BOMB;
         colosseumGame.potionCount = 1;
         auto colosseum = battleFixture(colosseumGame, encounter, Room::EVENT);
-        require(!colosseum.canUseSmokeBomb()
-                        && !search::Action(search::ActionType::POTION, 0).isValidAction(colosseum),
-                "unsupported Colosseum encounter allowed Smoke Bomb");
+        require(colosseum.canUseSmokeBomb()
+                        && search::Action(search::ActionType::POTION, 0).isValidAction(colosseum),
+                "Colosseum encounter did not allow its real Smoke Bomb escape");
         require(search::Action(search::ActionType::POTION, 0, 6).isValidAction(colosseum),
-                "unsupported Colosseum encounter incorrectly prevented potion discard");
+                "Colosseum encounter incorrectly prevented potion discard");
         colosseum.drinkPotion(0);
-        require(colosseum.potionCount == 1
-                        && colosseum.potions[0] == Potion::SMOKE_BOMB,
-                "direct invalid Colosseum Smoke Bomb use consumed the potion");
+        require(colosseum.outcome == Outcome::PLAYER_ESCAPE
+                        && colosseum.potionCount == 0,
+                "Colosseum Smoke Bomb use did not consume its potion and produce escape");
     }
 }
 
@@ -523,6 +523,40 @@ void checkSmokeBombExitSkipsRewards() {
                     && gc.deck.size() == startingDeckSize
                     && gc.potionCount == 0,
             "event escape applied a victory reward, altered the run, or failed to consume potion");
+}
+
+void checkColosseumSmokeBombAbandonsEvent() {
+    for (const auto encounter : {
+            MonsterEncounter::COLOSSEUM_EVENT_SLAVERS,
+            MonsterEncounter::COLOSSEUM_EVENT_NOBS}) {
+        auto gc = gameFixture();
+        gc.curRoom = Room::EVENT;
+        gc.curEvent = Event::COLOSSEUM;
+        gc.info.eventData = encounter == MonsterEncounter::COLOSSEUM_EVENT_SLAVERS ? 0 : 2;
+        gc.info.rewardsContainer.clear();
+        gc.potions[0] = Potion::SMOKE_BOMB;
+        gc.potionCount = 1;
+        gc.gold = 99;
+        gc.regainControlAction = [](GameContext &next) { next.afterBattle(); };
+        const int startingGold = gc.gold;
+        const int startingDeckSize = gc.deck.size();
+        const int startingRelicCount = gc.relics.size();
+
+        auto bc = battleFixture(gc, encounter, Room::EVENT);
+        bc.drinkPotion(0);
+        require(bc.outcome == Outcome::PLAYER_ESCAPE,
+                "Colosseum Smoke Bomb did not reach terminal escape");
+        bc.exitBattle(gc);
+        require(gc.screenState == ScreenState::MAP_SCREEN
+                        && gc.regainControlAction == nullptr
+                        && gc.outcome == GameOutcome::UNDECIDED,
+                "Colosseum escape did not abandon the event and resume at the map");
+        require(gc.gold == startingGold && gc.deck.size() == startingDeckSize
+                        && gc.relics.size() == startingRelicCount
+                        && gc.info.rewardsContainer.getTotalCount() == 0
+                        && gc.potionCount == 0,
+                "Colosseum escape granted victory loot or failed to consume Smoke Bomb");
+    }
 }
 
 void checkCombatEndRelic(
@@ -721,6 +755,7 @@ int main() {
         checkForbiddenPotionSlotSearch();
         checkProtectedEntropicBrewOccupancy();
         checkSmokeBombExitSkipsRewards();
+        checkColosseumSmokeBombAbandonsEvent();
         checkSmokeBombCombatEndRelics();
         checkCombinedCombatEndRelicOrdering();
         checkFaceOfClericEventVictory(Event::MASKED_BANDITS, 1,

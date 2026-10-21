@@ -947,6 +947,15 @@ void GameContext::setupEvent() { // todo necronomicon event
             info.hpAmount2 = 6;
             break;
 
+        case Event::COLOSSEUM:
+            // Colosseum opens with a forced Slavers battle. It has no ordinary
+            // first-fight reward screen; after victory, afterBattle exposes
+            // the actual leave/challenge decision.
+            info.eventData = 0;
+            regainControlAction = [](GameContext &gc) { gc.afterBattle(); };
+            enterBattle(ME::COLOSSEUM_EVENT_SLAVERS);
+            break;
+
         case Event::LAB: {
             Potion pReward[3];
             int pCount = 2;
@@ -961,8 +970,11 @@ void GameContext::setupEvent() { // todo necronomicon event
         }
 
         case Event::MATCH_AND_KEEP: {
-            if (disableMatchAndKeep) { // additional safeguard as it should also be prevented from spawning
+            if (disableMatchAndKeep) {
+                // Keep direct/forced setup fail-closed if the staging switch
+                // is ever re-enabled independently of shrine eligibility.
                 regainControl();
+                return;
             }
 
             info.toSelectCards.clear();
@@ -1188,6 +1200,28 @@ void GameContext::afterBattle() {
                 reward.addCardReward(createCardReward(Room::EVENT));
                 openCombatRewardScreen(reward);
                 regainControlAction = returnToMapAction;
+            } else if (curEvent == Event::COLOSSEUM) {
+                if (info.eventData == 0) {
+                    // The Slavers fight has no ordinary combat rewards. The
+                    // player may leave or challenge the Taskmaster/Nob pair.
+                    info.eventData = 1;
+                    screenState = ScreenState::EVENT_SCREEN;
+                    regainControlAction = returnToMapAction;
+                } else if (info.eventData == 2) {
+                    // Victory in the second fight grants the event's fixed
+                    // 100 gold, uncommon and rare relics, and elite card pick.
+                    regainControlAction = returnToMapAction;
+                    Rewards reward;
+                    addPotionRewards(reward);
+                    reward.addGold(100);
+                    reward.addRelic(returnRandomRelic(RelicTier::UNCOMMON));
+                    reward.addRelic(returnRandomRelic(RelicTier::RARE));
+                    reward.addCardReward(createCardReward(Room::ELITE));
+                    openCombatRewardScreen(reward);
+                } else {
+                    // Unknown event phases have no source-backed continuation.
+                    regainControl();
+                }
             } else {
                 regainControl();
             }
@@ -2406,10 +2440,18 @@ void GameContext::chooseBossRelic(int idx) {
 
 
 void GameContext::chooseMatchAndKeepCards(int idx1, int idx2) {
-    if (idx1 < 0 || idx1 >= 12 || info.toSelectCards[idx1].card.id == CardId::INVALID
-        || idx2 == idx1 || idx2 < 0 || idx2 >= 12 || info.toSelectCards[idx2].card.id == CardId::INVALID
-            ) {
-        assert(false);}
+    if (curEvent != Event::MATCH_AND_KEEP || screenState != ScreenState::EVENT_SCREEN
+            || info.eventData <= 0 || info.toSelectCards.size() != 12
+            || idx1 < 0 || idx1 >= 12 || idx2 <= idx1 || idx2 >= 12
+            || info.toSelectCards[idx1].deckIdx != -1
+            || info.toSelectCards[idx2].deckIdx != -1
+            || info.toSelectCards[idx1].card.id == CardId::INVALID
+            || info.toSelectCards[idx2].card.id == CardId::INVALID) {
+#ifdef sts_asserts
+        assert(false && "invalid Match and Keep card pair");
+#endif
+        return;
+    }
 
     auto &s1 = info.toSelectCards[idx1].card;
     auto &s2 = info.toSelectCards[idx2].card;
@@ -2556,8 +2598,15 @@ void GameContext::chooseEventOption(int idx) {
             break;
         }
 
-        case Event::COLOSSEUM: // todo
-            regainControl();
+        case Event::COLOSSEUM:
+            if (info.eventData == 1 && idx == 0) {
+                // Declining the second fight ends the event without a reward.
+                regainControl();
+            } else if (info.eventData == 1 && idx == 1) {
+                info.eventData = 2;
+                regainControlAction = [](GameContext &gc) { gc.afterBattle(); };
+                enterBattle(ME::COLOSSEUM_EVENT_NOBS);
+            }
             break;
 
         case Event::CURSED_TOME: {

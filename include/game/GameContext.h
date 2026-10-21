@@ -149,8 +149,11 @@ namespace sts {
 
         sts::Card noteForYourselfCard = Card(CardId::IRON_WAVE);
 
-        static constexpr bool disableColosseum = true;
-        static constexpr bool disableMatchAndKeep = true;
+        static constexpr bool disableColosseum = false;
+        static constexpr bool disableMatchAndKeep = false;
+        // Cross-class card generation is intentionally deferred for the
+        // restricted first-stage training population. See the source-bound
+        // training population qualification exposed by the native binding.
         static constexpr bool disablePrismaticShard = true;
         bool skipBattles = false;
 

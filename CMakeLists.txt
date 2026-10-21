@@ -80,5 +80,7 @@ else()
         set(STS_LIGHTSPEED_TESTED_SOURCE_COMMIT "unknown")
     endif()
 endif()
+target_compile_definitions(slaythespire PRIVATE
+        STS_LIGHTSPEED_TESTED_SOURCE_COMMIT="${STS_LIGHTSPEED_TESTED_SOURCE_COMMIT}")
 target_compile_definitions(test-public-noncombat-projection PRIVATE
         STS_LIGHTSPEED_TESTED_SOURCE_COMMIT="${STS_LIGHTSPEED_TESTED_SOURCE_COMMIT}")
