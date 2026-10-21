@@ -851,6 +851,7 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
         {"tested_native_source_commit", STS_LIGHTSPEED_TESTED_SOURCE_COMMIT},
         {"scope", "source-backed native projection and selected candidate execution; no policy training"},
         {"coverage_matrix", nlohmann::json::object()},
+        {"single_action_fixtures", nlohmann::json::object()},
         {"execution_witnesses", nlohmann::json::array()}
     };
 
@@ -1028,6 +1029,22 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     require(invalidPhaseRow["coverage_status"].cast<std::string>() == "unsupported"
                     && invalidPhaseRow.contains("reason"),
             "out-of-range Dead Adventurer phase did not fail closed per candidate");
+    // Test the real event-pool filter with only COLOSSEUM eligible by floor,
+    // plus one known shrine as the native getEvent() fallback.  The forced
+    // EVENT_SCREEN fixture below remains separately fail-closed.
+    StepSimulator colosseumEligibility(CharacterClass::IRONCLAD, 49, 20);
+    colosseumEligibility.gc.curMapNodeY = 8;
+    colosseumEligibility.gc.eventList = {Event::COLOSSEUM};
+    colosseumEligibility.gc.shrineList = {Event::ANCIENT_WRITING};
+    const bool colosseumCanBeAdded =
+            colosseumEligibility.gc.canAddEvent(Event::COLOSSEUM);
+    const auto eventSelectedByNativePoolFilter =
+            colosseumEligibility.gc.getEvent(colosseumEligibility.gc.eventRng);
+    const bool colosseumIsReachable =
+            eventSelectedByNativePoolFilter == Event::COLOSSEUM;
+    require(!colosseumCanBeAdded && !colosseumIsReachable,
+            "Colosseum became reachable under the current native event eligibility rules; revisit its forced-only classification");
+
     StepSimulator unsupportedColosseum(CharacterClass::IRONCLAD, 49, 20);
     unsupportedColosseum.gc.screenState = ScreenState::EVENT_SCREEN;
     unsupportedColosseum.gc.curEvent = Event::COLOSSEUM;
@@ -1039,9 +1056,28 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
                     && colosseumProjection["unsupported_candidates"].cast<pybind11::list>().size() == 2,
             "disabled/TODO Colosseum alternatives did not fail closed individually");
     result["coverage_matrix"]["EVENT_SCREEN:COLOSSEUM"] = {
-        {"status", "unsupported"}, {"native_candidate_count", colosseumActions.size()},
-        {"blocker", "native event generation disables Colosseum; chooseEventOption is TODO and both alternatives currently return to map"}
+        {"status", "unsupported_if_forced"},
+        {"reachability_classification", colosseumIsReachable
+                ? "actual_reachable_blocker" : "unreachable_by_current_rules"},
+        {"native_candidate_count", colosseumActions.size()},
+        {"native_generation_disabled", GameContext::disableColosseum},
+        {"can_add_at_event_floor", colosseumCanBeAdded},
+        {"native_event_pool_selected_colosseum", colosseumIsReachable},
+        {"forced_state_reason", "chooseEventOption is TODO; both forced alternatives return to map"}
     };
+
+    // LAB setup immediately opens the potion reward screen in current native
+    // rules, so the event itself contributes no legal choice.  Keep the
+    // forced EVENT_SCREEN projection check below as a separate fail-closed
+    // consistency fixture.
+    StepSimulator labSetup(CharacterClass::IRONCLAD, 49, 20);
+    labSetup.gc.curRoom = Room::EVENT;
+    labSetup.gc.curEvent = Event::LAB;
+    labSetup.gc.setupEvent();
+    const bool labAutoResolvedNoChoice =
+            labSetup.gc.screenState == ScreenState::REWARDS;
+    require(labAutoResolvedNoChoice,
+            "Lab no longer auto-resolves to REWARDS during native setup; revisit its no-choice classification");
 
     StepSimulator unsupportedLab(CharacterClass::IRONCLAD, 49, 20);
     unsupportedLab.gc.screenState = ScreenState::EVENT_SCREEN;
@@ -1053,8 +1089,12 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
                     && labProjection["unsupported_candidates"].cast<pybind11::list>().size() == 1,
             "LAB action bit did not fail closed against its asserting native chooser");
     result["coverage_matrix"]["EVENT_SCREEN:LAB"] = {
-        {"status", "unsupported"}, {"native_candidate_count", labActions.size()},
-        {"blocker", "native action enumeration has one bit but chooseEventOption asserts no action is valid"}
+        {"status", "unsupported_if_forced"},
+        {"reachability_classification", labAutoResolvedNoChoice
+                ? "auto_resolved_no_choice" : "actual_reachable_blocker"},
+        {"native_candidate_count", labActions.size()},
+        {"native_setup_opens_rewards", labAutoResolvedNoChoice},
+        {"forced_state_reason", "native event action enumeration has one bit but chooseEventOption asserts no action is valid"}
     };
 
     StepSimulator designer(CharacterClass::IRONCLAD, 49, 20);
@@ -1120,15 +1160,17 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
     (void) executeWheel.step(wheelActions[0]);
     require(executeWheel.gc.screenState != ScreenState::EVENT_SCREEN,
             "identified single Wheel of Change candidate did not execute its native chooser");
-    result["coverage_matrix"]["EVENT_SCREEN:WHEEL_OF_CHANGE"] = {
+    result["single_action_fixtures"]["EVENT_SCREEN:WHEEL_OF_CHANGE"] = {
         {"status", "supported"}, {"native_candidate_count", wheelActions.size()},
-        {"single_candidate_execution", true}, {"rng_result", "unavailable"}
+        {"single_candidate_execution", true}, {"rng_result", "unavailable"},
+        {"scope_note", "one legal spin action; excluded from registered multi-choice coverage"}
     };
 
     result["coverage_matrix"]["EVENT_SCREEN:SOURCE_ENABLED_MULTI_CHOICE"] = {
         {"status", "supported"}, {"multi_choice_event_families_checked", eventFamilyCount},
         {"native_candidate_occurrences_checked", eventCandidateCount},
         {"all_candidate_semantics_available", eventFamilyCount == eventFamilies.size()},
+        {"reachability_classification", "reachable_multichoice_supported"},
         {"transition_witness_scope", "representative native execution witnesses include Neow, Designer In-Spire, Old Beggar, Knowing Skull, and Wheel of Change"}
     };
 
@@ -1531,11 +1573,37 @@ nlohmann::json checkPrivilegedNoncombatProjection() {
         {"effect", "native inventory discard emptied the exact potion slot"}
     });
 
-    result["coverage_status"] = "NATIVE_CHOICE_SEMANTIC_NOT_READY";
-    result["unsupported_scope"] = {
-        "COLOSSEUM remains fail-closed if forced into EVENT_SCREEN; native generation disables it and GameContext::chooseEventOption is a TODO with no distinct option effects",
-        "LAB has a single legal-action bit but its native chooser asserts that no option is valid; it is not a multi-choice family",
-        "per-family execution witnesses are representative rather than an execution of every event branch"
+    std::vector<std::string> actualReachableBlockers;
+    if (colosseumIsReachable) {
+        actualReachableBlockers.push_back(
+                "EVENT_SCREEN:COLOSSEUM is admitted by the current event pool but its forced candidate semantics remain unsupported");
+    }
+    if (!labAutoResolvedNoChoice) {
+        actualReachableBlockers.push_back(
+                "EVENT_SCREEN:LAB no longer auto-resolves to REWARDS during native setup");
+    }
+
+    auto &coverageMatrix = result["coverage_matrix"];
+    for (auto it = coverageMatrix.begin(); it != coverageMatrix.end(); ++it) {
+        if (it.value().contains("reachability_classification")) continue;
+        if (it.value().value("status", std::string()) == "supported") {
+            it.value()["reachability_classification"] = "reachable_multichoice_supported";
+        } else {
+            it.value()["reachability_classification"] = "actual_reachable_blocker";
+            actualReachableBlockers.push_back(it.key() + " has unsupported semantic coverage");
+        }
+    }
+    const bool allRegisteredMultichoiceFamiliesSupported =
+            eventFamilyCount == eventFamilies.size() && actualReachableBlockers.empty();
+    result["coverage_status"] = allRegisteredMultichoiceFamiliesSupported
+            ? "NATIVE_FULL_NONCOMBAT_SEMANTIC_CAPABILITY_ACCEPTED"
+            : "NATIVE_CHOICE_SEMANTIC_NOT_READY";
+    result["registered_scope"] =
+            "currently reachable nonbattle decisions with multiple native legal actions";
+    result["actual_reachable_blockers"] = actualReachableBlockers;
+    result["coverage_limitations"] = {
+        "forced Colosseum and Lab EVENT_SCREEN fixtures remain individually fail-closed outside the registered natural decision population",
+        "per-family event execution witnesses are representative rather than an execution of every event branch"
     };
     result["no_training_or_evaluation_ran"] = true;
     return result;
