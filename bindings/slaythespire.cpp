@@ -8130,6 +8130,12 @@ struct StepSimulator {
             searcher.evalFnc = [this, callback](const BattleContext &state) {
                 pybind11::gil_scoped_acquire acquire;
                 const double value = callback(battleSearchNodeSnapshot(state)).cast<double>();
+                // A NaN return means "the learned value does not apply at this
+                // terminal"; preserve the native heuristic exactly rather than
+                // inventing a score for a boundary the critic never saw.
+                if (std::isnan(value)) {
+                    return search::BattleScumSearcher2::evaluateEndState(state);
+                }
                 if (!std::isfinite(value)) {
                     throw std::runtime_error(
                             "battle search v2 terminal callback returned non-finite value");
