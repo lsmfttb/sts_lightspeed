@@ -8100,7 +8100,8 @@ struct StepSimulator {
             bool includeClassicalTelemetry=false,
             bool progressiveBiasEnabled=false,
             std::size_t progressiveBiasAuditLimit=0,
-            int forbiddenPotionSlot=-1) {
+            int forbiddenPotionSlot=-1,
+            const pybind11::object &terminalValueCallback = pybind11::none()) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error("battle search v2 requested outside battle");
@@ -8117,8 +8118,25 @@ struct StepSimulator {
             throw std::invalid_argument("battle search v2 leaf value callback must be callable");
         }
 
+        const bool useTerminalValue = !terminalValueCallback.is_none();
+        if (useTerminalValue && !pybind11::isinstance<pybind11::function>(terminalValueCallback)) {
+            throw std::invalid_argument("battle search v2 terminal value callback must be callable");
+        }
+
         search::BattleScumSearcher2 searcher(bc);
         searcher.includePotions = includePotions;
+        if (useTerminalValue) {
+            const pybind11::function callback = terminalValueCallback.cast<pybind11::function>();
+            searcher.evalFnc = [this, callback](const BattleContext &state) {
+                pybind11::gil_scoped_acquire acquire;
+                const double value = callback(battleSearchNodeSnapshot(state)).cast<double>();
+                if (!std::isfinite(value)) {
+                    throw std::runtime_error(
+                            "battle search v2 terminal callback returned non-finite value");
+                }
+                return value;
+            };
+        }
         searcher.setForbiddenPotionSlot(forbiddenPotionSlot);
         searcher.progressiveBiasEnabled = progressiveBiasEnabled;
         searcher.progressiveBiasAuditLimit = progressiveBiasAuditLimit;
@@ -8215,7 +8233,8 @@ struct StepSimulator {
             bool includePotions,
             const pybind11::object &policyPriorCallback,
             const pybind11::object &leafValueCallback,
-            const int forbiddenPotionSlot=-1) {
+            const int forbiddenPotionSlot=-1,
+            const pybind11::object &terminalValueCallback = pybind11::none()) {
         return battleSearchV2Impl(
                 simulations,
                 includePotions,
@@ -8225,7 +8244,8 @@ struct StepSimulator {
                 false,
                 false,
                 0,
-                forbiddenPotionSlot);
+                forbiddenPotionSlot,
+                terminalValueCallback);
     }
 
     pybind11::dict battleSearchV2WithTreeGeometry(
@@ -8796,7 +8816,8 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),
             pybind11::arg("leaf_value_callback") = pybind11::none(),
-            pybind11::arg("forbidden_potion_slot") = -1)
+            pybind11::arg("forbidden_potion_slot") = -1,
+            pybind11::arg("terminal_value_callback") = pybind11::none())
         .def(
             "battle_search_v2_with_tree_geometry",
             &StepSimulator::battleSearchV2WithTreeGeometry,
