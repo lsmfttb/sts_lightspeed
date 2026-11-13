@@ -301,7 +301,7 @@ std::ostream& search::Action::printDesc(std::ostream &os, const BattleContext &b
         case ActionType::POTION: {
             const auto &p = bc.potions[getSourceIdx()];
             os << "{ ";
-            if (getTargetIdx() == -1) {
+            if (getTargetIdx() > 5) {
                 os << "discard potion ";
             } else {
                 os << "drink potion ";
@@ -309,7 +309,7 @@ std::ostream& search::Action::printDesc(std::ostream &os, const BattleContext &b
 
             os << "(" << getSourceIdx() << ") " << getPotionName(p);
 
-            if (potionRequiresTarget(p)) {
+            if (getTargetIdx() <= 5 && potionRequiresTarget(p)) {
                 const auto &m = bc.monsters.arr[getTargetIdx()];
                 os << " -> (" << getTargetIdx() << ") " << m.getName();
             }
