@@ -8755,6 +8755,16 @@ struct StepSimulator {
     pybind11::dict validateActionPlan(const pybind11::list &bitsList) const {
         pybind11::dict ret;
         BattleContext copy = bc;
+        // Action::execute reaches executeActions(), which sets the thread-local
+        // g_debug_bc to the context it is running on. Here that is a local copy,
+        // so without restoring it the pointer would dangle once this returns.
+        // The dereferences are assert-only, but a dangling thread-local is not
+        // something to leave behind for an assertion build.
+        struct DebugContextGuard {
+            BattleContext *saved;
+            DebugContextGuard() : saved(g_debug_bc) {}
+            ~DebugContextGuard() { g_debug_bc = saved; }
+        } debugContextGuard;
         pybind11::list steps;
         int index = 0;
         int failedIndex = -1;
