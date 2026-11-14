@@ -7865,6 +7865,15 @@ struct StepSimulator {
                 } else {
                     row["mean_value"] = pybind11::none();
                 }
+                // ISSUE88 DIAGNOSTIC ONLY: best terminal value seen under this
+                // root action, plus whether that value is the global tree best.
+                const auto bestForRootAction =
+                        searcher.rootActionBestValue.find(matchedEdge->action.bits);
+                if (bestForRootAction == searcher.rootActionBestValue.end()) {
+                    row["best_value_seen"] = pybind11::none();
+                } else {
+                    row["best_value_seen"] = bestForRootAction->second;
+                }
             }
             rootRows.append(row);
         }
@@ -7889,6 +7898,39 @@ struct StepSimulator {
         ret["best_action_value"] = searcher.bestActionValue;
         ret["min_action_value"] = searcher.minActionValue;
         ret["outcome_player_hp"] = searcher.outcomePlayerHp;
+
+        // ISSUE88 DIAGNOSTIC ONLY: the full terminal action sequence that
+        // achieved best_action_value, its length, and which root edge it starts
+        // from. This is reporting only - the selection path never reads it.
+        {
+            pybind11::list bestSequence;
+            for (const auto &bestAction : searcher.bestActionSequence) {
+                pybind11::dict bestRow = publicProjectionActionSnapshot(
+                        makeBattleAction(searchState, bestAction));
+                bestRow["action_bits"] = bestAction.bits;
+                bestSequence.append(bestRow);
+            }
+            ret["best_action_sequence"] = bestSequence;
+            ret["best_action_sequence_length"] =
+                    static_cast<int>(searcher.bestActionSequence.size());
+            if (searcher.bestActionSequence.empty()) {
+                ret["best_action_root_edge_index"] = pybind11::none();
+            } else {
+                const auto bestRootBits = searcher.bestActionSequence.front().bits;
+                int bestRootEdgeIndex = -1;
+                for (int edgeIdx = 0;
+                        edgeIdx < static_cast<int>(searcher.root.edges.size());
+                        ++edgeIdx) {
+                    if (searcher.root.edges[edgeIdx].action.bits == bestRootBits) {
+                        bestRootEdgeIndex = edgeIdx;
+                        break;
+                    }
+                }
+                ret["best_action_root_edge_index"] = bestRootEdgeIndex >= 0
+                        ? pybind11::object(pybind11::int_(bestRootEdgeIndex))
+                        : pybind11::object(pybind11::none());
+            }
+        }
         ret["root_row_count"] = static_cast<int>(rootRows.size());
         ret["search_edge_count"] = static_cast<int>(searcher.root.edges.size());
         ret["unsearched_legal_action_count"] = unsearchedLegalActionCount;

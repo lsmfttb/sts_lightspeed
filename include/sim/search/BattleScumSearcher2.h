@@ -114,6 +114,11 @@ namespace sts::search {
         double bestActionValue = std::numeric_limits<double>::min();
         double minActionValue = std::numeric_limits<double>::max();
         int outcomePlayerHp = 0;
+
+        // ISSUE88 DIAGNOSTIC ONLY. Best terminal value observed for each root
+        // action (keyed by root action bits). Read-only reporting; it does not
+        // feed evaluateEdge, backprop, selection or RNG.
+        std::map<std::uint32_t, double> rootActionBestValue;
         bool includePotions = true;
         std::int64_t actionExecutionCount = 0;
         std::int64_t expandedNodeCount = 0;

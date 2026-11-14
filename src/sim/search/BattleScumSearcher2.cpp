@@ -595,6 +595,18 @@ void search::BattleScumSearcher2::updateFromEvaluation(const std::vector<Node *>
         minActionValue = evaluation;
     }
 
+    // ISSUE88 DIAGNOSTIC ONLY: remember the best terminal value seen under each
+    // root action. Purely observational - no effect on evaluationSum,
+    // simulationCount, bestActionValue/minActionValue or any selection path.
+    if (terminalState != nullptr && !actionStack.empty()) {
+        const auto rootActionBits = actionStack.front().bits;
+        auto bestForRootAction = rootActionBestValue.find(rootActionBits);
+        if (bestForRootAction == rootActionBestValue.end()
+                || evaluation > bestForRootAction->second) {
+            rootActionBestValue[rootActionBits] = evaluation;
+        }
+    }
+
     for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
         auto &node = *(*it);
         ++node.simulationCount;
