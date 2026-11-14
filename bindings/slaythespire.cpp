@@ -7899,15 +7899,40 @@ struct StepSimulator {
         ret["min_action_value"] = searcher.minActionValue;
         ret["outcome_player_hp"] = searcher.outcomePlayerHp;
 
-        // ISSUE88 DIAGNOSTIC ONLY: the full terminal action sequence that
-        // achieved best_action_value, its length, and which root edge it starts
-        // from. This is reporting only - the selection path never reads it.
+        // The full terminal action sequence that achieved best_action_value, its
+        // length, and which root edge it starts from. Reporting only - the
+        // selection path never reads it.
+        //
+        // Only state-independent identity is emitted here. A public projection
+        // of a deeper action against the ROOT state is not a valid description
+        // of that action (it renders as INVALID ACTION or a stale label), so
+        // callers must resolve per-step labels with validate_action_plan, which
+        // evaluates each step against that step's own state.
         {
             pybind11::list bestSequence;
             for (const auto &bestAction : searcher.bestActionSequence) {
-                pybind11::dict bestRow = publicProjectionActionSnapshot(
-                        makeBattleAction(searchState, bestAction));
+                pybind11::dict bestRow;
                 bestRow["action_bits"] = bestAction.bits;
+                bestRow["action_type"] = static_cast<int>(bestAction.getActionType());
+                switch (bestAction.getActionType()) {
+                    case search::ActionType::END_TURN:
+                        break;
+                    case search::ActionType::SINGLE_CARD_SELECT:
+                        bestRow["select_index"] = bestAction.getSelectIdx();
+                        break;
+                    case search::ActionType::MULTI_CARD_SELECT: {
+                        pybind11::list selected;
+                        for (const int selectedIdx : bestAction.getSelectedIdxs()) {
+                            selected.append(selectedIdx);
+                        }
+                        bestRow["selected_indices"] = selected;
+                        break;
+                    }
+                    default:
+                        bestRow["source_index"] = bestAction.getSourceIdx();
+                        bestRow["target_index"] = bestAction.getTargetIdx();
+                        break;
+                }
                 bestSequence.append(bestRow);
             }
             ret["best_action_sequence"] = bestSequence;
@@ -8717,6 +8742,78 @@ struct StepSimulator {
         battleActive = checkpoint.battleActive;
         return snapshot();
     }
+
+    // Issue 88 plan consumer: validate a concrete action-bit sequence from the
+    // current battle state on a private copy of the context.
+    //
+    // This never touches `bc`, the RNG state, or any live simulator field, so it
+    // is safe to call between decisions. Legality is checked against each step's
+    // own state, and the terminal value is the same evaluateEndState the search
+    // uses, so a validated plan and a freshly searched plan are directly
+    // comparable. Step labels are resolved at the step's own state, which is why
+    // they are correct here while root-projected labels are not.
+    pybind11::dict validateActionPlan(const pybind11::list &bitsList) const {
+        pybind11::dict ret;
+        BattleContext copy = bc;
+        pybind11::list steps;
+        int index = 0;
+        int failedIndex = -1;
+        std::string failure;
+
+        for (auto item : bitsList) {
+            const auto wanted = item.cast<std::uint32_t>();
+            if (copy.outcome != Outcome::UNDECIDED) {
+                failedIndex = index;
+                failure = "battle already terminal before this action";
+                break;
+            }
+            const search::Action action(wanted);
+            if (!action.isValidAction(copy)) {
+                failedIndex = index;
+                failure = "action is not legal in this state";
+                pybind11::list legalBits;
+                for (const auto &candidate : enumerateBattleActions(copy)) {
+                    legalBits.append(candidate.bits);
+                }
+                ret["legal_action_bits_at_failure"] = legalBits;
+                break;
+            }
+
+            std::ostringstream description;
+            action.printDesc(description, copy);
+
+            pybind11::dict step;
+            step["index"] = index;
+            step["bits"] = wanted;
+            step["label"] = description.str();
+            step["player_hp"] = copy.player.curHp;
+            step["turn"] = copy.turn;
+            step["monsters_alive"] = copy.monsters.getAliveCount();
+
+            action.execute(copy);
+            ++index;
+            step["outcome_after"] =
+                    battleOutcomeStrings[static_cast<int>(copy.outcome)];
+            step["player_hp_after"] = copy.player.curHp;
+            step["turn_after"] = copy.turn;
+            steps.append(step);
+        }
+
+        ret["legal"] = failedIndex < 0;
+        ret["failed_index"] = failedIndex;
+        ret["failure"] = failure;
+        ret["executed_steps"] = index;
+        ret["steps"] = steps;
+        ret["terminal"] = copy.outcome != Outcome::UNDECIDED;
+        ret["outcome"] = battleOutcomeStrings[static_cast<int>(copy.outcome)];
+        if (copy.outcome != Outcome::UNDECIDED) {
+            ret["evaluation"] =
+                    search::BattleScumSearcher2::evaluateEndState(copy);
+        }
+        ret["player_hp"] = copy.player.curHp;
+        ret["turn"] = copy.turn;
+        return ret;
+    }
 };
 
 struct PrivilegedNoncombatProjectionAccess {
@@ -8878,6 +8975,7 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("rebuild_battle_start", &StepSimulator::rebuildBattleStart)
         .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
         .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
+        .def("validate_action_plan", &StepSimulator::validateActionPlan)
         .def("step", &StepSimulator::step);
 
     pybind11::class_<PrivilegedNoncombatProjectionAccess>(
