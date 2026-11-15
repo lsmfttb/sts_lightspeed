@@ -8167,7 +8167,8 @@ struct StepSimulator {
             bool includeClassicalTelemetry=false,
             bool progressiveBiasEnabled=false,
             std::size_t progressiveBiasAuditLimit=0,
-            int forbiddenPotionSlot=-1) {
+            int forbiddenPotionSlot=-1,
+            bool bestTerminalExploitationEnabled=false) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error("battle search v2 requested outside battle");
@@ -8189,6 +8190,7 @@ struct StepSimulator {
         searcher.setForbiddenPotionSlot(forbiddenPotionSlot);
         searcher.progressiveBiasEnabled = progressiveBiasEnabled;
         searcher.progressiveBiasAuditLimit = progressiveBiasAuditLimit;
+        searcher.bestTerminalExploitationEnabled = bestTerminalExploitationEnabled;
         if (usePolicyPriors) {
             const pybind11::function callback = policyPriorCallback.cast<pybind11::function>();
             searcher.policyPriorFnc = [this, callback](
@@ -8293,6 +8295,32 @@ struct StepSimulator {
                 false,
                 0,
                 forbiddenPotionSlot);
+    }
+
+    // ISSUE89 candidate M: identical to battle_search_v2 except that tree
+    // exploitation is driven by each child's best real terminal value. The flag
+    // is explicit and off by default, so S/U/V keep the frozen v2 behaviour and
+    // both modes come from this one build.
+    pybind11::dict battleSearchV2WithBestTerminal(
+            std::int64_t simulations,
+            bool includePotions,
+            bool bestTerminalEnabled) {
+        auto report = battleSearchV2Impl(
+                simulations,
+                includePotions,
+                pybind11::none(),
+                pybind11::none(),
+                false,
+                true,
+                false,
+                0,
+                -1,
+                bestTerminalEnabled);
+        report["native_api"] = "StepSimulator.battle_search_v2_with_best_terminal.v1";
+        report["patch_identity"] =
+                "sts_lightspeed_battle_search_v2_best_terminal_allocation_v1";
+        report["best_terminal_exploitation_enabled"] = bestTerminalEnabled;
+        return report;
     }
 
     pybind11::dict battleSearchV2WithTreeGeometry(
@@ -8953,6 +8981,12 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),
             pybind11::arg("leaf_value_callback") = pybind11::none())
+        .def(
+            "battle_search_v2_with_best_terminal",
+            &StepSimulator::battleSearchV2WithBestTerminal,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false,
+            pybind11::arg("best_terminal_enabled") = true)
         .def(
             "battle_search_v2_with_work_counters",
             &StepSimulator::battleSearchV2WithWorkCounters,

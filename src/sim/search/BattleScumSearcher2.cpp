@@ -607,10 +607,27 @@ void search::BattleScumSearcher2::updateFromEvaluation(const std::vector<Node *>
         }
     }
 
+    std::int64_t witnessIndex = -1;
+    if (bestTerminalExploitationEnabled && terminalState != nullptr) {
+        TerminalWitness witness;
+        witness.evaluation = evaluation;
+        witness.actionSequence = actionStack;
+        witness.outcome = battleOutcomeStrings[static_cast<int>(terminalState->outcome)];
+        witness.playerHp = terminalState->player.curHp;
+        witness.turn = terminalState->turn;
+        terminalWitnesses.push_back(std::move(witness));
+        witnessIndex = static_cast<std::int64_t>(terminalWitnesses.size()) - 1;
+    }
+
     for (auto it = stack.rbegin(); it != stack.rend(); ++it) {
         auto &node = *(*it);
         ++node.simulationCount;
         node.evaluationSum += evaluation;
+        if (witnessIndex >= 0
+                && (node.bestTerminalWitness < 0 || evaluation > node.bestTerminalValue)) {
+            node.bestTerminalValue = evaluation;
+            node.bestTerminalWitness = witnessIndex;
+        }
     }
 }
 
@@ -629,7 +646,20 @@ double search::BattleScumSearcher2::evaluateEdge(const search::BattleScumSearche
     const auto &edge = parent.edges[edgeIdx];
 
     double qualityValue = 0;
-    if (!bestActionSequence.empty()) {
+    if (bestTerminalExploitationEnabled) {
+        // Candidate M: exploitation is the best real complete terminal value
+        // witnessed through this child, not its running mean. A child that has
+        // never produced a terminal evaluation contributes zero exploitation, so
+        // allocation follows demonstrated complete outcomes only. A non-positive
+        // or unavailable range also yields zero rather than dividing by zero;
+        // this guard is M's alone and does not touch the frozen path below.
+        if (edge.node.bestTerminalWitness >= 0) {
+            const double terminalRange = bestActionValue - minActionValue;
+            if (terminalRange > 0) {
+                qualityValue = edge.node.bestTerminalValue / terminalRange;
+            }
+        }
+    } else if (!bestActionSequence.empty()) {
         auto avgEvaluation = edge.node.evaluationSum / (edge.node.simulationCount+1);
         double evalRange = bestActionValue - minActionValue;
         qualityValue = avgEvaluation / evalRange;

@@ -94,6 +94,23 @@ namespace sts::search {
             // Empty for the frozen Search-v2 path. Indexed by ordered tree edge.
             std::vector<CombatHandcraftedH1> childHeuristics;
             std::int64_t expansionOrdinal = 0;
+            // Best real complete terminal value witnessed through this node, and
+            // the index of that witness in terminalWitnesses (-1 = no witness).
+            // Only ever written by updateFromEvaluation with a terminal state, so
+            // unfinished states, estimates and illegal sequences cannot qualify.
+            // Read by evaluateEdge only when bestTerminalExploitationEnabled.
+            double bestTerminalValue = 0.0;
+            std::int64_t bestTerminalWitness = -1;
+        };
+
+        // One real terminal evaluation, kept so a node's best terminal value is
+        // traceable back to the complete outcome and action path that produced it.
+        struct TerminalWitness {
+            double evaluation = 0.0;
+            std::vector<Action> actionSequence;
+            std::string outcome;
+            int playerHp = 0;
+            int turn = 0;
         };
 
         struct Edge {
@@ -119,6 +136,16 @@ namespace sts::search {
         // action (keyed by root action bits). Read-only reporting; it does not
         // feed evaluateEdge, backprop, selection or RNG.
         std::map<std::uint32_t, double> rootActionBestValue;
+        // ISSUE89 MODE SWITCH (candidate M). When false this searcher is the
+        // frozen Search-v2 policy: evaluateEdge, backpropagation, selection and
+        // cost are exactly as before, and no witnesses are retained. When true,
+        // exploitation inside evaluateEdge is driven by each child's best real
+        // terminal value instead of its mean, and witnesses are recorded. S/U/V
+        // always run with this false.
+        bool bestTerminalExploitationEnabled = false;
+        // Only populated when bestTerminalExploitationEnabled, so the frozen
+        // path pays no allocation cost and keeps its historical behaviour.
+        std::vector<TerminalWitness> terminalWitnesses;
         bool includePotions = true;
         std::int64_t actionExecutionCount = 0;
         std::int64_t expandedNodeCount = 0;
