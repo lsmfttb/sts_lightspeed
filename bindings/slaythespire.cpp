@@ -8340,6 +8340,12 @@ struct StepSimulator {
     // exploitation is driven by each child's best real terminal value. The flag
     // is explicit and off by default, so S/U/V keep the frozen v2 behaviour and
     // both modes come from this one build.
+    //
+    // Every argument here matches battleSearchV2 exactly except
+    // bestTerminalExploitationEnabled. In particular includeTreeGeometry and
+    // includeClassicalTelemetry are false in both, so candidate M differs from
+    // plain v2 by the one registered flag and its measured cost carries no
+    // extra telemetry or geometry overhead.
     pybind11::dict battleSearchV2WithBestTerminal(
             std::int64_t simulations,
             bool includePotions,
@@ -8350,7 +8356,7 @@ struct StepSimulator {
                 pybind11::none(),
                 pybind11::none(),
                 false,
-                true,
+                false,
                 false,
                 0,
                 -1,
