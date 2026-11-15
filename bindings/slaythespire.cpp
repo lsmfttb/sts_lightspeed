@@ -8251,6 +8251,45 @@ struct StepSimulator {
                 ? "after_first_action_from_newly_expanded_node"
                 : "disabled";
         report["tree_internal_telemetry"] = telemetry;
+        if (bestTerminalExploitationEnabled) {
+            // Per-root-edge best terminal witness, so the value that steered
+            // allocation can be checked against validate_action_plan on the same
+            // state instead of being taken on trust.
+            pybind11::list edgeWitnesses;
+            for (std::size_t i = 0; i < searcher.root.edges.size(); ++i) {
+                const auto &edge = searcher.root.edges[i];
+                if (edge.node.bestTerminalWitness < 0) {
+                    continue;
+                }
+                const auto &witness = searcher.terminalWitnesses.at(
+                        static_cast<std::size_t>(edge.node.bestTerminalWitness));
+                pybind11::dict entry;
+                entry["edge_index"] = static_cast<int>(i);
+                entry["action_bits"] = edge.action.bits;
+                entry["best_terminal_value"] = edge.node.bestTerminalValue;
+                entry["witness_index"] = edge.node.bestTerminalWitness;
+                entry["evaluation"] = witness.evaluation;
+                entry["outcome"] = witness.outcome;
+                entry["player_hp"] = witness.playerHp;
+                entry["turn"] = witness.turn;
+                pybind11::list bits;
+                for (const auto &step : witness.actionSequence) {
+                    bits.append(step.bits);
+                }
+                entry["action_bits_sequence"] = bits;
+                edgeWitnesses.append(entry);
+            }
+            report["best_terminal_witnesses"] = edgeWitnesses;
+            report["terminal_witness_count"] =
+                    static_cast<std::int64_t>(searcher.terminalWitnesses.size());
+            pybind11::list noWitnessEdges;
+            for (std::size_t i = 0; i < searcher.root.edges.size(); ++i) {
+                if (searcher.root.edges[i].node.bestTerminalWitness < 0) {
+                    noWitnessEdges.append(static_cast<int>(i));
+                }
+            }
+            report["root_edges_without_terminal_witness"] = noWitnessEdges;
+        }
         if (includeTreeGeometry) {
             appendTreeGeometryTelemetry(report, searcher);
         }
