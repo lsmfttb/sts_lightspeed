@@ -536,6 +536,11 @@ pybind11::dict monsterSnapshot(const BattleContext &bc, int monsterIdx) {
     ret["misc_info"] = monster.miscInfo;
     ret["unique_power_0"] = monster.uniquePower0;
     ret["unique_power_1"] = monster.uniquePower1;
+    // ISSUE90: expose whether this monster is a minion. The inherited terminal
+    // scorer's non-minion HP ratio excludes minions from both numerator and
+    // denominator, so a consumer reproducing that score needs the flag; without
+    // it the ratio cannot be computed from the snapshot at all.
+    ret["is_minion"] = monster.hasStatus<MS::MINION>();
     return ret;
 }
 
@@ -4801,6 +4806,11 @@ struct StepSimulator {
         ret["battle_potion_capacity"] = state.potionCapacity;
         ret["battle_potions"] = potionListSnapshot(state);
         ret["battle_relics"] = relicListSnapshot(gc);
+        // ISSUE90: the inherited terminal scorer reads these two battle-context
+        // counters. They were absent from the snapshot, so an external evaluator
+        // could not reproduce evaluateEndState exactly without them.
+        ret["battle_energy_wasted"] = state.energyWasted;
+        ret["battle_cards_drawn"] = state.cardsDrawn;
         return ret;
     }
 
@@ -8168,7 +8178,9 @@ struct StepSimulator {
             bool progressiveBiasEnabled=false,
             std::size_t progressiveBiasAuditLimit=0,
             int forbiddenPotionSlot=-1,
-            bool bestTerminalExploitationEnabled=false) {
+            bool bestTerminalExploitationEnabled=false,
+            const pybind11::object &terminalEvalCallback=pybind11::none(),
+            bool projectPostExit=false) {
         ensureBattleContext();
         if (!battleActive) {
             throw std::runtime_error("battle search v2 requested outside battle");
@@ -8178,11 +8190,15 @@ struct StepSimulator {
         }
         const bool usePolicyPriors = !policyPriorCallback.is_none();
         const bool useLeafValue = !leafValueCallback.is_none();
+        const bool useTerminalEval = !terminalEvalCallback.is_none();
         if (usePolicyPriors && !pybind11::isinstance<pybind11::function>(policyPriorCallback)) {
             throw std::invalid_argument("battle search v2 policy prior callback must be callable");
         }
         if (useLeafValue && !pybind11::isinstance<pybind11::function>(leafValueCallback)) {
             throw std::invalid_argument("battle search v2 leaf value callback must be callable");
+        }
+        if (useTerminalEval && !pybind11::isinstance<pybind11::function>(terminalEvalCallback)) {
+            throw std::invalid_argument("battle search v2 terminal eval callback must be callable");
         }
 
         search::BattleScumSearcher2 searcher(bc);
@@ -8216,6 +8232,49 @@ struct StepSimulator {
                         battleSearchNodeActions(state, actions)).cast<double>();
                 if (!std::isfinite(value)) {
                     throw std::runtime_error("battle search v2 leaf callback returned non-finite value");
+                }
+                return value;
+            };
+        }
+        if (useTerminalEval) {
+            // ISSUE90: replace the inherited terminal utility with an externally
+            // supplied scoring function. This is the same substitution point the
+            // searcher's own constructor parameter exposes (EvalFnc defaults to
+            // evaluateEndState), so every downstream consumer -- path evaluation
+            // sums, in-tree allocation, best-terminal witnesses, suffix
+            // revalidation and the mean fallback -- follows automatically.
+            //
+            // projectPostExit additionally applies the finished battle to a copy
+            // of the game context with the native exitBattle routine, so the
+            // caller sees real post-exit persistent resources rather than the
+            // temporary battle-context values. It is opt-in because it costs a
+            // context copy plus exit processing per terminal evaluation, and that
+            // cost must be measured rather than assumed.
+            const pybind11::function callback = terminalEvalCallback.cast<pybind11::function>();
+            searcher.evalFnc = [this, callback, projectPostExit](
+                    const BattleContext &state) {
+                pybind11::gil_scoped_acquire acquire;
+                pybind11::dict payload = battleSearchNodeSnapshot(state);
+                if (projectPostExit) {
+                    GameContext projected(this->gc);
+                    state.exitBattle(projected);
+                    payload["post_exit_projected"] = true;
+                    payload["post_exit_cur_hp"] = projected.curHp;
+                    payload["post_exit_max_hp"] = projected.maxHp;
+                    payload["post_exit_gold"] = projected.gold;
+                    payload["post_exit_act"] = projected.act;
+                    payload["post_exit_floor_num"] = projected.floorNum;
+                    payload["post_exit_potions"] = gamePotionListSnapshot(projected);
+                    payload["post_exit_relics"] = relicListSnapshot(projected);
+                    payload["post_exit_deck"] = deckSnapshot(projected);
+                    payload["post_exit_outcome"] = gameOutcomeLabel(projected.outcome);
+                } else {
+                    payload["post_exit_projected"] = false;
+                }
+                const double value = callback(payload).cast<double>();
+                if (!std::isfinite(value)) {
+                    throw std::runtime_error(
+                            "battle search v2 terminal eval callback returned non-finite value");
                 }
                 return value;
             };
@@ -8379,6 +8438,37 @@ struct StepSimulator {
                 policyPriorCallback,
                 leafValueCallback,
                 true);
+    }
+
+    // ISSUE90: search driven by an externally supplied terminal scoring function.
+    // Identical to plain v2 apart from the replaced terminal utility, so the
+    // registered tree topology, rollout policy, exploration term and plan-suffix
+    // mechanism stay those of the accepted search. Geometry and classical
+    // telemetry stay off so measured cost carries no extra overhead.
+    pybind11::dict battleSearchV2WithTerminalEval(
+            std::int64_t simulations,
+            bool includePotions,
+            const pybind11::object &terminalEvalCallback,
+            bool projectPostExit) {
+        auto report = battleSearchV2Impl(
+                simulations,
+                includePotions,
+                pybind11::none(),
+                pybind11::none(),
+                false,
+                false,
+                false,
+                0,
+                -1,
+                false,
+                terminalEvalCallback,
+                projectPostExit);
+        report["native_api"] = "StepSimulator.battle_search_v2_with_terminal_eval.v1";
+        report["patch_identity"] =
+                "sts_lightspeed_battle_search_v2_terminal_eval_v1";
+        report["terminal_eval_external"] = !terminalEvalCallback.is_none();
+        report["post_exit_projected"] = projectPostExit;
+        return report;
     }
 
     pybind11::dict battleSearchV2WithStateUtilization(
@@ -9051,6 +9141,13 @@ PYBIND11_MODULE(slaythespire, m) {
             pybind11::arg("include_potions") = false,
             pybind11::arg("policy_prior_callback") = pybind11::none(),
             pybind11::arg("leaf_value_callback") = pybind11::none())
+        .def(
+            "battle_search_v2_with_terminal_eval",
+            &StepSimulator::battleSearchV2WithTerminalEval,
+            pybind11::arg("simulations"),
+            pybind11::arg("include_potions") = false,
+            pybind11::arg("terminal_eval_callback") = pybind11::none(),
+            pybind11::arg("project_post_exit") = false)
         .def(
             "battle_search_with_root_priors",
             &StepSimulator::battleSearchWithRootPriors,
