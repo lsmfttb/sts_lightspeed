@@ -8915,9 +8915,19 @@ struct StepSimulator {
     // uses, so a validated plan and a freshly searched plan are directly
     // comparable. Step labels are resolved at the step's own state, which is why
     // they are correct here while root-projected labels are not.
-    pybind11::dict validateActionPlan(const pybind11::list &bitsList) const {
+    pybind11::dict validateActionPlan(
+            const pybind11::list &bitsList,
+            const pybind11::object &terminalEvalCallback=pybind11::none(),
+            bool projectPostExit=false) const {
         pybind11::dict ret;
         BattleContext copy = bc;
+        const bool useTerminalEval = !terminalEvalCallback.is_none();
+        if (useTerminalEval &&
+                !pybind11::isinstance<pybind11::function>(terminalEvalCallback)) {
+            throw std::runtime_error(
+                    "terminal evaluation callback must be a callable");
+        }
+        ret["terminal_eval_external"] = useTerminalEval;
         // Action::execute reaches executeActions(), which sets the thread-local
         // g_debug_bc to the context it is running on. Here that is a local copy,
         // so without restoring it the pointer would dangle once this returns.
@@ -8980,8 +8990,42 @@ struct StepSimulator {
         ret["terminal"] = copy.outcome != Outcome::UNDECIDED;
         ret["outcome"] = battleOutcomeStrings[static_cast<int>(copy.outcome)];
         if (copy.outcome != Outcome::UNDECIDED) {
-            ret["evaluation"] =
-                    search::BattleScumSearcher2::evaluateEndState(copy);
+            // Plan validation must score through the same per-battle fixed theta the
+            // search used. Leaving this on the static evaluateEndState made the tree's
+            // callback external while the validator silently kept the native expression,
+            // so a caller that trusted validation and compared plans was comparing two
+            // different objectives.
+            if (useTerminalEval) {
+                const pybind11::function callback =
+                        terminalEvalCallback.cast<pybind11::function>();
+                pybind11::gil_scoped_acquire acquire;
+                pybind11::dict payload = battleSearchNodeSnapshot(copy);
+                if (projectPostExit) {
+                    GameContext projected(this->gc);
+                    copy.exitBattle(projected);
+                    payload["post_exit_projected"] = true;
+                    payload["post_exit_cur_hp"] = projected.curHp;
+                    payload["post_exit_max_hp"] = projected.maxHp;
+                    payload["post_exit_gold"] = projected.gold;
+                    payload["post_exit_act"] = projected.act;
+                    payload["post_exit_floor_num"] = projected.floorNum;
+                    payload["post_exit_potions"] = gamePotionListSnapshot(projected);
+                    payload["post_exit_relics"] = relicListSnapshot(projected);
+                    payload["post_exit_deck"] = deckSnapshot(projected);
+                    payload["post_exit_outcome"] = gameOutcomeLabel(projected.outcome);
+                } else {
+                    payload["post_exit_projected"] = false;
+                }
+                const double value = callback(payload).cast<double>();
+                if (!std::isfinite(value)) {
+                    throw std::runtime_error(
+                            "terminal evaluation callback returned a non-finite value");
+                }
+                ret["evaluation"] = value;
+            } else {
+                ret["evaluation"] =
+                        search::BattleScumSearcher2::evaluateEndState(copy);
+            }
         }
         ret["player_hp"] = copy.player.curHp;
         ret["turn"] = copy.turn;
@@ -9161,7 +9205,10 @@ PYBIND11_MODULE(slaythespire, m) {
         .def("rebuild_battle_start", &StepSimulator::rebuildBattleStart)
         .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
         .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
-        .def("validate_action_plan", &StepSimulator::validateActionPlan)
+        .def("validate_action_plan", &StepSimulator::validateActionPlan,
+            pybind11::arg("bits_list"),
+            pybind11::arg("terminal_eval_callback") = pybind11::none(),
+            pybind11::arg("project_post_exit") = false)
         .def("step", &StepSimulator::step);
 
     pybind11::class_<PrivilegedNoncombatProjectionAccess>(
