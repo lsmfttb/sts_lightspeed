@@ -392,7 +392,10 @@ void search::BattleScumSearcher2::search(int64_t simulations) {
 
     if (isTerminalState(*rootState)) {
         ++terminalUtilityEvaluationCount;
-        auto evaluation = evaluateEndState(*rootState);
+        // ISSUE90: same routing as updateFromPlayout, so a root that is already
+        // terminal is scored by the injected evaluator too and the two terminal
+        // sites cannot disagree.
+        auto evaluation = evalFnc ? evalFnc(*rootState) : evaluateEndState(*rootState);
         outcomePlayerHp = rootState->player.curHp;
         bestActionSequence = {};
 
@@ -633,7 +636,13 @@ void search::BattleScumSearcher2::updateFromEvaluation(const std::vector<Node *>
 
 void search::BattleScumSearcher2::updateFromPlayout(const std::vector<Node *> &stack, const std::vector<Action> &actionStack, const BattleContext &endState) {
     ++terminalUtilityEvaluationCount;
-    const auto evaluation = evaluateEndState(endState);
+    // ISSUE90: route the terminal utility through evalFnc instead of calling the
+    // static evaluateEndState directly. The constructor has always accepted an
+    // EvalFnc, but both call sites bypassed it, so the injected evaluator was dead
+    // code and an external scorer could not affect the search at all. The default
+    // argument still makes evalFnc the inherited evaluateEndState, so behaviour is
+    // unchanged when no evaluator is supplied.
+    const auto evaluation = evalFnc ? evalFnc(endState) : evaluateEndState(endState);
     updateFromEvaluation(stack, actionStack, evaluation, &endState);
 }
 
