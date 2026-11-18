@@ -1635,13 +1635,48 @@ pybind11::dict privilegedEventChoice(
                 case Event::DEAD_ADVENTURER:
                     if (idx == 0) {
                         choice["current_phase"] = gc.info.phase;
-                        if (gc.info.phase < 0
-                                || gc.info.phase >= static_cast<int>(gc.info.rewards.size())) {
+                        const int phaseIndex = gc.info.phase;
+                        const int rewardCount = static_cast<int>(gc.info.rewards.size());
+                        if (phaseIndex < 0 || phaseIndex > rewardCount) {
                             setUnavailable(
-                                    "Dead Adventurer phase has no native reward entry");
+                                    "Dead Adventurer phase is outside the source-backed search range");
                             return features;
                         }
-                        switch (gc.info.rewards[gc.info.phase]) {
+                        if (phaseIndex == rewardCount) {
+                            // The one past-the-table phase is a reachable, well-defined native state
+                            // and not a corrupt one. chooseEventOption increments info.phase only in
+                            // its non-encounter branch, so reaching this phase means the first
+                            // `rewards.size()` searches all resolved without an encounter, and this
+                            // search is the first whose encounter test cannot fail:
+                            // encounterChance is phase*25 + (ascension >= 15 ? 35 : 25), which is 100
+                            // or 110 here, against miscRng.random(99) drawn from 0..99, so
+                            // didEncounter holds regardless of the draw. In that branch the reward
+                            // loop `for (i = info.phase; i < 3; ++i)` has an empty body and the battle
+                            // is entered with the encounter chosen when the event began; the else
+                            // branch that would index rewards[phaseIndex] is not reached.
+                            //
+                            // So what this candidate owes the caller is: the phase-immediate reward is
+                            // exhausted, and the search enters the native encounter. Neither claim
+                            // draws RNG nor executes the action; both follow from the source above.
+                            // phase_reward_scope keeps the exhaustion claim attached to the phase
+                            // reward alone, so it cannot be read as "this action yields nothing".
+                            choice["phase_reward_kind"] = "none_remaining";
+                            choice["phase_reward_scope"] = "phase_immediate_reward_only";
+                            choice["search_outcome"] = "native_encounter";
+                            const int encounterIndex = static_cast<int>(gc.info.encounter);
+                            if (encounterIndex >= 0
+                                    && encounterIndex < static_cast<int>(
+                                            std::size(monsterEncounterStrings))) {
+                                choice["encounter"] = monsterEncounterStrings[encounterIndex];
+                            } else {
+                                setFutureUnavailable("encounter",
+                                        "native encounter id has no source-backed label");
+                            }
+                            setFutureUnavailable("search_result",
+                                    "battle rewards depend on future MiscRng and RelicRng state");
+                            break;
+                        }
+                        switch (gc.info.rewards[phaseIndex]) {
                             case 0:
                                 choice["phase_reward_kind"] = "gold";
                                 break;
@@ -1842,8 +1877,11 @@ pybind11::dict privilegedEventChoice(
                     break;
             }
             if (!features.contains("choice")) {
+                // The Dead Adventurer source note names the encounter branch too: at the phase past
+                // its reward table the candidate's semantics come from chooseEventOption's
+                // didEncounter branch, not from the reward codes it no longer has an entry for.
                 const char *choiceSource = gc.curEvent == Event::DEAD_ADVENTURER
-                        ? "GameContext::chooseEventOption DEAD_ADVENTURER reward codes"
+                        ? "GameContext::chooseEventOption DEAD_ADVENTURER reward codes, and its didEncounter branch at the phase past the reward table"
                         : "GameContext::chooseEventOption and source-backed native event branch";
                 features["choice"] = privilegedChoiceFeature(
                         choice, "oracle_only", choiceSource);
