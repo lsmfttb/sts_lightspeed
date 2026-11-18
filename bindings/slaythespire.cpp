@@ -1674,6 +1674,15 @@ pybind11::dict privilegedEventChoice(
                             }
                             setFutureUnavailable("search_result",
                                     "battle rewards depend on future MiscRng and RelicRng state");
+                            // Attach the choice here rather than letting the shared fallback below do
+                            // it: the fallback carries one source string for every DEAD_ADVENTURER
+                            // candidate, and that string is part of the feature payload which the
+                            // encoder audits. Editing it would change the recorded provenance of the
+                            // already-supported phases 0..2, so this branch supplies its own source
+                            // and the fallback stays exactly as it was.
+                            features["choice"] = privilegedChoiceFeature(
+                                    choice, "oracle_only",
+                                    "GameContext::chooseEventOption DEAD_ADVENTURER didEncounter branch at the phase past the reward table");
                             break;
                         }
                         switch (gc.info.rewards[phaseIndex]) {
@@ -1877,11 +1886,8 @@ pybind11::dict privilegedEventChoice(
                     break;
             }
             if (!features.contains("choice")) {
-                // The Dead Adventurer source note names the encounter branch too: at the phase past
-                // its reward table the candidate's semantics come from chooseEventOption's
-                // didEncounter branch, not from the reward codes it no longer has an entry for.
                 const char *choiceSource = gc.curEvent == Event::DEAD_ADVENTURER
-                        ? "GameContext::chooseEventOption DEAD_ADVENTURER reward codes, and its didEncounter branch at the phase past the reward table"
+                        ? "GameContext::chooseEventOption DEAD_ADVENTURER reward codes"
                         : "GameContext::chooseEventOption and source-backed native event branch";
                 features["choice"] = privilegedChoiceFeature(
                         choice, "oracle_only", choiceSource);
